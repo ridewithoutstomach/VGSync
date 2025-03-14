@@ -1,0 +1,1096 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>OpenLayers – Directions + Speed Input + Keep old logic</title>
+
+  <!-- OpenLayers (CDN) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@7.3.0/ol.css" />
+  <script src="https://cdn.jsdelivr.net/npm/ol@7.3.0/dist/ol.js"></script>
+
+  <!-- QWebChannel (für QtWebEngine) -->
+  <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+
+  <style>
+    html, body {
+      margin: 0; 
+      padding: 0; 
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #f0f0f0;
+    }
+    #map {
+      position: absolute;
+      top: 0; 
+      left: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* Button unten links => 4 Modi (OSM, MapTiler, Mapbox, Bing) */
+    #mapViewBtn {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      z-index: 9999;
+      opacity: 0.8;
+      background-color: #ccc;
+      border: none;
+      padding: 4px 8px;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    #moveBtn {
+      position: absolute;
+      top: 10px;
+      right: 80px;
+      z-index: 9999;
+      background-color: rgba(200,200,200,0.5); 
+      border: 1px solid #777;
+      padding: 4px 8px;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    #btnSyncNoArg {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      z-index: 9999;
+      background-color: rgba(200,200,200,0.5); 
+      border: 1px solid #777;
+      padding: 4px 8px;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    #btnNewPoint {
+      position: absolute;
+      top: 10px;
+      right: 160px;
+      z-index: 9999;
+      background-color: rgba(200,200,200,0.5);
+      border: 1px solid #777;
+      padding: 4px 8px;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+
+    /* Directions-Button */
+    #btnDirections {
+      position: absolute;
+      top: 10px;
+      right: 300px;
+      z-index: 9999;
+      background-color: rgba(200,200,200,0.5);
+      border: 1px solid #777;
+      padding: 4px 8px;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+
+    /* NEU: Profil-Button => Bike/Foot/Car */
+    #btnProfile {
+      position: absolute;
+      top: 10px;
+      right: 380px; /* etwas weiter rechts */
+      z-index: 9999;
+      background-color: rgba(200,200,200,0.5);
+      border: 1px solid #777;
+      padding: 4px 8px;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+
+    /* Speed-Eingabe - etwas tiefer, damit nichts überlappt */
+    #speedInputContainer {
+      position: absolute;
+      top: 50px;        
+      right: 300px;     
+      z-index: 9999;
+      display: none;
+      background-color: rgba(200,200,200,0.4);
+      padding: 4px;
+      border-radius: 4px;
+      font-size: 0.9rem;
+    }
+    #speedInputContainer label {
+      margin-right: 4px;
+    }
+    #speedInput {
+      width: 60px;
+    }
+
+    /* Loading-Overlay */
+    #loadingIndicator {
+      display: none; 
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%,-50%);
+      background: rgba(0,0,0,0.7);
+      color: #fff;
+      padding: 10px 20px;
+      border-radius: 4px;
+      z-index: 99999;
+      font-size: 1rem;
+    }
+    
+    #keyWarning {
+      display: none;
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 99999;
+      background: rgba(255, 128, 128, 0.9);
+      color: #000;
+      padding: 8px 12px;
+      font-size: 0.9rem;
+      border: 2px solid #c00;
+      border-radius: 3px;
+      max-width: 300px;
+    }
+  </style>
+</head>
+<body>
+  
+  <div id="map"></div>
+
+  <!-- Umschaltung OSM / MapTiler / Mapbox / Bing -->
+  <button id="mapViewBtn">OSM</button>
+  <button id="btnSyncNoArg">V-Sync</button> 
+  <button id="moveBtn">Move</button>
+  <button id="btnNewPoint">New</button>
+
+  <!-- Directions-Button -->
+  <button id="btnDirections">Directions</button>
+
+  <!-- NEU: Profil-Button => Bike, Foot, Car -->
+  <button id="btnProfile">Bike</button>
+
+  <!-- Container für Speed-Input (etwas tiefer) -->
+  <div id="speedInputContainer">
+    <label for="speedInput">Speed (km/h):</label>
+    <input type="number" id="speedInput" min="1" value="20" />
+  </div>
+
+  <!-- Loading + KeyWarning Overlays -->
+  <div id="loadingIndicator">Loading ...</div>
+  <div id="keyWarning">No valid API key! Please set your key in the application config.</div>
+
+  <script>
+    /***********************************************************
+     * 0) Globale Variablen & Hilfsfunktionen
+     ***********************************************************/
+    let debugMode = true;
+    function dbg(msg){ if(debugMode) console.log("[DEBUG] " + msg); }
+
+    let mapTilerKey = "";
+    let bingKey     = "";
+    let mapboxKey   = "";
+
+    // 0=OSM, 1=MapTiler, 2=Mapbox, 3=Bing
+    let currentMapMode = 0;
+
+    let map;
+    let osmLayer;
+    let satLayer;
+    let vectorLayer;
+
+    let channelObj = null;
+
+    let featuresMapIndex = {};
+    let featuresMapSid   = {};
+
+    let moveMode= false;
+    let modifyInteraction= null;
+    let addNewPointMode= false;
+
+    let markB_idx= -1;
+    let markE_idx= -1;
+
+    let videoIsPlaying= false;
+
+    // => Ausgewählter Punkt => Start
+    let selectedCoord = null;
+    let selectedIndex = null;
+
+    // => Toggle: Directions an/aus
+    let directionsMode = false;
+
+    // => Speed-Input DOM
+    let speedInputContainer = null;
+    let speedInput = null;
+
+    // NEU: Profil
+    let mapboxProfile = "cycling"; // default
+    // => 0: "cycling", 1: "walking", 2:"driving"
+    let profileIndex= 0;
+    const profileList= ["cycling","walking","driving"];
+    const profileNames= ["Bike","Foot","Car"];
+
+    // -------------------------------------------------
+    // NEU: Loading-Counter => Referenzzählung
+    // -------------------------------------------------
+    let loadingCounter = 0;
+
+	function getMaxIndex() {
+      // alle keys von featuresMapIndex holen, in Zahlen umwandeln
+      let keys = Object.keys(featuresMapIndex).map(k => parseInt(k));
+      if (!keys.length) return -1;
+       return Math.max(...keys);
+    }
+	
+    function pyLog(message){
+      if(channelObj && channelObj.jsLog){
+        channelObj.jsLog(message);
+      } else {
+        console.log("[JS->Py fallback] " + message);
+      }
+    }
+
+    function showKeyWarning(msg){
+      const kw = document.getElementById("keyWarning");
+      if(!kw) return;
+      kw.innerText = msg;
+      kw.style.display = "block";
+    }
+    function hideKeyWarning(){
+      const kw = document.getElementById("keyWarning");
+      if(!kw) return;
+      kw.style.display = "none";
+    }
+
+    function showLoading(msg="Loading..."){
+      loadingCounter++;
+      const elem = document.getElementById("loadingIndicator");
+      if(!elem) return;
+      elem.innerText = msg;
+      elem.style.display = "block";
+    }
+    function hideLoading(){
+      if(loadingCounter>0){
+        loadingCounter--;
+      }
+      if(loadingCounter===0){
+        const elem = document.getElementById("loadingIndicator");
+        if(!elem) return;
+        elem.style.display = "none";
+      }
+    }
+
+    /***********************************************************
+     * window.onload
+     ***********************************************************/
+    window.onload = function(){
+      if(typeof qt !== "undefined" && qt.webChannelTransport){
+        new QWebChannel(qt.webChannelTransport, function(channel){
+          channelObj = channel.objects.mapBridge;
+        });
+      } else {
+        console.log("[DEBUG] normal Browser => no QWebChannel => fallback");
+      }
+
+      // Speed-Input DOM
+      speedInputContainer = document.getElementById("speedInputContainer");
+      speedInput = document.getElementById("speedInput");
+
+      initMap();
+
+      let mvBtn = document.getElementById("mapViewBtn");
+      if(mvBtn){
+        mvBtn.addEventListener("click", cycleMapMode);
+      }
+
+      let moveB= document.getElementById("moveBtn");
+      if(moveB){
+        moveB.addEventListener("click", ()=>{
+          enableMoveMode(!moveMode);
+        });
+      }
+
+      let syncB= document.getElementById("btnSyncNoArg");
+      if(syncB){
+        syncB.addEventListener("click", ()=>{
+          if(channelObj && channelObj.syncNoArgSlot){
+            channelObj.syncNoArgSlot();
+          }
+        });
+      }
+
+      let newB= document.getElementById("btnNewPoint");
+      if(newB){
+        newB.addEventListener("click", ()=>{
+          addNewPointMode= !addNewPointMode;
+          document.body.style.cursor = addNewPointMode ? "crosshair" : "";
+        });
+      }
+
+      let dirB= document.getElementById("btnDirections");
+      if(dirB){
+        dirB.addEventListener("click", ()=>{
+          startDirectionsMode();
+        });
+      }
+
+      // NEU: Profil-Button
+      let profB= document.getElementById("btnProfile");
+      if(profB){
+        profB.addEventListener("click", cycleProfile);
+      }
+    };
+
+    /***********************************************************
+     * cycleProfile() => Bike->Foot->Car
+     ***********************************************************/
+    function cycleProfile(){
+      profileIndex= (profileIndex+1) % 3;  // 0->1->2->0
+      mapboxProfile= profileList[profileIndex];
+      let profB= document.getElementById("btnProfile");
+      if(profB){
+        profB.textContent= profileNames[profileIndex];
+      }
+      dbg("Profile switched => " + mapboxProfile);
+    }
+
+    /***********************************************************
+     * 1) cycleMapMode => 0..3
+     ***********************************************************/
+    function cycleMapMode(){
+      currentMapMode = (currentMapMode + 1) % 3;
+      let names = ["OSM","MapTiler","Mapbox"];
+      let btn = document.getElementById("mapViewBtn");
+      btn.textContent = names[currentMapMode];
+
+      if(currentMapMode===0){
+        hideKeyWarning();
+        osmLayer.setVisible(true);
+        satLayer.setVisible(false);
+      } else {
+        osmLayer.setVisible(false);
+        satLayer.setVisible(true);
+        satLayer.setSource(createSatelliteSource());
+      }
+    }
+
+    /***********************************************************
+     * 2) initMap
+     ***********************************************************/
+    function initMap(){
+      osmLayer = new ol.layer.Tile({
+        source: new ol.source.OSM(),
+        visible: (currentMapMode===0)
+      });
+      satLayer = new ol.layer.Tile({
+        source: createSatelliteSource(),
+        visible: (currentMapMode!==0)
+      });
+      vectorLayer = new ol.layer.Vector({
+        source: new ol.source.Vector()
+      });
+
+      map = new ol.Map({
+        target: "map",
+        layers: [osmLayer, satLayer, vectorLayer],
+        view: new ol.View({
+          center: ol.proj.fromLonLat([10,50]),
+          zoom: 5,
+          maxZoom: 30
+        })
+      });
+
+      initModify();
+
+      map.on("singleclick", function(evt){
+        if(addNewPointMode){
+          addNewPointMode= false;
+          document.body.style.cursor="";
+          insertNewPointOnLineOrEnd(evt);
+          return;
+        }
+
+        if(directionsMode){
+          directionsMode=false;
+          let dirBtn= document.getElementById("btnDirections");
+          if(dirBtn){
+            dirBtn.style.backgroundColor="rgba(200,200,200,0.5)";
+          }
+          document.body.style.cursor="";
+          if(speedInputContainer){
+            speedInputContainer.style.display="none";
+          }
+
+          let destCoord= ol.proj.toLonLat(evt.coordinate);
+          pyLog("Directions: Zielpunkt B => "+destCoord);
+          if(selectedCoord){
+            fetchAndInsertDirections(selectedCoord, destCoord);
+          }
+          return;
+        }
+
+        // Normaler Klick => Feature
+        selectedCoord=null;
+        selectedIndex=null;
+
+        if(!channelObj) return;
+        map.forEachFeatureAtPixel(evt.pixel, function(feature){
+          let idx= feature.get("index");
+          let sid= feature.get("stable_id");
+          let geom= feature.getGeometry();
+          if(geom && geom.getType()==="Point"){
+            selectedCoord= ol.proj.toLonLat(geom.getCoordinates());
+          }
+          if(idx!==undefined){
+            selectedIndex= idx;
+            dbg("clicked index="+idx);
+            if(channelObj.pointClicked){
+              channelObj.pointClicked(idx);
+            }
+            return true;
+          }
+          if(sid){
+            dbg("clicked stable_id="+sid);
+            if(channelObj.pointClicked){
+              channelObj.pointClicked(sid);
+            }
+            return true;
+          }
+          return false;
+        });
+      });
+    }
+
+    /***********************************************************
+     * 3) createSatelliteSource()
+     ***********************************************************/
+    function createSatelliteSource(){
+      hideKeyWarning();
+      if(currentMapMode===0){
+        return new ol.source.OSM();
+      }
+      else if(currentMapMode===1){
+        if(!mapTilerKey || mapTilerKey.trim()===""){
+          dbg("No mapTilerKey => fallback OSM");
+          showKeyWarning("No valid API key for MapTiler!");
+          return new ol.source.OSM();
+        }
+        return new ol.source.XYZ({
+          url: "https://api.maptiler.com/tiles/satellite/{z}/{x}/{y}.jpg?key="+mapTilerKey,
+          tileSize: 512,
+          maxZoom: 21
+        });
+      }
+      else{
+        if(!mapboxKey || mapboxKey.trim()===""){
+          dbg("No mapboxKey => fallback OSM");
+          showKeyWarning("No valid API key for Mapbox!");
+          return new ol.source.OSM();
+        }
+        return new ol.source.XYZ({
+          url: "https://api.mapbox.com/styles/v1/mapbox/satellite-v9/tiles/{z}/{x}/{y}?access_token="+mapboxKey,
+          tileSize: 512,
+          maxZoom: 22
+        });
+      }
+      
+    }
+
+    /***********************************************************
+     * 4) setMapTilerKey, setBingKey, setMapboxKey
+     ***********************************************************/
+    function setMapTilerKey(newKey){ mapTilerKey=newKey; }
+    function setBingKey(newKey){ bingKey=newKey; }
+    function setMapboxKey(newKey){ mapboxKey=newKey; }
+
+    /***********************************************************
+     * 5) initModify => Move
+     ***********************************************************/
+    function initModify(){
+      modifyInteraction= new ol.interaction.Modify({
+        source: vectorLayer.getSource()
+      });
+      modifyInteraction.on("modifyend", function(evt){
+        let arr= evt.features.getArray();
+        arr.forEach(f=>{
+          let idx= f.get("index");
+          let sid= f.get("stable_id");
+          let coords= f.getGeometry().getCoordinates();
+          let ll= ol.proj.toLonLat(coords);
+          if(channelObj && channelObj.pointMoved){
+            if(sid!==undefined){
+              channelObj.pointMoved(sid, ll[1], ll[0]);
+            } else if(idx!==undefined){
+              channelObj.pointMoved(idx, ll[1], ll[0]);
+            }
+          }
+        });
+      });
+    }
+    function enableMoveMode(enable){
+      moveMode= enable;
+      let b= document.getElementById("moveBtn");
+      if(!map || !modifyInteraction) return;
+      if(moveMode){
+        map.addInteraction(modifyInteraction);
+        b.style.backgroundColor="rgba(255,100,100,0.5)";
+      } else {
+        map.removeInteraction(modifyInteraction);
+        b.style.backgroundColor="rgba(200,200,200,0.5)";
+      }
+    }
+
+    /***********************************************************
+     * 6) insertNewPointOnLineOrEnd
+     ***********************************************************/
+    
+	function insertNewPointOnLineOrEnd(evt){
+    // Prüfe, ob vorher ein Punkt ausgewählt wurde (selectedIndex != null).
+    // Falls selectedIndex===0 => => wir setzen idx = -2 (Vor dem ersten).
+    // Falls selectedIndex=== letzterIndex => => idx = -1 => am Ende.
+	let maxIdx = getMaxIndex();
+	if (maxIdx === -1) {
+		// => Hier darf man ohne Selektion einen neuen *ersten* Punkt setzen.
+		let ll = ol.proj.toLonLat(evt.coordinate);
+		if (channelObj && channelObj.newPointInserted) {
+		channelObj.newPointInserted(ll[1], ll[0], -1);
+		}
+		addNewPointMode = false;
+		document.body.style.cursor = "";
+		return;
+	}
+	
+	
+    if (selectedIndex == null) {
+        alert("No point selected ⇒ cannot insert new point.");
+        addNewPointMode = false;
+        document.body.style.cursor = "";
+        return;
+    }
+	
+	if (maxIdx === 0) {
+		// => es gibt nur diesen einen Punkt
+		let ll = ol.proj.toLonLat(evt.coordinate);
+		if (channelObj && channelObj.newPointInserted) {
+		// => Immer hinten anfügen (idx = -1)
+		channelObj.newPointInserted(ll[1], ll[0], -1);
+		}
+		selectedIndex = null;
+		addNewPointMode = false;
+		document.body.style.cursor = "";
+		return;
+	}
+	
+    if (selectedIndex === 0) {
+        // => Vorne einfügen
+        let ll = ol.proj.toLonLat(evt.coordinate);
+        if (channelObj && channelObj.newPointInserted) {
+            channelObj.newPointInserted(ll[1], ll[0], -2); 
+            // -2 signalisiert "vor dem ersten Punkt"
+        }
+        // Danach selectedIndex zurücksetzen
+        selectedIndex = null;
+        addNewPointMode = false;
+        document.body.style.cursor = "";
+        return;
+    }
+    else {
+        // Prüfen, ob er den letzten geklickt hat – das macht (index = -1)
+        let mIdx = getMaxIndex();
+        if (selectedIndex === mIdx && mIdx >= 0) {
+            // => "hinten" anfügen => idx=-1
+            let ll = ol.proj.toLonLat(evt.coordinate);
+            if (channelObj && channelObj.newPointInserted) {
+                channelObj.newPointInserted(ll[1], ll[0], -1);
+            }
+            selectedIndex = null;
+            addNewPointMode = false;
+            document.body.style.cursor = "";
+            return;
+        }
+        // --- Sonst "alte" Logik => Zwischen zwei Punkten oder Ende ---
+        let foundLine = null;
+        let closestCoord = null;
+        map.forEachFeatureAtPixel(evt.pixel, (feature, layer) => {
+            let geom = feature.getGeometry();
+            if (geom.getType() === "LineString") {
+                foundLine = feature;
+                closestCoord = geom.getClosestPoint(evt.coordinate);
+                return true; 
+            }
+            return false;
+        }, {
+            hitTolerance: 10
+        });
+
+        if (!foundLine || !closestCoord) {
+            // => index = -1 => "am Ende"
+            let ll = ol.proj.toLonLat(evt.coordinate);
+            if (channelObj && channelObj.newPointInserted) {
+                channelObj.newPointInserted(ll[1], ll[0], -1);
+            }
+            selectedIndex = null;
+            addNewPointMode = false;
+            document.body.style.cursor = "";
+            return;
+        }
+        
+        // Hier: Zwischen Segmenten
+        let coords = foundLine.getGeometry().getCoordinates();
+        if (coords.length < 2) {
+            let ll = ol.proj.toLonLat(evt.coordinate);
+            channelObj.newPointInserted(ll[1], ll[0], -1);
+        } else {
+            let seg = findSegmentIndexForClosestCoord(coords, closestCoord);
+            let cLL = ol.proj.toLonLat(closestCoord);
+            channelObj.newPointInserted(cLL[1], cLL[0], seg);
+        }
+        selectedIndex = null;
+        addNewPointMode = false;
+        document.body.style.cursor = "";
+    }
+}
+
+	
+    function findSegmentIndexForClosestCoord(coords, p){
+      let minDist= Infinity;
+      let bestI=0;
+      for(let i=0; i<coords.length-1; i++){
+        let d= pointSegmentDistance(p, coords[i], coords[i+1]);
+        if(d<minDist){
+          minDist=d; bestI=i;
+        }
+      }
+      return bestI;
+    }
+    function pointSegmentDistance(p,a,b){
+      let px=p[0], py=p[1];
+      let ax=a[0], ay=a[1];
+      let bx=b[0], by=b[1];
+      let dx=bx-ax, dy=by-ay;
+      if(dx===0&&dy===0){
+        return Math.hypot(px-ax,py-ay);
+      }
+      let t=((px-ax)*dx+(py-ay)*dy)/(dx*dx+dy*dy);
+      if(t<0)t=0;if(t>1)t=1;
+      let cx=ax+t*dx, cy=ay+t*dy;
+      return Math.hypot(px-cx, py-cy);
+    }
+
+    /***********************************************************
+     * 7) loadRoute(...) => index + stable_id
+     ***********************************************************/
+    function loadRoute(routeGeoJson, doFit=true){
+      showLoading("Loading route ...");
+      vectorLayer.getSource().clear();
+      featuresMapIndex={};
+      featuresMapSid={};
+
+      if(!routeGeoJson || !routeGeoJson.features){
+        console.log("[DEBUG] no routeGeoJson => skip");
+        hideLoading();
+        return;
+      }
+      for(let feat of routeGeoJson.features){
+        let g= feat.geometry;
+        let p= feat.properties||{};
+        if(!g) continue;
+
+        if(g.type==="LineString"){
+          let coords= g.coordinates.map(c=>ol.proj.fromLonLat(c));
+          let lineF= new ol.Feature({
+            geometry: new ol.geom.LineString(coords),
+            color: p.color||"#000"
+          });
+          vectorLayer.getSource().addFeature(lineF);
+          updateFeatureStyle(lineF);
+        } 
+        else if(g.type==="Point"){
+          let coords= ol.proj.fromLonLat(g.coordinates);
+          let idx= p.index;
+          let sid= p.stable_id;
+          let color= p.color||"#000000";
+          let size= p.size||4;
+
+          let f= new ol.Feature({
+            geometry: new ol.geom.Point(coords),
+            index: idx,
+            stable_id: sid,
+            color: color,
+            size: size
+          });
+          vectorLayer.getSource().addFeature(f);
+
+          if(idx!==undefined){
+            featuresMapIndex[idx]= f;
+          }
+          if(sid){
+            featuresMapSid[sid]= f;
+          }
+          updateFeatureStyle(f);
+        }
+      }
+
+      if(doFit){
+        let ext= vectorLayer.getSource().getExtent();
+        if(!ol.extent.isEmpty(ext)){
+          map.getView().fit(ext,{padding:[30,30,30,30],maxZoom:20});
+        }
+      }
+      hideLoading();
+    }
+
+    /***********************************************************
+     * 8) addOrUpdatePoint, removePoint, updateFeatureStyle
+     ***********************************************************/
+    function addOrUpdatePoint(stable_id, lat, lon, color="#000000", size=4){
+      showLoading("Updating point...");
+      let f= featuresMapSid[stable_id];
+      let coord= ol.proj.fromLonLat([lon, lat]);
+      if(!f){
+        f= new ol.Feature({
+          geometry: new ol.geom.Point(coord),
+          stable_id: stable_id,
+          color: color,
+          size: size
+        });
+        vectorLayer.getSource().addFeature(f);
+        featuresMapSid[stable_id]= f;
+      } else {
+        f.set("color", color);
+        f.set("size", size);
+        f.getGeometry().setCoordinates(coord);
+      }
+      updateFeatureStyle(f);
+      hideLoading();
+    }
+
+    function removePoint(stable_id){
+      showLoading("Removing point...");
+      let f= featuresMapSid[stable_id];
+      if(!f){
+        hideLoading();
+        return;
+      }
+      vectorLayer.getSource().removeFeature(f);
+      delete featuresMapSid[stable_id];
+
+      for(let k in featuresMapIndex){
+        if(featuresMapIndex[k]===f){
+          delete featuresMapIndex[k];
+          break;
+        }
+      }
+      hideLoading();
+    }
+
+    function updateFeatureStyle(feature){
+      let c= feature.get("color")||"#000000";
+      let s= feature.get("size")||4;
+      let geom= feature.getGeometry();
+      if(geom.getType()==="LineString"){
+        feature.setStyle(new ol.style.Style({
+          stroke: new ol.style.Stroke({color:c, width:2})
+        }));
+      } else {
+        feature.setStyle(new ol.style.Style({
+          image: new ol.style.Circle({
+            radius: s,
+            fill: new ol.style.Fill({ color:c }),
+            stroke: new ol.style.Stroke({ color:"#fff", width:1 })
+          })
+        }));
+      }
+    }
+
+    /***********************************************************
+     * 9) FUNKTION: updateAllPointsByColor(col, newSize)
+     ***********************************************************/
+    function updateAllPointsByColor(col, newSize) {
+      const feats= vectorLayer.getSource().getFeatures();
+      feats.forEach(f=>{
+        let currentColor= f.get("color");
+        if(currentColor===col){
+          f.set("size", newSize);
+          updateFeatureStyle(f);
+        }
+      });
+    }
+
+    /***********************************************************
+     * 10) Mark B..E, show_blue, show_yellow
+     ***********************************************************/
+    function clear_marked_range(){
+      unmark_range_markB_E();
+      markB_idx=-1;
+      markE_idx=-1;
+    }
+    function set_markB_point(new_b){
+      if(markE_idx>=0 && new_b>=markE_idx){
+        console.log(`[map] B=${new_b} cannot be >= E=${markE_idx} => skip`);
+        return;
+      }
+      unmark_range_markB_E();
+      markB_idx= new_b;
+      mark_new_range_markB_E();
+    }
+    function set_markE_point(new_e){
+      if(markB_idx>=0 && new_e<=markB_idx){
+        console.log(`[map] E=${new_e} cannot be <= B=${markB_idx} => skip`);
+        return;
+      }
+      unmark_range_markB_E();
+      markE_idx= new_e;
+      mark_new_range_markB_E();
+    }
+    function unmark_range_markB_E(){
+      if(markB_idx>=0 && markE_idx>=0){
+        let s= Math.min(markB_idx, markE_idx);
+        let e= Math.max(markB_idx, markE_idx);
+        unmark_range(s,e);
+      } else if(markB_idx>=0){
+        unmark_range(markB_idx,markB_idx);
+      } else if(markE_idx>=0){
+        unmark_range(markE_idx,markE_idx);
+      }
+    }
+    function mark_new_range_markB_E(){
+      if(markB_idx>=0 && markE_idx>=0){
+        let s= Math.min(markB_idx, markE_idx);
+        let e= Math.max(markB_idx, markE_idx);
+        mark_range_in_red(s,e);
+      } else if(markB_idx>=0){
+        mark_range_in_red(markB_idx,markB_idx);
+      } else if(markE_idx>=0){
+        mark_range_in_red(markE_idx,markE_idx);
+      }
+    }
+    function unmark_range(start_i, end_i){
+      for(let i=start_i; i<=end_i; i++){
+        let f= featuresMapIndex[i];
+        if(f){
+          f.set("color","#000000");
+          f.set("size",4);
+          updateFeatureStyle(f);
+        }
+      }
+    }
+    function mark_range_in_red(start_i, end_i){
+      for(let i=start_i; i<=end_i; i++){
+        let f= featuresMapIndex[i];
+        if(f){
+          f.set("color","red");
+          f.set("size",4);
+          updateFeatureStyle(f);
+        }
+      }
+    }
+    function highlightPoint(index, color, size, do_center=false){
+      let f= featuresMapIndex[index];
+      if(!f) return;
+      f.set("color",color);
+      f.set("size",size);
+      updateFeatureStyle(f);
+      if(do_center){
+        let c= f.getGeometry().getCoordinates();
+        map.getView().animate({center:c,duration:600});
+      } else {
+        if(videoIsPlaying){
+          checkAndCenterIfNeeded(index,50);
+        }
+      }
+    }
+    function show_blue(index, do_center=false){
+      highlightPoint(index, "#0000FF",6, do_center);
+    }
+    function show_yellow(index, do_center=false){
+      highlightPoint(index, "#FFFF00",6, do_center);
+    }
+
+    function setVideoPlayState(isPlaying){
+      videoIsPlaying= isPlaying;
+      dbg("[DEBUG] setVideoPlayState => "+isPlaying);
+    }
+    function checkAndCenterIfNeeded(index, marginPx=50){
+      let f= featuresMapIndex[index];
+      if(!f) return;
+      let coords= f.getGeometry().getCoordinates();
+      let pixel= map.getPixelFromCoordinate(coords);
+      let size= map.getSize();
+      if(!size) return;
+      let w= size[0], h= size[1];
+      if(pixel[0]<marginPx||pixel[0]>(w-marginPx)||
+         pixel[1]<marginPx||pixel[1]>(h-marginPx)){
+        map.getView().animate({center:coords,duration:600});
+      }
+    }
+
+    /***********************************************************
+     * 11) Directions mit Geschwindigkeitsangabe => Toggle
+     ***********************************************************/
+    function startDirectionsMode(){
+      let dirBtn= document.getElementById("btnDirections");
+
+      // => Falls directionsMode ALREADY true => toggeln => aus
+      if(directionsMode){
+        directionsMode= false;
+        if(dirBtn) dirBtn.style.backgroundColor= "rgba(200,200,200,0.5)";
+        document.body.style.cursor="";
+        if(speedInputContainer) speedInputContainer.style.display="none";
+        pyLog("Directions mode turned OFF => no destination needed");
+        return;
+      }
+
+      // => Code wie bisher (Sicherheits-Check)
+      if(!selectedCoord){
+        alert("No start point selected. Please select a point first!");
+        return;
+      }
+      let keys= Object.keys(featuresMapIndex);
+      if(keys.length<1){
+        alert("No route points => Directions not possible!");
+        return;
+      }
+      keys.sort((a,b)=> parseInt(a)-parseInt(b));
+      let n= keys.length;
+      if(n===1){
+        // nur ein Punkt => ok
+      } else {
+        let firstIdx= parseInt(keys[0]);
+        let lastIdx= parseInt(keys[keys.length-1]);
+        if(selectedIndex!==firstIdx && selectedIndex!==lastIdx){
+          alert("Directions are only allowed from the first or last point (or if there is only one point)!");
+          return;
+        }
+      }
+
+      if(!mapboxKey || mapboxKey.trim()===""){
+        alert("No mapboxKey => directions not possible!");
+        return;
+      }
+
+      // => Speed-Feld einblenden
+      if(speedInputContainer){
+        speedInputContainer.style.display="block";
+      }
+      directionsMode=true;
+      if(dirBtn) dirBtn.style.backgroundColor= "rgba(255,100,100,0.5)"; // Farbe wie Move
+      document.body.style.cursor="crosshair";
+      pyLog("Directions Mode => next click is Destination B. Then time-based insertion.");
+    }
+
+    /***********************************************************
+     * fetchAndInsertDirections => mit Loading-Counter
+     ***********************************************************/
+    async function fetchAndInsertDirections(coordA, coordB){
+      showLoading("Please wait, we are calculating the new points!");
+      let spVal= parseFloat(speedInput.value);
+      if(isNaN(spVal)||spVal<=0){
+        spVal=20;
+      }
+      pyLog("Using speed => "+spVal+" km/h => time-based densify.");
+
+      let url= "https://api.mapbox.com/directions/v5/mapbox/"
+               + mapboxProfile + "/"
+               + coordA[0]+","+coordA[1]+";"
+               + coordB[0]+","+coordB[1]
+               + "?geometries=geojson&overview=full&access_token="+mapboxKey;
+      pyLog("Mapbox Directions URL => "+url);
+
+      try{
+        let resp= await fetch(url);
+        let data= await resp.json();
+        if(!data.routes||data.routes.length===0){
+          pyLog("No route found!");
+          return;
+        }
+        let coords= data.routes[0].geometry.coordinates;
+        if(!coords||coords.length<2){
+          pyLog("Route invalid/too short!");
+          return;
+        }
+        let speedMs= spVal/3.6;
+        let resultCoords= densifyLineStringTimeBased(coords, speedMs);
+        pyLog("Time-based => created "+resultCoords.length+" new points.");
+
+        resultCoords.forEach(ll=>{
+          let lat= ll[1];
+          let lon= ll[0];
+          if(channelObj && channelObj.newPointInserted){
+            channelObj.newPointInserted(lat, lon, -1);
+          }
+        });
+
+      }catch(err){
+        console.error(err);
+        pyLog("Directions error => "+err);
+      }
+      finally {
+        hideLoading();
+      }
+    }
+
+    function densifyLineStringTimeBased(lonLatArray, speedMs){
+      if(lonLatArray.length<2) return lonLatArray;
+      let segs=[];
+      let totalDist=0;
+      for(let i=0; i<lonLatArray.length-1; i++){
+        let a= lonLatArray[i];
+        let b= lonLatArray[i+1];
+        let d= geoDistanceInMeters(a,b);
+        segs.push({start:a, end:b, dist:d, cumStart: totalDist});
+        totalDist+= d;
+      }
+      let result=[ lonLatArray[0] ];
+      if(totalDist<0.01){
+        return result;
+      }
+      let s=0;
+      while(true){
+        s+= speedMs;
+        if(s>= totalDist) break;
+        let coord= getCoordAtDist(segs, s);
+        result.push(coord);
+      }
+      result.push(lonLatArray[lonLatArray.length-1]);
+      return result;
+    }
+    function getCoordAtDist(segs, s){
+      for(let i=0; i<segs.length; i++){
+        let seg= segs[i];
+        let s0= seg.cumStart;
+        let s1= seg.cumStart+seg.dist;
+        if(s>=s0 && s<=s1){
+          let frac= (s-s0)/seg.dist;
+          return interpolateCoord(seg.start, seg.end, frac);
+        }
+      }
+      let last= segs[segs.length-1];
+      return last.end;
+    }
+    function geoDistanceInMeters(ll1, ll2){
+      let R=6371000;
+      let lat1= ll1[1]*Math.PI/180, lon1= ll1[0]*Math.PI/180;
+      let lat2= ll2[1]*Math.PI/180, lon2= ll2[0]*Math.PI/180;
+      let dLat= lat2-lat1;
+      let dLon= lon2-lon1;
+      let a= Math.sin(dLat/2)**2 + Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLon/2)**2;
+      return R*2*Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    }
+    function interpolateCoord(a,b,f){
+      let lon= a[0] + (b[0]-a[0])*f;
+      let lat= a[1] + (b[1]-a[1])*f;
+      return [lon,lat];
+    }
+
+    /***********************************************************
+     * 13) setDirectionsEnabled(...) => Versteckt/zeigt Buttons
+     ***********************************************************/
+    function setDirectionsEnabled(isEnabled) {
+      const dirBtn  = document.getElementById("btnDirections");
+      const profBtn = document.getElementById("btnProfile");
+
+      if (dirBtn)  dirBtn.style.display  = isEnabled ? "block" : "none";
+      if (profBtn) profBtn.style.display = isEnabled ? "block" : "none";
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,51 @@
+ffmpeg:
+
+./configure \
+  --prefix="/Users/m1/build-libs/ffmpeg" \
+  --disable-static \
+  --enable-shared \
+  --disable-gpl \
+  --disable-nonfree \
+  --enable-libvpx \
+  --enable-libopus \
+  --enable-libvorbis \
+  --enable-libwebp \
+  --enable-libaom \
+  --enable-gnutls \
+  --enable-runtime-cpudetect
+
+mpv:
+export PKG_CONFIG_PATH="/Users/m1/build-libs/ffmpeg/lib/pkgconfig:$PKG_CONFIG_PATH"
+
+meson setup build \
+  --prefix=/Users/m1/build-libs/mpv \
+  --buildtype=release \
+  -Dgpl=false \
+  -Dlibmpv=true \
+  -Dcplayer=false \
+  -Dmanpage-build=disabled \
+  -Dlibarchive=disabled \
+  -Dlua=disabled \
+  -Djack=disabled
+
+neu:
+
+meson setup build \
+  --prefix=/Users/m1/build-libs/mpv \
+  --buildtype=release \
+  -Dgpl=false \
+  -Dlibmpv=true \
+  -Dcplayer=false \
+  -Dmanpage-build=disabled \
+  -Dlibarchive=disabled \
+  -Dlua=disabled \
+  -Djack=disabled \
+  -Dlibass=disabled
+
+
+
+Windows:
+mpv
+
+ meson setup build   --prefix=/mingw64   --buildtype=release   -Dgpl=false   -Dlibmpv=true   -Dcplayer=false   -Dlua=disabled   -Dlibarchive=disabled   -Dmanpage-build=disabled
+

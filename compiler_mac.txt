@@ -1,0 +1,20 @@
+python -m nuitka --standalone --macos-create-app-bundle \
+    --include-data-dir=assets=assets \
+    app.py
+	
+python -m nuitka \
+  --standalone \
+  --macos-create-app-bundle \
+  --include-data-dir=assets=Resources/assets \
+  --plugin-enable=pyside6 \
+  --include-qt-plugins=platforms,imageformats,webengine \
+  --output-dir=dist \
+  app.py	
+  
+pyinstaller --clean --noconfirm \
+    --windowed \
+    --name=MyApp \
+    --add-data="assets:Resources/assets" \
+    --hidden-import=PySide6.QtWebEngineWidgets \
+    --collect-all PySide6 \
+    app.py  

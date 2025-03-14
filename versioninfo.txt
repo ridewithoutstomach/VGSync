@@ -1,0 +1,10 @@
+# version ; STATUS ; expiry_date
+2.1.0-TH ; ENABLE ; 2025-02-01
+2.4.5-PC ; ENABLE ; 2025-02-02
+2.4.6-TH ; ENABLE ; 2025-02-05
+1.8.4-BE ; ENABLE  ; 2025-12-31
+2.4.6-D ; ENABLE ; 2025-12-31
+2.4.6-CH ; ENABLE ; 2025-02-06
+
+
+

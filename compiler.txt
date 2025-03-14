@@ -1,0 +1,30 @@
+pyinstaller --onedir --add-data "map_page.html;." --add-data "ol.css;." --add-data "ol.js;." app.py
+
+pyinstaller --onefile --add-data "map_page.html;." --add-data "ol.css;." --add-data "ol.js;." app.py
+
+nuitka --standalone --enable-plugin=pyside6 --output-dir=dist VGSync_full.py
+
+nuitka --standalone --windows-disable-console --enable-plugin=pyside6 --windows-icon-from-ico=icon_icon.ico --output-dir=dist app.py
+
+nuitka --standalone --enable-plugin=pyside6 --windows-icon-from-ico=icon_icon.ico --output-dir=dist app.py
+
+
+
+
+nuitka --standalone --windows-console-mode=disable --enable-plugin=pyside6 --windows-icon-from-ico=icon_icon.ico --output-dir=dist app.py
+
+nuitka --standalone --enable-plugin=pyside6 --windows-icon-from-ico=icon_icon.ico --output-dir=dist app.py
+
+
+
+
+ACHTUNG in der config.py muss vor dem compilen die def im Kopf geändert werden!!
+
+MAC:
+
+pyinstaller --windowed --icon=MyIcon.icns app.py
+
+Du hast dann im Dist Ordner 2 apps. die mit dem Logo ist richtig.
+Du musst alle externen Dateien wie  map_page.html ol.js und ol.css in den Ordner app.app/Contents/MacOS kopieren!
+die lic Datei muss anscheinedn in framework ?
+

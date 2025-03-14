@@ -1,0 +1,212 @@
+
+ 
+  
+		
+		
+		<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <title>Git-Anleitung für ein Python-Projekt</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 40px;
+      line-height: 1.5;
+    }
+    code, pre {
+      background-color: #f4f4f4;
+      padding: 2px 4px;
+      font-family: "Courier New", Courier, monospace;
+    }
+    h1, h2, h3, h4 {
+      color: #2c3e50;
+    }
+    .section {
+      margin-bottom: 40px;
+    }
+    .section h2 {
+      margin-top: 0;
+    }
+    ul {
+      margin-left: 20px;
+    }
+  </style>
+</head>
+<body>
+
+<h1>Git-Anleitung für ein Python-Projekt</h1>
+<hr>
+
+<div class="section">
+  <h2>Inhalt</h2>
+  <ol>
+    <li>Git installieren</li>
+    <li>Python-Projekt zu einem Git-Projekt machen</li>
+    <li>Änderungen versionieren (Commits)</li>
+    <li>Alle Versionen anzeigen (Git Log)</li>
+    <li>Ältere Versionen (Commits) wiederherstellen oder ansehen</li>
+    <li>Arbeiten mit Branches</li>
+    <li>Projekt auf GitHub hochladen</li>
+    <li>Weitere nützliche Git-Kommandos</li>
+    <li>Zusammenfassung / Ablauf im Alltag</li>
+    <li>Tipps und Best Practices</li>
+  </ol>
+</div>
+
+<div class="section">
+  <h2>1. Git installieren</h2>
+  <p>
+    <strong>Windows:</strong> 
+    <a href="https://git-scm.com/download/win" target="_blank">git-scm.com/download/win</a>
+  </p>
+  <p>
+    <strong>macOS:</strong><br>
+    <code>brew install git</code><br>
+    oder <a href="https://git-scm.com/download/mac" target="_blank">git-scm.com/download/mac</a>
+  </p>
+  <p>
+    <strong>Linux (Ubuntu/Debian):</strong><br>
+    <code>sudo apt-get update</code><br>
+    <code>sudo apt-get install git</code>
+  </p>
+  <p>Installationsprüfung:</p>
+  <pre><code>git --version</code></pre>
+</div>
+
+<div class="section">
+  <h2>2. Python-Projekt zu einem Git-Projekt machen</h2>
+  <ol>
+    <li><strong>In Projektverzeichnis wechseln</strong><br>
+      <code>cd /pfad/zu/deinem/python-projekt</code></li>
+    <li><strong>Git initialisieren</strong><br>
+      <code>git init</code></li>
+    <li><strong>.gitignore erstellen</strong> (empfohlen)<br>
+      Beispiel-Inhalt:<br>
+      <pre><code>__pycache__/
+*.py[cod]
+venv/
+.venv/
+build/
+dist/
+*.egg-info/
+</code></pre>
+    </li>
+    <li><strong>Ersten Commit vorbereiten</strong><br>
+      <code>git add .</code></li>
+    <li><strong>Ersten Commit ausführen</strong><br>
+      <code>git commit -m "Initial commit"</code></li>
+  </ol>
+</div>
+
+<div class="section">
+  <h2>3. Änderungen versionieren (Commits)</h2>
+  <ol>
+    <li><strong>Status prüfen</strong><br>
+      <code>git status</code></li>
+    <li><strong>Dateien zum Commit hinzufügen</strong><br>
+      <code>git add &lt;datei&gt;</code><br>
+      oder<br>
+      <code>git add .</code></li>
+    <li><strong>Commit ausführen</strong><br>
+      <code>git commit -m "Beschreibender Commit-Text"</code></li>
+  </ol>
+</div>
+
+<div class="section">
+  <h2>4. Alle Versionen anzeigen (Git Log)</h2>
+  <pre><code>git log</code></pre>
+  <p>Mit <code>q</code> verlässt du den Log-Modus.</p>
+  <p>Alternativ kompakter:</p>
+  <pre><code>git log --oneline --graph --decorate</code></pre>
+</div>
+
+<div class="section">
+  <h2>5. Ältere Versionen (Commits) wiederherstellen oder ansehen</h2>
+  <ol>
+    <li><strong>Nur ansehen („detached HEAD“)</strong><br>
+      <code>git checkout &lt;commit-hash&gt;</code><br>
+      Zurück zum Hauptbranch:<br>
+      <code>git checkout main</code></li>
+    <li><strong>Dauerhaft zurücksetzen</strong><br>
+      <ul>
+        <li><strong>Revert (empfohlen)</strong>: <br>
+          <code>git revert &lt;commit-hash&gt;</code>
+        </li>
+        <li><strong>Reset (Vorsicht)</strong>: <br>
+          <code>git reset --hard &lt;commit-hash&gt;</code>
+        </li>
+      </ul>
+    </li>
+  </ol>
+</div>
+
+<div class="section">
+  <h2>6. Arbeiten mit Branches</h2>
+  <ul>
+    <li><strong>Neuen Branch erstellen &amp; wechseln</strong><br>
+      <code>git checkout -b feature/neues_feature</code></li>
+    <li><strong>Zurück zu main</strong><br>
+      <code>git checkout main</code></li>
+    <li><strong>Branch zusammenführen (Merge)</strong><br>
+      <code>git checkout main</code><br>
+      <code>git merge feature/neues_feature</code></li>
+  </ul>
+</div>
+
+<div class="section">
+  <h2>7. Projekt auf GitHub hochladen</h2>
+  <ol>
+    <li><strong>Neues Repository auf GitHub anlegen</strong><br>
+      (z.B. auf <a href="https://github.com" target="_blank">github.com</a> einloggen und auf "New" klicken).</li>
+    <li><strong>Lokales Projekt mit GitHub Repo verknüpfen</strong><br>
+      <code>git remote add origin https://github.com/&lt;benutzer&gt;/&lt;repo&gt;.git</code><br>
+      <code>git push -u origin main</code></li>
+    <li><strong>Zukünftige Änderungen hochladen</strong><br>
+      <code>git push</code></li>
+  </ol>
+</div>
+
+<div class="section">
+  <h2>8. Weitere nützliche Git-Kommandos</h2>
+  <ul>
+    <li><strong>Unterschiede anzeigen:</strong><br>
+      <code>git diff</code></li>
+    <li><strong>Aktualisieren (fetch + merge):</strong><br>
+      <code>git pull</code></li>
+    <li><strong>Stash (Änderungen zwischenparken):</strong><br>
+      <code>git stash</code><br>
+      <code>git stash pop</code></li>
+    <li><strong>Tags (Versionen markieren):</strong><br>
+      <code>git tag v1.0.0</code><br>
+      <code>git push origin --tags</code></li>
+  </ul>
+</div>
+
+<div class="section">
+  <h2>9. Zusammenfassung / Ablauf im Alltag</h2>
+  <ol>
+    <li><strong>Aktuellsten Stand holen</strong>: <code>git pull</code></li>
+    <li><strong>Änderungen machen</strong></li>
+    <li><strong>Status prüfen</strong>: <code>git status</code></li>
+    <li><strong>Änderungen stagen</strong>: <code>git add .</code></li>
+    <li><strong>Committen</strong>: <code>git commit -m "Beschreibung"</code></li>
+    <li><strong>Pushen</strong>: <code>git push</code></li>
+  </ol>
+</div>
+
+<div class="section">
+  <h2>10. Tipps und Best Practices</h2>
+  <ul>
+    <li><strong>Aussagekräftige Commit-Nachrichten</strong> schreiben.</li>
+    <li><strong>Regelmäßige, kleine Commits</strong> sind besser als seltene, große.</li>
+    <li><strong>.gitignore</strong> aktuell halten, damit keine unnötigen Dateien (z.B. <code>venv</code>) im Repo landen.</li>
+    <li><strong>Branches</strong> für neue Features und Bugfixes nutzen, um den Hauptbranch stabil zu halten.</li>
+  </ul>
+</div>
+
+<hr>
+<p><em>Viel Erfolg mit deinem Git-Workflow!</em></p>
+
+</body>
+</html>
