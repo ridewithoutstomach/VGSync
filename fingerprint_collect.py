@@ -9,6 +9,14 @@ import hashlib
 import win32com.client  # pywin32
 
 def get_fingerprint_windows():
+    """
+    Entspricht der Logik aus mainwindow.py (pywin32 WMI + Debug-Ausgabe).
+    Liest CPU + Board SerialNumber aus WMI, plus hostname.
+
+    Gibt die ersten 16 Hex-Stellen in Großbuchstaben zurück.
+    """
+    print("[DEBUG] get_fingerprint_windows => collecting CPU + Board SN")
+
     hostname = platform.node()
     cpu_id = "CPU_UNKNOWN"
     board_sn = "BOARD_UNKNOWN"
@@ -30,9 +38,13 @@ def get_fingerprint_windows():
     except Exception as e:
         print("[WARN] Could not read CPU/Board via pywin32 WMI:", e)
 
+    # Roh-String = "hostname-cpuId-boardSN"
     raw_str = f"{hostname}-{cpu_id}-{board_sn}"
+
+    # SHA256 => Hex => uppercase => 16 chars
     h = hashlib.sha256(raw_str.encode("utf-8")).hexdigest().upper()
     return h[:16]
+
 
 def get_fingerprint_linux():
     hostname = platform.node()

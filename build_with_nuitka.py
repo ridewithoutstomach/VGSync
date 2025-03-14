@@ -77,6 +77,10 @@ def build_windows():
         "--enable-plugin=pyside6",
         "--windows-icon-from-ico=icon_icon.ico",  # Anpassen oder entfernen, wenn kein Icon
         "--output-dir=dist",
+        "--include-module=win32com",
+        "--include-module=win32com.client",
+        "--include-module=pythoncom",
+        "--include-module=pywintypes",
         "app.py"
     ]
     run_cmd(cmd)

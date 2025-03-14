@@ -18,6 +18,7 @@ import subprocess
 import re
 import uuid
 import hashlib
+import win32com.client  # pywin32
 
 
 from PySide6.QtCore import QUrl
@@ -75,45 +76,33 @@ from config import reset_config
 from datetime import datetime, timedelta
 
 def _get_fingerprint_windows():
-    """
-    Liest unter Windows per wmic CPU-ID und Mainboard-SerialNumber aus 
-    (plus Hostname) und erzeugt daraus einen SHA256-Hash.
-    Gibt die ersten 16 Hex-Zeichen (Großbuchstaben) zurück.
-    """
+    print("[DEBUG Get new Fingerprint")
     hostname = platform.node()
     cpu_id = "CPU_UNKNOWN"
     board_sn = "BOARD_UNKNOWN"
 
-    # CPU-ID
     try:
-        cpu_output = subprocess.check_output(
-            ["wmic", "cpu", "get", "ProcessorId"], text=True
-        )
-        lines = cpu_output.split()
-        for token in lines:
-            # CPU-IDs sind meist hexadezimal
-            if re.match(r"^[0-9A-Fa-f]{16,}$", token):
-                cpu_id = token.upper()
-                break
-    except:
-        pass
+        locator = win32com.client.Dispatch("WbemScripting.SWbemLocator")
+        wmi_svc = locator.ConnectServer(".", "root\\cimv2")
 
-    # Mainboard-Serial
-    try:
-        board_output = subprocess.check_output(
-            ["wmic", "baseboard", "get", "SerialNumber"], text=True
-        )
-        lines = board_output.split()
-        for token in lines:
-            if len(token) >= 4 and token.upper() != "SERIALNUMBER":
-                board_sn = token.upper()
-                break
-    except:
-        pass
+        cpus = wmi_svc.ExecQuery("SELECT ProcessorId FROM Win32_Processor")
+        for cpu in cpus:
+            cpu_id = str(cpu.ProcessorId).strip()
+            break
+
+        boards = wmi_svc.ExecQuery("SELECT SerialNumber FROM Win32_BaseBoard")
+        for bd in boards:
+            board_sn = str(bd.SerialNumber).strip()
+            break
+
+    except Exception as e:
+        print("[WARN] Could not read CPU/Board via pywin32 WMI:", e)
 
     raw_str = f"{hostname}-{cpu_id}-{board_sn}"
     h = hashlib.sha256(raw_str.encode("utf-8")).hexdigest().upper()
     return h[:16]
+
+
 
 
 def _get_fingerprint_linux():
