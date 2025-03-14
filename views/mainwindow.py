@@ -1245,7 +1245,7 @@ class MainWindow(QMainWindow):
             self._update_gpx_overview()
         
         
-    
+    from PySide6.QtWidgets import QInputDialog
 
     def _on_set_limit_speed(self):
         """
@@ -1256,6 +1256,7 @@ class MainWindow(QMainWindow):
         current_limit = self.chart._speed_cap  # Oder self.chart.get_speed_cap() falls du eine Getter-Methode hast
 
         # 2) QInputDialog: Eingabe eines float-Wertes
+    
         new_val, ok = self.QInputDialog.getDouble(
             self,
             "Set Speed Limit",
