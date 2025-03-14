@@ -2,270 +2,293 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8">
-  <title>Git-Anleitung für Einsteiger (Python-Projekt)</title>
+  <title>Umfassende Git-Anleitung (Deutsch)</title>
   <style>
     body {
-      font-family: Arial, sans-serif;
-      margin: 40px;
+      margin: 0;
+      padding: 0;
+      font-family: sans-serif;
+      background: #f9f9f9;
+      color: #333;
       line-height: 1.5;
+    }
+    header {
+      background: #333;
+      color: #fff;
+      padding: 1.5rem;
+      text-align: center;
+    }
+    main {
       max-width: 900px;
+      margin: 2rem auto;
+      padding: 0 1rem;
     }
     h1, h2, h3, h4 {
-      color: #2c3e50;
+      color: #444;
+      margin-top: 1.5rem;
+      margin-bottom: 0.5rem;
+    }
+    p, ul, ol {
+      margin-bottom: 1rem;
     }
     code, pre {
-      background-color: #f4f4f4;
-      padding: 2px 4px;
-      font-family: Consolas, monospace;
+      background: #f4f4f4;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-family: "Courier New", Courier, monospace;
+    }
+    pre {
+      display: block;
+      padding: 10px;
+      overflow-x: auto;
     }
     .section {
-      margin-bottom: 40px;
+      margin-bottom: 2rem;
     }
-    .note {
-      background-color: #f9f9a9;
-      border-left: 4px solid #f1c40f;
-      padding: 10px;
-      margin: 15px 0;
+    footer {
+      background: #ddd;
+      text-align: center;
+      padding: 1rem;
+      color: #666;
+      margin-top: 30px;
     }
   </style>
 </head>
 <body>
 
-<h1>Git-Anleitung für Einsteiger (Python-Projekt)</h1>
-<hr>
+<header>
+  <h1>Umfassende Git-Anleitung (Deutsch)</h1>
+</header>
 
-<div class="section">
-  <h2>Inhalt</h2>
-  <ol>
-    <li>Was ist Git und warum brauche ich das?</li>
-    <li>Vorbereitung: Git installieren</li>
-    <li>Erste Schritte im Projekt</li>
-    <li>.gitignore verstehen und erstellen</li>
-    <li>Versionen erfassen: <em>git add</em> und <em>git commit</em></li>
-    <li>Änderungen ansehen und überprüfen</li>
-    <li>Vergangene Versionen anzeigen und wiederherstellen</li>
-    <li>Arbeiten mit Branches (Kurzüberblick)</li>
-    <li>Projekt auf GitHub hochladen</li>
-    <li>Alltäglicher Ablauf im Schnelldurchlauf</li>
-  </ol>
-</div>
+<main>
 
-<div class="section">
-  <h2>1. Was ist Git und warum brauche ich das?</h2>
-  <p>
-    <strong>Git</strong> ist ein Werkzeug zur Versionsverwaltung deines Codes. Stell es dir wie ein 
-    <em>Rückgängig- und Wiederholen-Knopf</em> für dein gesamtes Projekt vor, nur viel mächtiger.
-  </p>
-  <ul>
-    <li>Du kannst jederzeit den <strong>Zustand deines Projekts</strong> (Quellcode) in "Schnappschüssen" festhalten.</li>
-    <li>Falls etwas schiefläuft, kannst du zu einer älteren, funktionierenden Version <em>zurückspringen</em>.</li>
-    <li>Mit <strong>GitHub</strong> oder anderen Plattformen kannst du deinen Code außerdem leicht <em>in der Cloud sichern</em> und mit anderen teilen.</li>
-  </ul>
-</div>
+  <!-- EINLEITUNG -->
+  <section class="section" id="einleitung">
+    <h2>1. Was ist Git?</h2>
+    <p>
+      <strong>Git</strong> ist ein Versionskontrollsystem, mit dem du Änderungen an deinen Dateien (meist Quellcode) 
+      im Zeitverlauf speichern und verwalten kannst. Es erlaubt dir, ältere Zustände wiederherzustellen, 
+      parallel an verschiedenen Features zu arbeiten und Änderungen mit anderen zu teilen.
+    </p>
+  </section>
 
-<div class="section">
-  <h2>2. Vorbereitung: Git installieren</h2>
-  <p>
-    Wenn du Git noch nicht installiert hast, hole das jetzt nach:
-  </p>
-  <ul>
-    <li><strong>Windows:</strong> Lade den Installer unter 
-      <a href="https://git-scm.com/download/win" target="_blank">https://git-scm.com/download/win</a> herunter und führe ihn aus.</li>
-    <li><strong>macOS:</strong> Mit Homebrew: <code>brew install git</code> oder lade es von 
-      <a href="https://git-scm.com/download/mac" target="_blank">git-scm.com/download/mac</a> herunter.</li>
-    <li><strong>Linux (z.B. Ubuntu):</strong> <code>sudo apt-get update</code>, <code>sudo apt-get install git</code></li>
-  </ul>
-  <p>Teste anschließend die Installation:</p>
-  <pre><code>git --version</code></pre>
-  <p>Wenn eine Versionsnummer erscheint, ist alles korrekt installiert.</p>
-</div>
+  <!-- INSTALLATION -->
+  <section class="section" id="installation">
+    <h2>2. Git installieren</h2>
+    <ul>
+      <li><strong>Windows:</strong> <a href="https://git-scm.com/download/win" target="_blank">Git für Windows herunterladen</a> und installieren.</li>
+      <li><strong>macOS:</strong> <code>brew install git</code> (oder via <a href="https://git-scm.com/download/mac" target="_blank">offizieller Download</a>)</li>
+      <li><strong>Linux (z.B. Ubuntu):</strong> <code>sudo apt-get install git</code></li>
+    </ul>
+    <p>Prüfe die Installation durch:</p>
+    <pre><code>git --version</code></pre>
+  </section>
 
-<div class="section">
-  <h2>3. Erste Schritte im Projekt</h2>
-  <p>
-    Wir gehen davon aus, dass du bereits ein <strong>bestehendes Python-Projekt</strong> (oder auch ein leeres Verzeichnis für ein neues Projekt) hast.
-  </p>
-  <ol>
-    <li><strong>In das Verzeichnis des Projekts wechseln.</strong><br>
-      Beispiel: <code>cd /pfad/zu/deinem/python-projekt</code></li>
-    <li><strong>Git initialisieren.</strong><br>
-      <code>git init</code><br>
-      Das erzeugt im Hintergrund einen versteckten Ordner namens <code>.git</code>, der all deine Versionsinformationen speichert.
-    </li>
-  </ol>
-  <div class="note">
-    <strong>Hinweis:</strong> Sobald du <code>git init</code> gemacht hast, wird dein Verzeichnis zum "Git-Repository". 
-    Das heißt, Git überwacht ab jetzt deine Dateien (sobald du sie hinzufügst) und kann Versionen davon speichern.
-  </div>
-</div>
+  <!-- INITIALISIERUNG -->
+  <section class="section" id="initialisierung">
+    <h2>3. Neues Git-Repository anlegen</h2>
+    <ol>
+      <li><strong>In ein bestehendes Projekt wechseln:</strong>
+        <pre><code>cd /pfad/zu/deinem/projekt</code></pre>
+      </li>
+      <li><strong>Git initialisieren:</strong>
+        <pre><code>git init</code></pre>
+        Dadurch entsteht ein versteckter Ordner <code>.git</code>, der alle Versionsinformationen speichert.
+      </li>
+      <li><strong>.gitignore anlegen (empfohlen):</strong>
+        <p>
+          Erstelle eine Datei namens <code>.gitignore</code>, in der du Dateien/Verzeichnisse definierst, 
+          die nicht versioniert werden sollen (z.B. <code>venv/</code>, <code>node_modules/</code>, 
+          <code>*.log</code> etc.).
+        </p>
+      </li>
+    </ol>
+  </section>
 
-<div class="section">
-  <h2>4. .gitignore verstehen und erstellen</h2>
-  <p>
-    In einer Datei namens <code>.gitignore</code> stehen alle Dateien oder Ordner, die Git <em>nicht</em> in die Versionsverwaltung aufnehmen soll. 
-    Das ist wichtig, damit zum Beispiel dein <strong>virtuelles Python-Umfeld (venv)</strong>, 
-    automatisch erzeugte Cache-Dateien oder sensible Daten <em>nicht</em> mit versioniert werden.
-  </p>
-  <p>Typische Einträge für ein Python-Projekt:</p>
-  <pre><code>__pycache__/
-*.py[cod]
-venv/
-.venv/
-build/
-dist/
-*.egg-info/
-.env
+  <!-- STATUS, ADD, COMMIT -->
+  <section class="section" id="aenderungen">
+    <h2>4. Änderungen festhalten (Status, Add, Commit)</h2>
+    <ul>
+      <li><strong>Status prüfen:</strong>
+        <pre><code>git status</code></pre>
+        Zeigt, welche Dateien verändert wurden und ob sie bereits zum Commit vorgemerkt sind.
+      </li>
+      <li><strong>Änderungen zum Commit vormerken (stagen):</strong>
+        <pre><code>git add datei.txt
+git add .
 </code></pre>
-  <p>
-    Erstelle eine neue Textdatei mit dem Namen <code>.gitignore</code> in deinem Projektordner 
-    und kopiere obenstehende Zeilen hinein (passe sie bei Bedarf an).
-  </p>
-</div>
+        <code>git add .</code> fügt alle geänderten Dateien hinzu.
+      </li>
+      <li><strong>Commit ausführen (speichern):</strong>
+        <pre><code>git commit -m "Sinnvolle Beschreibung der Änderung"</code></pre>
+      </li>
+    </ul>
+    <p>
+      Jeder <em>Commit</em> ist ein Schnappschuss deines Projekts. Achte auf aussagekräftige Commit-Nachrichten!
+    </p>
+  </section>
 
-<div class="section">
-  <h2>5. Versionen erfassen: <em>git add</em> und <em>git commit</em></h2>
-  <ol>
-    <li><strong>Änderungen "stagen" (mit <code>git add</code>)</strong><br>
-      Wenn du an deinen Dateien arbeitest, ändert Git noch nichts automatisch. Erst wenn du sagst 
-      <code>git add &lt;datei&gt;</code>, landen die Änderungen im sogenannten "Staging-Bereich". 
-      Das bedeutet, du markierst sie für den nächsten Schnappschuss (Commit).
-      <br><br>
-      Möchtest du alle geänderten Dateien auf einmal hinzufügen, kannst du schreiben: 
-      <code>git add .</code>
-    </li>
-    <li><strong>Schnappschuss erstellen (mit <code>git commit</code>)</strong><br>
-      <code>git commit -m "Kurze Beschreibung"</code><br>
-      Damit erstellst du jetzt wirklich den Versions-Schnappschuss. Die Nachricht (in Anführungszeichen) 
-      sollte kurz und prägnant beschreiben, was sich geändert hat, z. B. 
-      <em>"Feature X hinzugefügt" oder "Bug Y behoben"</em>.
-    </li>
-  </ol>
-  <div class="note">
-    <strong>Warum zwei Schritte (<em>add</em> und <em>commit</em>)?</strong><br>
-    Das ermöglicht dir, genau zu kontrollieren, welche Änderungen in den nächsten Versions-Schnappschuss gehören und welche nicht.
-  </div>
-</div>
+  <!-- UNTERSCHIEDE ANZEIGEN (DIFF) -->
+  <section class="section" id="diff">
+    <h2>5. Unterschiede anzeigen (Diff)</h2>
+    <p>Wenn du sehen möchtest, was sich seit dem letzten Commit geändert hat:</p>
+    <pre><code>git diff</code></pre>
+    <p>Um den Unterschied zwischen Staging und Commits zu sehen:</p>
+    <pre><code>git diff --staged</code></pre>
+  </section>
 
-<div class="section">
-  <h2>6. Änderungen ansehen und überprüfen</h2>
-  <ul>
-    <li><strong>Status überprüfen:</strong><br>
-      <code>git status</code><br>
-      So siehst du, welche Dateien gerade verändert oder noch nicht "gestaged" sind.</li>
-    <li><strong>Unterschiede anzeigen:</strong><br>
-      <code>git diff</code><br>
-      Zeigt dir Zeile für Zeile an, was sich seit dem letzten Commit verändert hat.</li>
-    <li><strong>Bisherige Commits (Verlauf) anschauen:</strong><br>
-      <code>git log</code><br>
-      Listet alle bisherigen Commits mit Autor, Datum und Nachricht auf.</li>
-  </ul>
-</div>
+  <!-- VERSIONEN ANZEIGEN (LOG) -->
+  <section class="section" id="log">
+    <h2>6. Alle gespeicherten Versionen anzeigen (Log)</h2>
+    <p>Mit <code>git log</code> siehst du alle Commits in chronologischer Reihenfolge:</p>
+    <pre><code>git log</code></pre>
+    <p>Etwas kompakter:</p>
+    <pre><code>git log --oneline --graph --decorate</code></pre>
+    <p>Damit siehst du eine übersichtliche Liste mit Verzweigungen (Branches) und Commit-Nachrichten.</p>
+  </section>
 
-<div class="section">
-  <h2>7. Vergangene Versionen anzeigen und wiederherstellen</h2>
-  <p>Manchmal möchtest du eine alte Version deines Projekts anschauen oder sogar dorthin zurückkehren.</p>
-  <ul>
-    <li>
-      <strong>Alte Version "nur ansehen"</strong>: <br>
-      <code>git checkout &lt;Commit-Hash&gt;</code><br>
-      Damit bewegst du dich temporär in einen älteren Zustand. Das wird "detached HEAD" genannt. 
-      Wenn du wieder zu deinem aktuellen Hauptzweig willst, tippst du: 
-      <code>git checkout main</code>.
-    </li>
-    <li>
-      <strong>Version dauerhaft zurücksetzen</strong>:  
-      <ul>
-        <li>
-          <strong>Revert (empfohlen, da sicherer)</strong>: 
-          <code>git revert &lt;Commit-Hash&gt;</code><br>
-          Das erstellt einen <em>neuen Commit</em>, der die Änderungen von damals rückgängig macht, 
-          ohne den Verlauf zu zerstören.
-        </li>
-        <li>
-          <strong>Reset (Vorsicht!)</strong>:
-          <code>git reset --hard &lt;Commit-Hash&gt;</code><br>
-          Hier wird der Projektstand auf den angegebenen Commit zurückgespult. 
-          Alle commits, die danach kamen, sind <em>lokal weg</em> (entweder überschrieben oder verloren), 
-          was in Teamprojekten für Verwirrung sorgen kann.
-        </li>
-      </ul>
-    </li>
-  </ul>
-</div>
+  <!-- BRANCHES -->
+  <section class="section" id="branches">
+    <h2>7. Branches (Zweige) nutzen</h2>
+    <p>Branches erlauben parallele Entwicklungszweige. Standardmäßig hast du den Branch <code>main</code> (oder <code>master</code>).</p>
+    <ul>
+      <li><strong>Aktuelle Branches anzeigen:</strong>
+        <pre><code>git branch</code></pre>
+      </li>
+      <li><strong>Neuen Branch erstellen & wechseln:</strong>
+        <pre><code>git checkout -b feature-xyz</code></pre>
+      </li>
+      <li><strong>Zwischen Branches wechseln:</strong>
+        <pre><code>git checkout main</code></pre>
+      </li>
+      <li><strong>Branch mergen (zusammenführen):</strong>
+        <pre><code>git checkout main
+git merge feature-xyz</code></pre>
+        Jetzt sind die Änderungen aus <code>feature-xyz</code> in <code>main</code>.
+      </li>
+      <li><strong>Branch löschen:</strong>
+        <pre><code>git branch -d feature-xyz</code></pre>
+      </li>
+    </ul>
+    <p>
+      Möchtest du nur einzelne Dateien aus einem Branch übernehmen, kannst du die Zusammenführung händisch lösen 
+      (Stichwort <em>cherry-pick</em>), siehe unten.
+    </p>
+  </section>
 
-<div class="section">
-  <h2>8. Arbeiten mit Branches (Kurzüberblick)</h2>
-  <p>
-    Ein <em>Branch</em> ist wie ein Entwicklungszweig. Standardmäßig hast du den <code>main</code>-Branch. 
-    Für neue Features oder Experimente legst du am besten eigene Branches an, damit du deinen Hauptzweig stabil hältst.
-  </p>
-  <pre><code>git checkout -b feature/neues_feature
-# wechselt automatisch in den neuen Branch 'feature/neues_feature'
-</code></pre>
-  <p>
-    Zurück zum <code>main</code>-Branch:
-  </p>
-  <pre><code>git checkout main</code></pre>
-  <p>
-    Um deinen Feature-Branch am Ende in <code>main</code> zu integrieren, führst du einen <em>Merge</em> durch:
-  </p>
-  <pre><code>git checkout main
-git merge feature/neues_feature
-</code></pre>
-</div>
+  <!-- EINZELNE DATEIEN ÜBERNEHMEN (CHERRY-PICK) -->
+  <section class="section" id="cherry-pick">
+    <h2>8. Einzelne Commits übernehmen (Cherry-Pick)</h2>
+    <p>
+      Angenommen, du hast im Branch <code>feature-xyz</code> einzelne Commits, die du in <code>main</code> integrieren willst, 
+      ohne den gesamten Branch zu mergen. Dafür nutzt du <em>cherry-pick</em>.
+    </p>
+    <ol>
+      <li>Finde den Commit-Hash, den du willst (z.B. mit <code>git log --oneline</code>).</li>
+      <li>Wechsle in den Ziel-Branch, z.B. <code>main</code>:
+        <pre><code>git checkout main</code></pre>
+      </li>
+      <li>Cherry-Pick aus <code>feature-xyz</code>:
+        <pre><code>git cherry-pick COMMIT-HASH</code></pre>
+      </li>
+    </ol>
+    <p>So übernimmst du nur diesen einen Commit.</p>
+  </section>
 
-<div class="section">
-  <h2>9. Projekt auf GitHub hochladen</h2>
-  <p>Möchtest du dein lokales Git-Projekt auf GitHub speichern, gehe so vor:</p>
-  <ol>
-    <li><strong>Neues Repository auf GitHub erstellen:</strong><br>
-      Gehe zu <a href="https://github.com/" target="_blank">github.com</a>, 
-      melde dich an und klicke auf <em>New</em>. Vergib einen Namen und lege fest, ob es öffentlich oder privat sein soll.
-    </li>
-    <li><strong>Lokales Projekt mit dem GitHub-Repo verknüpfen:</strong><br>
-      Im Terminal (immer noch in deinem Projektordner):
-      <pre><code>git remote add origin https://github.com/deinBenutzername/deinRepositoryName.git
-git push -u origin main
-</code></pre>
-      Damit verbindest du deinen lokalen <code>main</code>-Branch mit dem sogenannten <em>Remote</em> namens 
-      <code>origin</code> (GitHub). <br>
-      Das <code>-u</code> stellt eine "Tracking-Verbindung" her, sodass du in Zukunft nur <code>git push</code> tippen musst.
-    </li>
-    <li><strong>Änderungen hochladen:</strong><br>
-      Nach neuen Commits genügt <code>git push</code>, um deinen Code auf GitHub zu übertragen.
-    </li>
-  </ol>
-</div>
+  <!-- ZURÜCKSETZEN & REVERT -->
+  <section class="section" id="zuruecksetzen">
+    <h2>9. Änderungen zurücksetzen</h2>
+    <p>Es gibt verschiedene Möglichkeiten, Änderungen rückgängig zu machen:</p>
+    <ul>
+      <li><strong>Unstagen (Datei aus Staging entfernen):</strong>
+        <pre><code>git restore --staged datei.txt</code></pre>
+      </li>
+      <li><strong>Datei auf letzten Commit zurücksetzen:</strong>
+        <pre><code>git checkout -- datei.txt</code></pre>
+      </li>
+      <li><strong>Letzten Commit rückgängig machen (neuen Commit erzeugen):</strong>
+        <pre><code>git revert HEAD</code></pre>
+        Erstellt einen neuen Commit, der die Änderungen von HEAD rückgängig macht.
+      </li>
+      <li><strong>Auf älteren Commit zurücksetzen (History überschreiben):</strong>
+        <pre><code>git reset --hard COMMIT-HASH</code></pre>
+        <strong>Achtung:</strong> Überschreibt den Verlauf lokal; in Teamprojekten eher <code>revert</code> benutzen!
+      </li>
+    </ul>
+  </section>
 
-<div class="section">
-  <h2>10. Alltäglicher Ablauf im Schnelldurchlauf</h2>
-  <ol>
-    <li><strong>Aktuellsten Stand holen (wenn du mit anderen zusammenarbeitest):</strong><br>
-      <code>git pull</code>
-    </li>
-    <li><strong>Code bearbeiten, Dateien verändern.</strong></li>
-    <li><strong>Status prüfen:</strong><br>
-      <code>git status</code>
-    </li>
-    <li><strong>Änderungen <code>stagen</code>:</strong><br>
-      <code>git add .</code> (oder gezielt bestimmte Dateien)
-    </li>
-    <li><strong>Commit erstellen:</strong><br>
-      <code>git commit -m "Beschreibender Text"</code>
-    </li>
-    <li><strong>Änderungen (falls nötig) hochladen:</strong><br>
-      <code>git push</code>
-    </li>
-  </ol>
-  <div class="note">
-    <strong>Wichtig:</strong> Regelmäßig und in <em>kleinen Schritten</em> committen. 
-    So bleibt deine Historie übersichtlich und du kannst leichter Fehler finden oder rückgängig machen.
-  </div>
-</div>
+  <!-- STASH -->
+  <section class="section" id="stash">
+    <h2>10. Änderungen zwischenparken (Stash)</h2>
+    <p>Mit <code>stash</code> kannst du aktuelle Änderungen „parken“, ohne sie zu committen:</p>
+    <pre><code>git stash</code></pre>
+    <p>Um sie wiederherzustellen:</p>
+    <pre><code>git stash pop</code></pre>
+    <p>Liste aller Stashes:</p>
+    <pre><code>git stash list</code></pre>
+  </section>
 
-<hr>
-<p><em>Damit hast du jetzt eine verständliche Grundlage, um Git in deinem Python-Projekt zu nutzen – 
-und zugleich eine Möglichkeit, den Code sicher auf GitHub zu verwalten.</em></p>
+  <!-- TAGS -->
+  <section class="section" id="tags">
+    <h2>11. Tags (Versionen markieren)</h2>
+    <p>Um einen bestimmten Commit als Version (z.B. v1.0) zu markieren:</p>
+    <pre><code>git tag v1.0</code></pre>
+    <p>Alle Tags anzeigen:</p>
+    <pre><code>git tag</code></pre>
+    <p>Auf einen Tag zurückspringen (detached HEAD):</p>
+    <pre><code>git checkout v1.0</code></pre>
+  </section>
+
+  <!-- GITHUB -->
+  <section class="section" id="github">
+    <h2>12. GitHub (Remote-Repository)</h2>
+    <p>
+      <strong>GitHub</strong> ist ein Online-Dienst, der Git-Repositories hostet. 
+      Hier kannst du deinen Code hochladen, sichern und mit anderen teilen.
+    </p>
+    <ol>
+      <li>Erstelle ein neues Repository auf <a href="https://github.com" target="_blank">GitHub</a>.</li>
+      <li>Verbinde dein lokales Repository damit:
+        <pre><code>git remote add origin https://github.com/DEIN_BENUTZERNAME/DEIN_REPOSITORY.git
+git push -u origin main</code></pre>
+      </li>
+    </ol>
+    <p>Danach kannst du mit <code>git push</code> neue Commits hochladen und mit <code>git pull</code> Änderungen holen.</p>
+  </section>
+
+  <!-- PUSH, PULL, CLONE -->
+  <section class="section" id="push-pull-clone">
+    <h2>13. Push, Pull & Clone</h2>
+    <ul>
+      <li><strong>Push (lokale Änderungen hochladen):</strong>
+        <pre><code>git push</code></pre>
+      </li>
+      <li><strong>Pull (Änderungen vom Remote holen und mergen):</strong>
+        <pre><code>git pull</code></pre>
+      </li>
+      <li><strong>Clone (bestehendes Repo herunterladen):</strong>
+        <pre><code>git clone https://github.com/DEIN_BENUTZERNAME/DEIN_REPO.git</code></pre>
+      </li>
+    </ul>
+  </section>
+
+  <!-- TIPPS & BEST PRACTICES -->
+  <section class="section" id="best-practices">
+    <h2>14. Tipps & Best Practices</h2>
+    <ul>
+      <li><strong>Regelmäßige, kleine Commits:</strong> Lieber oft committen, statt riesige Commits.</li>
+      <li><strong>Commit-Messages:</strong> Klar und beschreibend (z.B. „Fix: Speicherleck behoben“)</li>
+      <li><strong>Branches:</strong> Für neue Features oder Experimente immer separate Branches verwenden.</li>
+      <li><strong>.gitignore aktuell halten:</strong> Keine unnötigen Dateien (Logs, Temp-Files, etc.) ins Repo.</li>
+      <li><strong>Reset vs. Revert:</strong> In Teamprojekten lieber <code>revert</code> statt <code>reset</code>, um keine gemeinsame History zu überschreiben.</li>
+    </ul>
+  </section>
+
+</main>
+
+<footer>
+  &copy; 2025 – Umfassende Git-Anleitung (Deutsch). Alle Rechte vorbehalten.
+</footer>
 
 </body>
 </html>

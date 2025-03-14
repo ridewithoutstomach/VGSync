@@ -14,7 +14,7 @@ from license_check import load_license  # <-- dein cryptography-basiertes Script
 # 1) Versions-Konfiguration & Modus
 ##############################################################################
 
-APP_VERSION = "3.242"
+APP_VERSION = "3.25"
 
 # Falls du nur über den Server prüfen willst, ob diese APP_VERSION freigegeben ist,
 # setze das hier auf True.
