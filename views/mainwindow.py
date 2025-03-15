@@ -489,7 +489,7 @@ class MainWindow(QMainWindow):
         
         # Unten: Map (50%)
         self.map_widget = MapWidget(mainwindow=self, parent=None)
-       
+        #self.map_widget.view.loadFinished.connect(self._on_map_page_loaded)   
         
         self.left_v_layout.addWidget(self.map_widget, stretch=1)
         
@@ -1054,46 +1054,49 @@ class MainWindow(QMainWindow):
         self.map_widget.view.page().runJavaScript(js_code)
 
     def _apply_map_sizes_from_settings(self):
+        """Wendet für black, red, cyan, yellow die in QSettings gespeicherten
+        (oder Standard-) Größen an und aktualisiert die Karte.
+        """
         s = QSettings("VGSync", "VGSync")
-        for col in ["yellow", "cyan", "black"]:
-            size_val = s.value(f"mapSize/{col}", 6, type=int)
-            # => Map updaten
-            self._update_map_points_of_color(col, size_val)    
         
-        
+        for color_str in ["black", "red", "cyan", "yellow"]:
+            # Wenn nichts in QSettings gespeichert ist, nimm:
+            #   6 bei 'yellow'
+            #   4 bei allen anderen
+            default_val = 6 if color_str == "yellow" else 4
+            
+            size_val = s.value(f"mapSize/{color_str}", default_val, type=int)
+            self._update_map_points_of_color(color_str, size_val)
     
-
+        print("[DEBUG] _apply_map_sizes_from_settings() abgeschlossen.")
+        
+        
     def _on_set_map_point_size(self, color_str: str):
-        """
-        Öffnet ein Dialogfenster, in dem der Nutzer die Größe
-        der Map-Punkte für 'color_str' (z.B. 'yellow', 'cyan', 'black') eingeben kann.
-        Speichert den Wert in QSettings und aktualisiert sofort die Map.
-        """
-        # 1) Settings-Objekt
-        s = QSettings("VGSync", "VGSync")  # oder deine Domain/App
+        s = QSettings("VGSync", "VGSync")
+
+        # Wieder das „gelb vs. Rest“ Muster
+        default_val = 6 if color_str == "yellow" else 4
+        current_val = s.value(f"mapSize/{color_str}", default_val, type=int)
     
-        # 2) Aktuellen Wert aus QSettings laden (default z.B. 6)
-        default_val = s.value(f"mapSize/{color_str}", 6, type=int)
-    
-        # 3) QInputDialog => int
         new_val, ok = QInputDialog.getInt(
             self,
             f"Set Map Size for {color_str}",
-            f"Current size = {default_val}. Enter new size (1..20):",
-            default_val,
-            1, 20
+            f"Current size = {current_val}. Enter new size (1..20):",
+            current_val, 1, 20
         )
         if not ok:
-            return  # abgebrochen
+            return
 
-        # 4) Speichern in QSettings
+        # Neues abspeichern:
         s.setValue(f"mapSize/{color_str}", new_val)
-
-        # 5) Map aktualisieren
+        s.sync()
+        # Und direkt in map_page.html anwenden:
         self._update_map_points_of_color(color_str, new_val)
 
         QMessageBox.information(self, "Map Size Updated",
             f"{color_str.capitalize()} points changed to size={new_val}.")
+
+    
             
     
     def _update_map_points_of_color(self, color_str: str, new_size: int):
@@ -2674,7 +2677,7 @@ class MainWindow(QMainWindow):
 
         route_geojson = self._build_route_geojson_from_gpx(gpx_data)
         self.map_widget.loadRoute(route_geojson, do_fit=True)
-
+        self._apply_map_sizes_from_settings()
         self._update_gpx_overview()
         self.check_gpx_errors(gpx_data)
 

@@ -123,12 +123,35 @@ def build_windows():
     ffmpeg_bin_dir = os.path.join(target_dir, "ffmpeg", "bin")
     src_ffmpeg_bin = os.path.join(LOCAL_FFMPEG, "bin")  # ggf. anpassen
     copy_tree_all(src_ffmpeg_bin, ffmpeg_bin_dir)
+    
+    src_ffmpeg_doc = os.path.join(LOCAL_FFMPEG, "doc")
+    dst_ffmpeg_doc = os.path.join(target_dir, "ffmpeg", "doc")
+    copy_tree_all(src_ffmpeg_doc, dst_ffmpeg_doc)
+    
+    ffmpeg_files_to_copy = ["LICENSE.txt", "LGPL_Compiler.txt"]
+    for fname in ffmpeg_files_to_copy:
+        src_file = os.path.join(LOCAL_FFMPEG, fname)
+        if os.path.isfile(src_file):
+            shutil.copy2(src_file, os.path.join(target_dir, "ffmpeg", fname))
+            print("[COPY]", src_file, "->", os.path.join(target_dir, "ffmpeg", fname))
+        else:
+            print("[WARN] ffmpeg-Datei fehlt:", src_file)
+    
 
     # --- mpv kopieren ---
     # Beispiel: mpv/lib in VGSync_<APP_VERSION>\mpv\lib
     mpv_lib_dir = os.path.join(target_dir, "mpv", "lib")
     src_mpv_lib = os.path.join(LOCAL_MPV, "lib")  # ggf. anpassen
     copy_tree_all(src_mpv_lib, mpv_lib_dir)
+    
+    mpv_files_to_copy = ["LICENSE.txt", "LGPL_Compiler.txt"]
+    for fname in mpv_files_to_copy:
+        src_file = os.path.join(LOCAL_MPV, fname)
+        if os.path.isfile(src_file):
+            shutil.copy2(src_file, os.path.join(target_dir, "mpv", fname))
+            print("[COPY]", src_file, "->", os.path.join(target_dir, "mpv", fname))
+        else:
+            print("[WARN] mpv-Datei fehlt:", src_file)
 
     # Extra-Dateien kopieren
     for f in EXTRA_FILES:

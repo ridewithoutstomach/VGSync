@@ -188,12 +188,18 @@ def main():
         # (A) Falls konfiguriert -> Fingerprint-Check
         if config.FINGERPRINT_CHECK_ENABLED:
             local_fp = fingerprint_collect.get_fingerprint_universal()
-            if local_fp != config.HARDCODED_FINGERPRINT:
+            print(f"[DEBUG b) System-Fingerprint (startup): {local_fp}")
+            if local_fp == config.HARDCODED_FINGERPRINT:
+                print("[DEBUG c) => MATCH: The system fingerprint equals the license fingerprint!")
+            else:
+                print(f"[DEBUG c) => MISMATCH! system={local_fp} vs license={config.HARDCODED_FINGERPRINT}")
                 QMessageBox.warning(None, "Demo Mode",
                     "Warning: You are running in DEMO mode, because the license\n"
                     "does not match this PC! The 'Save Buttons' function will be disabled."
                 )
                 config.DEMO_MODE = True
+            
+            
                 
 
     else:
@@ -206,6 +212,7 @@ def main():
 
     # 3) SERVER-Versions-Check
     ok, msg, expiry_str = check_version_on_server()
+    print(f"[DEBUG d) Server-Version-Check => localVersion={config.LOCAL_VERSION}, ok={ok}, msg={msg}, expiry={expiry_str}")
     if not ok:
         QMessageBox.critical(None, "Version gesperrt oder abgelaufen", msg)
         sys.exit(1)

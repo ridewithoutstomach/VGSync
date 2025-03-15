@@ -105,6 +105,7 @@ def _init_license_data():
         # Normale Vorgehensweise: license.lic laden, aber Demo-Fallback falls nicht möglich.
         try:
             licdata = load_license(LICENSE_FILE)
+            print(f"[DEBUG a) license.lic data => {licdata}")
             HARDCODED_FINGERPRINT = licdata["fingerprint"]
             LOCAL_VERSION         = licdata["version"]
             REGISTERED_NAME       = licdata["registered_name"]

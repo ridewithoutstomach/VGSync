@@ -12,7 +12,8 @@ from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QPushButton, QStyle,
     QVBoxLayout, QLabel, QSizePolicy, QFrame,
     QMenu, QDialog, QRadioButton, QButtonGroup,
-    QDoubleSpinBox, QMessageBox, QFileDialog
+    QDoubleSpinBox, QMessageBox, QFileDialog,
+    QLineEdit
 )
 
 from PySide6.QtCore import Qt, Signal, QPoint
@@ -26,7 +27,9 @@ from core.gpx_parser import recalc_gpx_data
 
 
 
-        
+
+
+
 
 
 
@@ -196,6 +199,9 @@ class GPXControlWidget(QWidget):
         action_get_ele = self.more_menu.addAction("GetElevation from Open-Elevation")
         action_get_ele.triggered.connect(self._on_get_ele_open_elevation)
         
+        action_set_height_b2e = self.more_menu.addAction("setHeight(B2E)")
+        action_set_height_b2e.triggered.connect(self.on_setHeight_B2E_clicked)
+        
         
         # Menü dem Button zuweisen
         self.more_button.clicked.connect(self._on_more_button_clicked)
@@ -261,6 +267,181 @@ class GPXControlWidget(QWidget):
         #self._info_layout.insertStretch(0)  # links
         self._info_layout.addStretch()      # rechts
         
+    
+    
+    def on_setHeight_B2E_clicked(self):
+        mw = self._mainwindow
+        if not mw:
+            return
+
+        gpx_data = mw.gpx_widget.gpx_list._gpx_data
+        if not gpx_data:
+            QMessageBox.warning(self, "No GPX Data", "No GPX data available.")
+            return
+
+        n = len(gpx_data)
+        if n < 2:
+            QMessageBox.warning(self, "Too few points", "At least 2 GPX points are required.")
+            return
+
+        b_idx = mw.gpx_widget.gpx_list._markB_idx
+        e_idx = mw.gpx_widget.gpx_list._markE_idx
+
+        if b_idx is None or e_idx is None:
+            QMessageBox.warning(self, "No Range Selected",
+                            "Please mark a range (markB..markE) first.")
+            return
+
+        # Falls markB > markE => tauschen
+        if b_idx > e_idx:
+            b_idx, e_idx = e_idx, b_idx
+
+        if (e_idx - b_idx) < 1:
+            QMessageBox.warning(self, "Invalid Range",
+                            "The selected range must contain at least 2 points.")
+            return
+
+        # 1) Start/End-Höhen merken
+        start_ele = gpx_data[b_idx].get("ele", 0.0)
+        old_end_ele = gpx_data[e_idx].get("ele", 0.0)  # Original-Endhöhe vor Änderung
+
+        # 2) Dialog: User wählt neue End-Höhe
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"Set Height B..E (Wave-Preserve) – Range {b_idx}..{e_idx}")
+        vbox = QVBoxLayout(dlg)
+
+        lbl_info = QLabel(
+            f"You have selected a range from index {b_idx} to {e_idx}.\n"
+            "We will preserve the wave shape in [B..E], but shift the end to your new value.\n"
+            "The start's elevation remains the same, the end's elevation is changed,\n"
+            "and all in-between points keep their relative offsets.\n\n"
+            "All subsequent points (after E) will be shifted by the difference from old_end_ele to new_end_ele."
+        )
+        vbox.addWidget(lbl_info)
+
+        # Start-Höhe (read-only)
+        row_start = QHBoxLayout()
+        lbl_start = QLabel(f"Start Height ({b_idx}):")
+        edit_start = QLineEdit(f"{start_ele:.2f}")
+        edit_start.setReadOnly(True)
+        row_start.addWidget(lbl_start)
+        row_start.addWidget(edit_start)
+        vbox.addLayout(row_start)
+
+        # End-Höhe (editierbar)
+        row_end = QHBoxLayout()
+        lbl_end = QLabel(f"End Height ({e_idx}):")
+        spin_end = QDoubleSpinBox()
+        spin_end.setRange(-9999.0, 99999.0)  # je nach Bedarf anpassen
+        spin_end.setDecimals(2)
+        spin_end.setSingleStep(0.1)
+        spin_end.setValue(old_end_ele)  # Vorbelegung
+        row_end.addWidget(lbl_end)
+        row_end.addWidget(spin_end)
+        vbox.addLayout(row_end)
+
+        # OK/Cancel
+        h_btn = QHBoxLayout()
+        btn_ok = QPushButton("OK")
+        btn_cancel = QPushButton("Cancel")
+        h_btn.addWidget(btn_ok)
+        h_btn.addWidget(btn_cancel)
+        vbox.addLayout(h_btn)
+    
+        def haversine_m(lat1, lon1, lat2, lon2):
+            import math
+            R = 6371000.0
+            d_lat = math.radians(lat2 - lat1)
+            d_lon = math.radians(lon2 - lon1)
+            a = (math.sin(d_lat / 2.0) ** 2
+                + math.cos(math.radians(lat1))
+                * math.cos(math.radians(lat2))
+                * math.sin(d_lon / 2.0) ** 2)
+            return R * 2.0 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+        def calc_total_2d_distance(idxA, idxB):
+            dist_sum = 0.0
+            for x in range(idxA, idxB):
+                lat1, lon1 = gpx_data[x]["lat"], gpx_data[x]["lon"]
+                lat2, lon2 = gpx_data[x+1]["lat"], gpx_data[x+1]["lon"]
+                dist_sum += haversine_m(lat1, lon1, lat2, lon2)
+            return dist_sum
+    
+        def calc_cumulative_dist(idxA, idxI):
+            # Distance from idxA to idxI
+            return calc_total_2d_distance(idxA, idxI)
+    
+        def on_ok_dialog():
+            new_end_val = spin_end.value()
+            dlg.accept()
+
+            # Undo-Snapshot
+            old_data = copy.deepcopy(gpx_data)
+            mw.gpx_widget.gpx_list._history_stack.append(old_data)
+
+            # (A) Gesamtstrecke 2D in [b_idx.. e_idx]
+            total_2d = calc_total_2d_distance(b_idx, e_idx)
+            if total_2d < 0.001:
+                QMessageBox.warning(
+                    self, "Zero distance",
+                    f"Range {b_idx}..{e_idx} has almost no 2D distance => can't do wave-based approach."
+                )
+                return
+    
+            # (B) Alte "Basislinie" + waveOffsets bestimmen
+            #     Basislinie alt: L(i) = start_ele + frac*(old_end_ele - start_ele)
+            #     waveOffset_i = oldEle_i - L(i)
+            wave_offsets = {}
+            for i in range(b_idx, e_idx + 1):
+                dist_i = calc_cumulative_dist(b_idx, i)
+                frac = dist_i / total_2d
+                old_line_ele_i = start_ele + frac * (old_end_ele - start_ele)
+                actual_ele_i   = gpx_data[i]["ele"]
+                wave_offsets[i] = actual_ele_i - old_line_ele_i
+
+            # (C) Neue Basislinie (start_ele -> new_end_val) + Wave Offset
+            #     newEle_i = (start_ele + frac*(new_end_val - start_ele)) + waveOffset[i]
+            for i in range(b_idx, e_idx + 1):
+                dist_i = calc_cumulative_dist(b_idx, i)
+                frac   = dist_i / total_2d
+                new_line_ele_i = start_ele + frac * (new_end_val - start_ele)
+                gpx_data[i]["ele"] = new_line_ele_i + wave_offsets[i]
+
+            # (D) Konstanter Offset für alle Punkte ab e_idx+1
+            offset = gpx_data[e_idx]["ele"] - old_end_ele
+
+            # -- FIXED: Statt gpx_data[j]["ele"] + offset => old_data[j]["ele"] + offset 
+            for j in range(e_idx + 1, len(gpx_data)):
+                old_ele_j = old_data[j]["ele"]  # der unveränderte Wert vor der Aktion
+                gpx_data[j]["ele"] = old_ele_j + offset
+    
+            # Recalc & Refresh
+            recalc_gpx_data(gpx_data)
+            mw.gpx_widget.set_gpx_data(gpx_data)
+            mw._gpx_data = gpx_data
+            mw._update_gpx_overview()
+
+            # -> Chart
+            mw.chart.set_gpx_data(gpx_data)
+            if mw.mini_chart_widget:
+                mw.mini_chart_widget.set_gpx_data(gpx_data)
+
+            QMessageBox.information(
+                self, "Done",
+                f"Range {b_idx}..{e_idx} wave-preserved.\n"
+                f"Start remains {start_ele:.2f}m, end changed to {gpx_data[e_idx]['ele']:.2f}m.\n\n"
+                f"All subsequent points (>{e_idx}) shifted by +{offset:.2f}m."
+            )
+
+        def on_cancel_dialog():
+            dlg.reject()
+
+        btn_ok.clicked.connect(on_ok_dialog)
+        btn_cancel.clicked.connect(on_cancel_dialog)
+        dlg.exec()
+
+    
+            
     def _on_get_ele_open_elevation(self):
         """
         Ruft Open-Elevation API auf, um für B..E die Höhen neu zu setzen.
