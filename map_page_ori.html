@@ -182,24 +182,22 @@
      * 0) Globale Variablen & Hilfsfunktionen
      ***********************************************************/
 	let colorSizeMap = {
-		"#000000": 4,   // Schwarz => Standard 4
-		"red": 4,       // Rot => Standard 4
-		"#0000FF": 4,   // Blau => Standard 4   (bisher hast du "blue" oder "#0000FF")
-		"#FFFF00": 6    // Gelb => Standard 6
-		// Falls du wirklich "cyan" = "#0000FF" brauchst, ergänze es hier.
-	};	
+		"black": 4,	
+		"red": 4,
+		"blue": 4,
+		"yellow": 6
+	};
 
 	// Kleine Helferfunktion, um die Größe aus colorSizeMap zu holen:
+	
 	function getSizeForFeature(feature) {
+		// Hier lassen wir uns vom Feature die Farbe geben (z.B. "blue")
 		let c = feature.get("color");
-		if(!c) {
-		c = "#000000"; // Fallback, falls gar keine color gesetzt
-		}
+		if (!c) c = "black";
 		let s = colorSizeMap[c];
-		if(!s) s = 4;  // Ultimativer Fallback
+		if (!s) s = 4; // Fallback
 		return s;
 	} 
-	 
 	 
 	 
     let debugMode = true;
@@ -728,7 +726,14 @@
           let coords= ol.proj.fromLonLat(g.coordinates);
           let idx= p.index;
           let sid= p.stable_id;
-          let color= p.color||"#000000";
+          //let color= p.color||"#000000";
+		  let rawColor = p.color || "black"; // default = "black" statt "#000000"
+			if (rawColor === "#000000") rawColor = "black";
+			else if (rawColor === "#FF0000") rawColor = "red";
+			else if (rawColor === "#0000FF") rawColor = "blue";
+			else if (rawColor === "#FFFF00") rawColor = "yellow";
+			let color = rawColor;
+		  
           let size= p.size||4;
 
           let f= new ol.Feature({
@@ -764,6 +769,11 @@
      ***********************************************************/
     function addOrUpdatePoint(stable_id, lat, lon, color="#000000", size=4){
       showLoading("Updating point...");
+	  if (inColor === "#000000") inColor = "black";
+		else if (inColor === "#FF0000") inColor = "red";
+		else if (inColor === "#0000FF") inColor = "blue";
+		else if (inColor === "#FFFF00") inColor = "yellow";
+	  
       let f= featuresMapSid[stable_id];
       let coord= ol.proj.fromLonLat([lon, lat]);
       if(!f){
@@ -804,40 +814,52 @@
     }
 
     function updateFeatureStyle(feature){
-      let c= feature.get("color")||"#000000";
-	  let s = getSizeForFeature(feature);
-	  
-      let geom= feature.getGeometry();
-      if(geom.getType()==="LineString"){
-        feature.setStyle(new ol.style.Style({
-          stroke: new ol.style.Stroke({color:c, width:2})
-        }));
-      } else {
-        feature.setStyle(new ol.style.Style({
-          image: new ol.style.Circle({
-            radius: s,
-            fill: new ol.style.Fill({ color:c }),
-            stroke: new ol.style.Stroke({ color:"#fff", width:1 })
-          })
-        }));
-      }
-    }
+	// 'color' ist z.B. "blue", "yellow", ...
+	let c = feature.get("color") || "black";
+
+	// Hier definieren wir, wie wir Name => Hex abbilden:
+	let hex = "#000000";
+	if      (c === "black")   hex = "#000000";
+	else if (c === "red")     hex = "#FF0000";
+	else if (c === "blue")    hex = "#0000FF";
+	else if (c === "yellow")  hex = "#FFFF00";
+
+	let s = getSizeForFeature(feature); // holt aus colorSizeMap[...] die Größe
+
+	let geom = feature.getGeometry();
+	if (geom.getType() === "LineString") {
+		feature.setStyle(new ol.style.Style({
+		stroke: new ol.style.Stroke({color: hex, width: 2})
+		}));
+	} else {
+		feature.setStyle(new ol.style.Style({
+		image: new ol.style.Circle({
+			radius: s,
+			fill: new ol.style.Fill({ color: hex }),
+			stroke: new ol.style.Stroke({ color: "#fff", width: 1 })
+		})
+		}));
+	}
+	}
+
 
     /***********************************************************
      * 9) FUNKTION: updateAllPointsByColor(col, newSize)
      ***********************************************************/
     function updateAllPointsByColor(col, newSize) {
-	  colorSizeMap[col] = newSize;
-	  
-      const feats= vectorLayer.getSource().getFeatures();
-      feats.forEach(f=>{
-        let currentColor= f.get("color");
-        if(currentColor===col){
-          
-          updateFeatureStyle(f);
-        }
-      });
-    }
+	// z.B. col = "blue"
+	// in colorSizeMap['blue'] = newSize
+	colorSizeMap[col] = newSize;
+
+	const feats = vectorLayer.getSource().getFeatures();
+	feats.forEach(f => {
+		// Falls Feature dieselbe Farbe hat => neu stylen
+		if (f.get("color") === col) {
+		updateFeatureStyle(f);
+		}
+	});
+	}
+
 
     /***********************************************************
      * 10) Mark B..E, show_blue, show_yellow
@@ -891,8 +913,8 @@
       for(let i=start_i; i<=end_i; i++){
         let f= featuresMapIndex[i];
         if(f){
-          f.set("color","#000000");
-          
+          //f.set("color","#000000");
+          f.set("color", "black");
           updateFeatureStyle(f);
         }
       }
@@ -901,16 +923,26 @@
       for(let i=start_i; i<=end_i; i++){
         let f= featuresMapIndex[i];
         if(f){
-          f.set("color","red");
+          //f.set("color","#FF0000");
+		  f.set("color", "red");
           
           updateFeatureStyle(f);
         }
       }
     }
-    function highlightPoint(index, color, dummySize=4, do_center=false){
+    function highlightPoint(index, color, size, do_center=false){
       let f= featuresMapIndex[index];
       if(!f) return;
       f.set("color",color);
+	  
+	  if (typeof size === "number") {
+        f.set("size", size);
+		} else {
+			// Falls None/undefined => unset("size"), 
+			// dann nimmt updateFeatureStyle(...) fallback via colorSizeMap
+			f.unset("size");
+		}
+	  
       
       updateFeatureStyle(f);
       if(do_center){
@@ -922,12 +954,7 @@
         }
       }
     }
-    function show_blue(index, do_center=false){
-      highlightPoint(index, "#0000FF",6, do_center);
-    }
-    function show_yellow(index, do_center=false){
-      highlightPoint(index, "#FFFF00",6, do_center);
-    }
+    
 
     function setVideoPlayState(isPlaying){
       videoIsPlaying= isPlaying;
