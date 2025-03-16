@@ -340,10 +340,10 @@ class MainWindow(QMainWindow):
         action_size_red.triggered.connect(lambda: self._on_set_map_point_size("red"))
         map_setup_menu.addAction(action_size_red)
         
-        # Action 2: Size Cyan Point
-        action_size_cyan = QAction("Size Cyan Point", self)
-        action_size_cyan.triggered.connect(lambda: self._on_set_map_point_size("cyan"))
-        map_setup_menu.addAction(action_size_cyan)
+        # Action 2: Size blue Point
+        action_size_blue = QAction("Size Blue Point", self)
+        action_size_blue.triggered.connect(lambda: self._on_set_map_point_size("blue"))
+        map_setup_menu.addAction(action_size_blue)
         
         
         action_size_yellow = QAction("Size Yellow Point", self)
@@ -1054,74 +1054,89 @@ class MainWindow(QMainWindow):
         self.map_widget.view.page().runJavaScript(js_code)
 
     def _apply_map_sizes_from_settings(self):
-        """Wendet für black, red, cyan, yellow die in QSettings gespeicherten
-        (oder Standard-) Größen an und aktualisiert die Karte.
+        """
+        Liest aus QSettings *nur noch* "black", "red", "blue", "yellow"
+        und setzt fallback=4 für black/red/blue, fallback=6 für yellow.
+        Anschließend wird colorSizeMap[...] in JavaScript aktualisiert.
         """
         s = QSettings("VGSync", "VGSync")
-        
-        for color_str in ["black", "red", "cyan", "yellow"]:
-            # Wenn nichts in QSettings gespeichert ist, nimm:
-            #   6 bei 'yellow'
-            #   4 bei allen anderen
-            default_val = 6 if color_str == "yellow" else 4
-            
-            size_val = s.value(f"mapSize/{color_str}", default_val, type=int)
-            self._update_map_points_of_color(color_str, size_val)
-    
-        print("[DEBUG] _apply_map_sizes_from_settings() abgeschlossen.")
-        
+
+        defaults = {
+            "black": 4,
+            "red": 4,
+            "blue": 4,
+            "yellow": 6
+        }
+
+        for color_name, default_size in defaults.items():
+            size_val = s.value(f"mapSize/{color_name}", default_size, type=int)
+            # An JS: colorSizeMap['black']=4 etc.
+            js_code = f"colorSizeMap['{color_name}'] = {size_val};"
+            self.map_widget.view.page().runJavaScript(js_code)
+
+        print("[DEBUG] colorSizeMap updated in JS with QSettings (color names).")
+
         
     def _on_set_map_point_size(self, color_str: str):
+        """
+        Bekommt z.B. 'black', 'red', 'blue', 'yellow' rein.
+        Fragt neuen Wert ab und speichert in QSettings => "mapSize/black" etc.
+        Übergibt dann an JS => updateAllPointsByColor('black', new_val).
+        """
         s = QSettings("VGSync", "VGSync")
 
-        # Wieder das „gelb vs. Rest“ Muster
-        default_val = 6 if color_str == "yellow" else 4
-        current_val = s.value(f"mapSize/{color_str}", default_val, type=int)
-    
+        default_size = 6 if color_str == "yellow" else 4
+        current_val = s.value(f"mapSize/{color_str}", default_size, type=int)
+
         new_val, ok = QInputDialog.getInt(
             self,
             f"Set Map Size for {color_str}",
             f"Current size = {current_val}. Enter new size (1..20):",
-            current_val, 1, 20
+            current_val,
+            1, 20
         )
         if not ok:
-            return
+            return  # User hat abgebrochen
 
-        # Neues abspeichern:
+        # In QSettings speichern
         s.setValue(f"mapSize/{color_str}", new_val)
         s.sync()
-        # Und direkt in map_page.html anwenden:
-        self._update_map_points_of_color(color_str, new_val)
 
-        QMessageBox.information(self, "Map Size Updated",
-            f"{color_str.capitalize()} points changed to size={new_val}.")
+        # Jetzt JS-Funktion anstoßen: updateAllPointsByColor("black", new_val)
+        self.map_widget.view.page().runJavaScript(
+            f"updateAllPointsByColor('{color_str}', {new_val});"
+        )
+    
+        QMessageBox.information(
+            self,
+            "Map Size Updated",
+            f"{color_str.capitalize()} points changed to size={new_val}."
+        )
+    
+    
+
 
     
             
-    
     def _update_map_points_of_color(self, color_str: str, new_size: int):
         """
-        Ruft in map_page.html => updateAllPointsByColor(js_color, new_size) auf,
-        wobei js_color das exakte String‐Matching zur Feature‐Farbe ermöglicht.
+        Ruft in map_page.html => updateAllPointsByColor(color_str, new_size) auf.
+        'color_str' ist einer der Farbnamen: 'black', 'red', 'blue', 'yellow'.
         """
         if not self.map_widget:
             return
 
-        # Mapping: "yellow" => "#FFFF00" usw.
-        color_map = {
-            "yellow": "#FFFF00",
-            "cyan":   "#0000FF",
-            "black":  "#000000",
-            # Hier analog zu deinem JS: mark_range_in_red(...) setzt "red"
-            "red":    "red"  
-            # oder "#FF0000" – aber dann musst du in JS auch "f.set("color","#FF0000")" machen
-        }
+        # Wenn 'color_str' mal was Unbekanntes ist, fallback auf 'black':
+        valid_colors = {'black', 'red', 'blue', 'yellow'}
+        color_lower = color_str.lower()
+        if color_lower not in valid_colors:
+            color_lower = 'black'
 
-        # Fallback = #000000, falls irgendwas unbekanntes reinkommt
-        js_color = color_map.get(color_str.lower(), "#000000")
-
-        js_code = f"updateAllPointsByColor('{js_color}', {new_size});"
+        # Dann direkt mit dem Farbnamen ins JS
+        js_code = f"updateAllPointsByColor('{color_lower}', {new_size});"
         self.map_widget.view.page().runJavaScript(js_code)
+
+    
     
     
     # views/mainwindow.py (Ausschnitt aus deiner MainWindow-Klasse)

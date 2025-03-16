@@ -181,6 +181,27 @@
     /***********************************************************
      * 0) Globale Variablen & Hilfsfunktionen
      ***********************************************************/
+	let colorSizeMap = {
+		"#000000": 4,   // Schwarz => Standard 4
+		"red": 4,       // Rot => Standard 4
+		"#0000FF": 4,   // Blau => Standard 4   (bisher hast du "blue" oder "#0000FF")
+		"#FFFF00": 6    // Gelb => Standard 6
+		// Falls du wirklich "cyan" = "#0000FF" brauchst, ergänze es hier.
+	};	
+
+	// Kleine Helferfunktion, um die Größe aus colorSizeMap zu holen:
+	function getSizeForFeature(feature) {
+		let c = feature.get("color");
+		if(!c) {
+		c = "#000000"; // Fallback, falls gar keine color gesetzt
+		}
+		let s = colorSizeMap[c];
+		if(!s) s = 4;  // Ultimativer Fallback
+		return s;
+	} 
+	 
+	 
+	 
     let debugMode = true;
     function dbg(msg){ if(debugMode) console.log("[DEBUG] " + msg); }
 
@@ -756,7 +777,7 @@
         featuresMapSid[stable_id]= f;
       } else {
         f.set("color", color);
-        f.set("size", size);
+        
         f.getGeometry().setCoordinates(coord);
       }
       updateFeatureStyle(f);
@@ -784,7 +805,8 @@
 
     function updateFeatureStyle(feature){
       let c= feature.get("color")||"#000000";
-      let s= feature.get("size")||4;
+	  let s = getSizeForFeature(feature);
+	  
       let geom= feature.getGeometry();
       if(geom.getType()==="LineString"){
         feature.setStyle(new ol.style.Style({
@@ -805,11 +827,13 @@
      * 9) FUNKTION: updateAllPointsByColor(col, newSize)
      ***********************************************************/
     function updateAllPointsByColor(col, newSize) {
+	  colorSizeMap[col] = newSize;
+	  
       const feats= vectorLayer.getSource().getFeatures();
       feats.forEach(f=>{
         let currentColor= f.get("color");
         if(currentColor===col){
-          f.set("size", newSize);
+          
           updateFeatureStyle(f);
         }
       });
@@ -868,7 +892,7 @@
         let f= featuresMapIndex[i];
         if(f){
           f.set("color","#000000");
-          f.set("size",4);
+          
           updateFeatureStyle(f);
         }
       }
@@ -878,16 +902,16 @@
         let f= featuresMapIndex[i];
         if(f){
           f.set("color","red");
-          f.set("size",4);
+          
           updateFeatureStyle(f);
         }
       }
     }
-    function highlightPoint(index, color, size, do_center=false){
+    function highlightPoint(index, color, dummySize=4, do_center=false){
       let f= featuresMapIndex[index];
       if(!f) return;
       f.set("color",color);
-      f.set("size",size);
+      
       updateFeatureStyle(f);
       if(do_center){
         let c= f.getGeometry().getCoordinates();

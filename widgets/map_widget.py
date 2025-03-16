@@ -6,6 +6,8 @@ from PySide6.QtCore import QUrl, Signal, Slot
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEngineSettings
 from PySide6.QtWebChannel import QWebChannel
+from PySide6.QtCore import QSettings
+
 
 from .map_bridge import MapBridge
 
@@ -164,7 +166,9 @@ class MapWidget(QWidget):
         if playing:
             # alten blauen Marker entfernen
             if self._blue_idx is not None:
-                self._color_point(self._blue_idx, "#000000", size=4)
+                
+                
+                self._color_point(self._blue_idx, "#000000")
                 self._blue_idx = None
         else:
             # Bei Pause belassen wir ggf. den gelben Marker
@@ -189,68 +193,82 @@ class MapWidget(QWidget):
     # ----------------------------------------------------------
     # Hilfsfunktion: JS highlightPoint(...)
     # ----------------------------------------------------------
-    def _color_point(self, index: int, color: str, size: int=4, do_center: bool=False):
+    def _color_point(self, index: int, color: str, size: int=None, do_center: bool=False):
         """
-        Intern: Ruft highlightPoint(index, color, size, do_center) in JS auf.
+        Ruft in map_page.html => highlightPoint(index, color, size, do_center) auf.
+        'color' ist jetzt nur noch 'black', 'red', 'blue', 'yellow'.
+        Falls size=None, soll JS den Wert aus colorSizeMap[...] selbst holen.
         """
+        if size is None:
+            size_str = "null"
+        else:
+            size_str = str(size)
+    
+        do_center_str = "true" if do_center else "false"
+    
         js_code = (
-            f"highlightPoint({index}, '{color}', {size}, {str(do_center).lower()});"
+            f"highlightPoint({index}, '{color}', {size_str}, {do_center_str});"
         )
         self.view.page().runJavaScript(js_code)
+
 
     # ----------------------------------------------------------
     # show_blue / show_yellow
     # ----------------------------------------------------------
     def show_blue(self, index: int, do_center: bool=False):
         """
-        Marker blau bei Pause-Klick.
+        Marker in 'blue', wenn das Video pausiert.
+        Macht vorher den alten blue_idx rückgängig => 'black' oder 'red' (je nach B/E).
+        Entfernt auch ggf. den yellow_idx, falls wir umschalten.
         """
         if index < 0 or index >= self._num_points:
             return
-
-        # Alten blauen Marker revert
+    
+        # alten blauen Marker revertieren
         if self._blue_idx is not None and self._blue_idx != index:
             old_b = self._blue_idx
             color_old = self.get_default_color_for_index(old_b)
-            self._color_point(old_b, color_old, size=4, do_center=False)
+            self._color_point(old_b, color_old, None, False)
             self._blue_idx = None
 
-        # Gelben Marker (wenn existiert) revert
+        # alten gelben Marker revertieren
         if self._yellow_idx is not None:
             old_y = self._yellow_idx
             color_old_y = self.get_default_color_for_index(old_y)
-            self._color_point(old_y, color_old_y, size=4, do_center=False)
+            self._color_point(old_y, color_old_y, None, False)
             self._yellow_idx = None
 
-        # Jetzt den neuen Index blau
+        # jetzt den neuen Index blau
         self._blue_idx = index
-        self._color_point(index, "#0000FF", size=6, do_center=do_center)
+        self._color_point(index, "blue", None, do_center)
 
     def show_yellow(self, index: int, do_center: bool=False):
         """
-        Marker gelb beim Video-Playback.
+        Marker in 'yellow' während des Video-Playbacks.
         """
         if index == self._yellow_idx:
             return
         if index < 0 or index >= self._num_points:
             return
 
-        # alten gelben Marker revert
+        # alten gelben Marker revertieren
         if self._yellow_idx is not None:
             old_y = self._yellow_idx
             color_old = self.get_default_color_for_index(old_y)
-            self._color_point(old_y, color_old, size=4, do_center=False)
+            self._color_point(old_y, color_old, None, False)
             self._yellow_idx = None
 
-        # Falls dieser Index blau war => revert
+        # falls wir dasselbe Index in blau hatten => revertieren
         if self._blue_idx == index:
             color_old_b = self.get_default_color_for_index(index)
-            self._color_point(index, color_old_b, size=4, do_center=False)
+            self._color_point(index, color_old_b, None, False)
             self._blue_idx = None
 
-        # Neuer Index => gelb
+        # Neuer Index => 'yellow'
         self._yellow_idx = index
-        self._color_point(index, "#FFFF00", size=6, do_center=do_center)
+        self._color_point(index, "yellow", None, do_center)
+
+    
 
     # ----------------------------------------------------------
     # Farblogik (rot bei MarkB..MarkE, sonst schwarz)
@@ -269,22 +287,44 @@ class MapWidget(QWidget):
 
     def get_default_color_for_index(self, i: int) -> str:
         """
-        - '#FF0000' (rot) in B..E
-        - '#000000' sonst
+        Gibt für den Index i die "normale" Farbe zurück:
+        - 'red', wenn i in [markB_idx .. markE_idx]
+        - sonst 'black'
         """
-        if i < 0 or i >= self._num_points:
-            return "#000000"
-
         if self._markB_idx is not None and self._markE_idx is not None:
             b = min(self._markB_idx, self._markE_idx)
             e = max(self._markB_idx, self._markE_idx)
             if b <= i <= e:
-                return "#FF0000"
+                return "red"
         elif self._markB_idx is not None:
             if i == self._markB_idx:
-                return "#FF0000"
+                return "red"
         elif self._markE_idx is not None:
             if i == self._markE_idx:
-                return "#FF0000"
+                return "red"
 
-        return "#000000"
+        return "black"
+        
+        
+
+    def get_default_size_for_color(self, color: str) -> int:
+        s = QSettings("VGSync", "VGSync")
+
+        c = color.lower()
+        if c in ("#ff0000"):
+            color_key = "#FF0000"  # wir speichern dann in QSettings => mapSize/#FF0000
+        elif c in ("#0000ff"):
+            color_key = "#0000FF"
+        elif c in ("#ffff00"):
+            color_key = "#FFFF00"
+        else:
+            color_key = "#000000"
+
+        # Standardwert 6 bei gelb, sonst 4
+        if color_key == "#FFFF00":
+            default_val = 6
+        else:
+            default_val = 4
+
+        val = s.value(f"mapSize/{color_key}", default_val, type=int)
+        return val
