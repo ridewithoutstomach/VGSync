@@ -5,7 +5,6 @@ import copy
 import math
 import urllib.request
 import urllib.error
-import copy
 import json
 
 from PySide6.QtWidgets import (
@@ -1446,7 +1445,7 @@ class GPXControlWidget(QWidget):
             old_ele = gpx_data[row].get("ele", 0.0)
     
             # Undo
-            import copy
+            
             old_data = copy.deepcopy(gpx_data)
             mw.gpx_widget.gpx_list._history_stack.append(old_data)
     
@@ -1563,6 +1562,7 @@ class GPXControlWidget(QWidget):
                 return
     
             # 1) Undo snapshot
+            
             old_data = copy.deepcopy(gpx_data)
             mw.gpx_widget.gpx_list._history_stack.append(old_data)
     
