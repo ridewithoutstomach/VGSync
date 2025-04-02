@@ -1,6 +1,6 @@
 <!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
 <html>
-<!-- Created by , GNU Texinfo 7.1 -->
+<!-- Created by , GNU Texinfo 7.1.1 -->
   <head>
     <meta charset="utf-8">
     <title>
@@ -4720,14 +4720,13 @@ default, a single hls variant containing all the encoded streams is created.
 
 </li><li>Create a single variant stream. Add the <code class="code">#EXT-X-MEDIA</code> tag with
 <code class="code">TYPE=SUBTITLES</code> in the master playlist with webvtt subtitle group name
-&rsquo;subtitle&rsquo; and optional subtitle name, e.g. &rsquo;English&rsquo;. Make sure the input
-file has one text subtitle stream at least.
+&rsquo;subtitle&rsquo;. Make sure the input file has one text subtitle stream at least.
 <div class="example">
 <pre class="example-preformatted">ffmpeg -y -i input_with_subtitle.mkv \
  -b:v:0 5250k -c:v h264 -pix_fmt yuv420p -profile:v main -level 4.1 \
  -b:a:0 256k \
  -c:s webvtt -c:a mp2 -ar 48000 -ac 2 -map 0:v -map 0:a:0 -map 0:s:0 \
- -f hls -var_stream_map &quot;v:0,a:0,s:0,sgroup:subtitle,sname:English&quot; \
+ -f hls -var_stream_map &quot;v:0,a:0,s:0,sgroup:subtitle&quot; \
  -master_pl_name master.m3u8 -t 300 -hls_time 10 -hls_init_time 4 -hls_list_size \
  10 -master_pl_publish_rate 10 -hls_flags \
  delete_segments+discont_start+split_by_time ./tmp/video.m3u8

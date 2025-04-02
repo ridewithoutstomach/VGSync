@@ -1,3 +1,23 @@
+# -*- coding: utf-8 -*-
+#
+# This file is part of VGSync.
+#
+# Copyright (C) 2025 by Bernd Eller
+#
+# VGSync is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# VGSync is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+# See the GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with VGSync. If not, see <https://www.gnu.org/licenses/>.
+#
+
 # views/mainwindow.py
 import os
 import sys
@@ -62,7 +82,6 @@ from core.gpx_parser import parse_gpx  # Hier hinzufügen!
 from .dialogs import _IndexingDialog, _SafeExportDialog, DetachDialog
 from widgets.mini_chart_widget import MiniChartWidget
 from config import is_edit_video_enabled, set_edit_video_enabled
-from config import LOCAL_VERSION, REGISTERED_NAME, REGISTERED_EMAIL
 from core.gpx_parser import parse_gpx, ensure_gpx_stable_ids  # <--- Achte auf diesen Import!
 from core.gpx_parser import recalc_gpx_data
 from tools.merge_keyframes_incremental import merge_keyframes_incremental
@@ -190,12 +209,8 @@ class MainWindow(QMainWindow):
         self.user_wants_editing = user_wants_editing
         
         
-        if config.DEMO_MODE:
-            # Demo
-            
-            self.setWindowTitle(f"VGSync v{APP_VERSION} - the simple Video and GPX-Sync Tool -----  DEMO ----- DEMO ----")
-        else:
-            self.setWindowTitle(f"VGSync v{APP_VERSION} - the simple Video and GPX-Sync Tool")
+        
+        self.setWindowTitle(f"VGSync v{APP_VERSION} - the simple Video and GPX-Sync Tool")
             
         
             
@@ -397,11 +412,10 @@ class MainWindow(QMainWindow):
         copyright_action = info_menu.addAction("Copyright + License")
         copyright_action.triggered.connect(self._show_copyright_dialog)
         
-        dependencies_action = info_menu.addAction("Third-Party Libraries")
-        dependencies_action.triggered.connect(self._show_dependencies_dialog)
+        #dependencies_action = info_menu.addAction("Third-Party Libraries")
+        #dependencies_action.triggered.connect(self._show_dependencies_dialog)
         
-        fingerprint_action = info_menu.addAction("Get Fingerprint")
-        fingerprint_action.triggered.connect(self._on_get_fingerprint)
+        
         
         
         help_menu = menubar.addMenu("Help")
@@ -575,9 +589,8 @@ class MainWindow(QMainWindow):
         
         
         
-        if not config.DEMO_MODE:
-            # DEMO New
-            self.gpx_control.saveClicked.connect(self.gpx_control.on_save_gpx_clicked)
+        
+        self.gpx_control.saveClicked.connect(self.gpx_control.on_save_gpx_clicked)
             
         
         
@@ -654,8 +667,8 @@ class MainWindow(QMainWindow):
         
        
             
-        if not config.DEMO_MODE:    
-            self.video_control.safeClicked.connect(self.on_safe_clicked)
+        
+        self.video_control.safeClicked.connect(self.on_safe_clicked)
 
        
 
@@ -1009,11 +1022,10 @@ class MainWindow(QMainWindow):
         # Im ChartWidget setzen
         self.chart.set_stop_threshold(new_val)    
         
-        
+    """    
     def _show_dependencies_dialog(self):
-        """
-        Zeigt einen Dialog mit den verwendeten Fremdbibliotheken und Lizenzen.
-        """
+       
+       
         msg = QMessageBox(self)
         msg.setWindowTitle("Third-Party Libraries")
         msg.setTextFormat(Qt.RichText)
@@ -1036,7 +1048,7 @@ class MainWindow(QMainWindow):
     
         msg.setStandardButtons(QMessageBox.Ok)
         msg.exec()    
-        
+    """    
     def _on_map_page_loaded(self, ok: bool):
         """
         Wird aufgerufen, sobald deine map.html im QWebEngineView fertig geladen ist.
@@ -1144,68 +1156,9 @@ class MainWindow(QMainWindow):
    
     
 
-    def _on_get_fingerprint(self):
-        """
-        Zeigt den Fingerprint in einer MessageBox an, mit anklickbarem Link.
-        Wir leiten das linkActivated-Signal selbst auf QDesktopServices.openUrl(...)
-        """
-
-        # 1) Fingerprint erzeugen
-        fp = _get_fingerprint_universal()
     
-        # 2) In Datei speichern
-        filename = "VGSync_Fingerprint.txt"
-        try:
-            with open(filename, "w", encoding="utf-8") as f:
-                f.write(fp + "\n")
-        except Exception as e:
-            QMessageBox.critical(
-                self,
-                "Error",
-                f"Error writing file: '{filename}':\n{e}"
-            )
-            return
     
-        # 3) MessageBox als Objekt erstellen
-        msg_box = QMessageBox(self)
-        msg_box.setIcon(QMessageBox.Information)
-        msg_box.setWindowTitle("Fingerprint Created")
     
-        # Wichtig: RichText + Link-Verhalten
-        msg_box.setTextFormat(Qt.RichText)
-        #msg_box.setOpenExternalLinks(False)  # wir fangen linkActivated selbst ab
-        msg_box.setTextInteractionFlags(Qt.TextBrowserInteraction | Qt.LinksAccessibleByMouse)
-    
-        # 4) HTML-Text
-        msg_html = (
-            f"<p>Fingerprint was created successfully.<br>"
-            f"<b>Fingerprint:</b> {fp}</p>"
-            f"<p>The file '{filename}' was saved in the current directory. "
-            "Please send this file to the software provider if necessary.</p>"
-    
-            "<p><b>NOTE:</b> By sending the fingerprint to us, you explicitly accept our "
-            "<a href='http://vgsync.casa-eller.de/vgsync_eula.pdf'>EULA</a> "
-            "(opens in your default browser).</p>"
-            )
-        msg_box.setText(msg_html)
-    
-        # 5) Standardbuttons
-        msg_box.setStandardButtons(QMessageBox.Ok)
-    
-        # 6) Link-Aktivierung => QDesktopServices
-        #    In einer QMessageBox ist der Text in einem untergeordneten QLabel namens "qt_msgbox_label"
-        label = msg_box.findChild(QLabel, "qt_msgbox_label")
-        if label is not None:
-            label.linkActivated.connect(self._on_fingerprint_link_clicked)
-    
-        # 7) Anzeigen
-        msg_box.exec()
-    
-    def _on_fingerprint_link_clicked(self, url: str):
-        """
-        Öffnet den Link (EULA.pdf) im Standardbrowser.
-        """
-        QDesktopServices.openUrl(QUrl(url))
     
     
      
@@ -2450,24 +2403,41 @@ class MainWindow(QMainWindow):
         msg.setText(
             "<h3>VGSync - Video and GPX Sync Tool</h3>"
             f"Version: {APP_VERSION}<br><br>"
-            "©2025 by Bernd Eller<br>All rights reserved.<br><br>"
-            "This software is for private use only. Commercial use is strictly prohibited.<br><br>"
-        
-            "<h3>End User License Agreement (EULA)</h3>"
-            "By using this software, you agree to our <a href='http://vgsync.casa-eller.de/vgsync_eula.pdf'>End User License Agreement</a>.<br><br>"
-        
-            "<h3>Third-Party Libraries</h3>"
-            "This application uses open-source software:<br>"
-            "<b>1. FFmpeg</b> - <a href='https://ffmpeg.org'>ffmpeg.org</a> (LGPL v2.1 or later)<br>"
-            "<b>2. mpv</b> - <a href='https://mpv.io'>mpv.io</a> (LGPL v2.1 or later)<br><br>"
-        
-            "The full license texts can be found in the <code>LICENSES</code> inside the mpv and ffmpeg directories.<br><br>"
             
-            "<b>By clicking 'I Accept', you acknowledge that you have read and understood the terms.</b><br><br>"
-            f"V: {vcount}  G: {gcount}</b>"
-        )
-
-        #msg.setText("  VGSync V1.0  \t\n\n\n©2025 by Bernd Eller.\n    All rights reserved.    ")
+            "Copyright (C) 2025 Bernd Eller<br>"
+            "This program is free software: you can redistribute it and/or modify "
+            "it under the terms of the GNU General Public License as published by "
+            "the Free Software Foundation, either version 3 of the License, or "
+            "(at your option) any later version.<br><br>"
+        
+            "This program is distributed in the hope that it will be useful, "
+            "but WITHOUT ANY WARRANTY; without even the implied warranty of "
+            "MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. "
+            "See the GNU General Public License for more details.<br><br>"
+            
+            "You should have received a copy of the GNU General Public License "
+            "along with this program. If not, see "
+            "<a href='https://www.gnu.org/licenses/'>https://www.gnu.org/licenses/</a>.<br><br>"
+            
+            "<h3>Third-Party Libraries & Patent Notice</h3>"
+            "This application includes and distributes open-source libraries:<br>"
+            "<b>1. FFmpeg</b> - <a href='https://ffmpeg.org'>ffmpeg.org</a> (GPL build)<br>"
+            "<b>2. mpv</b> - <a href='https://mpv.io'>mpv.io</a> (GPL build)<br><br>"
+             "Full license texts for these libraries are located in the <br>"
+             "<code>_internal/ffmpeg</code> and <code>_internal/mpv</code> folders.<br>"            
+            "The complete source code for these libraries as used in this software "
+            "is available at "
+            "<a href='http://vgsync.casa-eller.de'>http://vgsync.casa-eller.de</a>.<br><br>"
+            
+            "<b>Patent Encumbrance Notice:</b><br>"
+            "Some codecs (such as x265) may be patent-encumbered in certain jurisdictions. "
+            "It is the user's responsibility to ensure compliance with all applicable "
+            "laws and regulations, and to obtain any necessary patent licenses.<br><br>"
+            
+            "<b>By clicking 'I Accept', you acknowledge that you have read and "
+            "understood the GNU General Public License terms.</b><br><br>"
+            f"V: {vcount}  G: {gcount}"
+)
         msg.exec()
     
    

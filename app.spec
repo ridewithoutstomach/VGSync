@@ -4,7 +4,7 @@
 a = Analysis(
     ['app.py'],
     pathex=[],
-    binaries=[('C:\\Users\\berel\\Documents\\GPX_Syncer\\V3.0\\v3.243_aufgeräumt\\ffmpeg\\bin\\*.*', '.'), ('C:\\Users\\berel\\Documents\\GPX_Syncer\\V3.0\\v3.243_aufgeräumt\\mpv\\lib\\*.*', '.')],
+    binaries=[],
     datas=[],
     hiddenimports=[],
     hookspath=[],
@@ -32,7 +32,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['icon_icon.ico'],
+    icon=['C:\\Users\\berel\\Documents\\GPX_Syncer\\V3.0\\v3.26_GPL_GIT\\icon_icon.ico'],
 )
 coll = COLLECT(
     exe,

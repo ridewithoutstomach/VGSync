@@ -1,6 +1,6 @@
 <!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
 <html>
-<!-- Created by , GNU Texinfo 7.1 -->
+<!-- Created by , GNU Texinfo 7.1.1 -->
   <head>
     <meta charset="utf-8">
     <title>
@@ -573,21 +573,9 @@ format with <code class="command">ffmpeg</code>, you can use the command:
 <a name="h264_005fredundant_005fpps"></a>
 <h3 class="section">2.14 h264_redundant_pps<span class="pull-right"><a class="anchor hidden-xs" href="#h264_005fredundant_005fpps" aria-hidden="true">#</a> <a class="anchor hidden-xs"href="#toc-h264_005fredundant_005fpps" aria-hidden="true">TOC</a></span></h3>
 
-<p>This applies a specific fixup to some Blu-ray BDMV H264 streams
-which contain redundant PPSs. The PPSs modify irrelevant parameters
-of the stream, confusing other transformations which require
-the correct extradata.
-</p>
-<p>The encoder used on these impacted streams adds extra PPSs throughout
-the stream, varying the initial QP and whether weighted prediction
-was enabled. This causes issues after copying the stream into
-a global header container, as the starting PPS is not suitable
-for the rest of the stream. One side effect, for example,
-is seeking will return garbled output until a new PPS appears.
-</p>
-<p>This BSF removes the extra PPSs and rewrites the slice headers
-such that the stream uses a single leading PPS in the global header,
-which resolves the issue.
+<p>This applies a specific fixup to some Blu-ray streams which contain
+redundant PPSs modifying irrelevant parameters of the stream which
+confuse other transformations which require correct extradata.
 </p>
 <a name="hevc_005fmetadata"></a>
 <h3 class="section">2.15 hevc_metadata<span class="pull-right"><a class="anchor hidden-xs" href="#hevc_005fmetadata" aria-hidden="true">#</a> <a class="anchor hidden-xs"href="#toc-hevc_005fmetadata" aria-hidden="true">TOC</a></span></h3>

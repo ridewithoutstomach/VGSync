@@ -1,6 +1,6 @@
 <!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
 <html>
-<!-- Created by , GNU Texinfo 7.1 -->
+<!-- Created by , GNU Texinfo 7.1.1 -->
   <head>
     <meta charset="utf-8">
     <title>
@@ -35,9 +35,8 @@
     </ul></li>
     <li><a id="toc-Code-formatting-conventions" href="#Code-formatting-conventions">2.2 Code formatting conventions</a>
     <ul class="toc-numbered-mark">
-      <li><a id="toc-Examples" href="#Examples">2.2.1 Examples</a></li>
-      <li><a id="toc-Vim-configuration" href="#Vim-configuration">2.2.2 Vim configuration</a></li>
-      <li><a id="toc-Emacs-configuration" href="#Emacs-configuration">2.2.3 Emacs configuration</a></li>
+      <li><a id="toc-Vim-configuration" href="#Vim-configuration">2.2.1 Vim configuration</a></li>
+      <li><a id="toc-Emacs-configuration" href="#Emacs-configuration">2.2.2 Emacs configuration</a></li>
     </ul></li>
     <li><a id="toc-Comments" href="#Comments">2.3 Comments</a></li>
     <li><a id="toc-Naming-conventions-1" href="#Naming-conventions-1">2.4 Naming conventions</a></li>
@@ -176,7 +175,7 @@ typically applies to code that needs to be inlined.
 <a name="Code-formatting-conventions"></a>
 <h3 class="section">2.2 Code formatting conventions<span class="pull-right"><a class="anchor hidden-xs" href="#Code-formatting-conventions" aria-hidden="true">#</a> <a class="anchor hidden-xs"href="#toc-Code-formatting-conventions" aria-hidden="true">TOC</a></span></h3>
 
-<p>There are the following guidelines regarding the code style in files:
+<p>There are the following guidelines regarding the indentation in files:
 </p>
 <ul class="itemize mark-bullet">
 <li>Indent size is 4.
@@ -192,102 +191,8 @@ and only if this improves readability.
 </li></ul>
 <p>The presentation is one inspired by &rsquo;indent -i4 -kr -nut&rsquo;.
 </p>
-<a name="Examples"></a>
-<h4 class="subsection">2.2.1 Examples<span class="pull-right"><a class="anchor hidden-xs" href="#Examples" aria-hidden="true">#</a> <a class="anchor hidden-xs"href="#toc-Examples" aria-hidden="true">TOC</a></span></h4>
-<p>Some notable examples to illustrate common code style in FFmpeg:
-</p>
-<ul class="itemize mark-bullet">
-<li>Space around assignments and after
-<code class="code">if</code>/<code class="code">do</code>/<code class="code">while</code>/<code class="code">for</code> keywords:
-
-<div class="example user-c user-good">
-<pre class="example-preformatted">// Good
-if (condition)
-    av_foo();
-</pre></div>
-
-<div class="example user-c user-good">
-<pre class="example-preformatted">// Good
-for (size_t i = 0; i &lt; len; i++)
-    av_bar(i);
-</pre></div>
-
-<div class="example user-c user-good">
-<pre class="example-preformatted">// Good
-size_t size = 0;
-</pre></div>
-
-<p>However no spaces between the parentheses and condition, unless it helps
-readability of complex conditions, so the following should not be done:
-</p>
-<div class="example user-c user-bad">
-<pre class="example-preformatted">// Bad style
-if ( condition )
-    av_foo();
-</pre></div>
-
-</li><li>No unnecessary parentheses, unless it helps readability:
-
-<div class="example user-c user-good">
-<pre class="example-preformatted">// Good
-int fields = ilace ? 2 : 1;
-</pre></div>
-
-</li><li>No braces around single-line blocks:
-
-<div class="example user-c user-good">
-<pre class="example-preformatted">// Good
-if (bits_pixel == 24)
-    avctx-&gt;pix_fmt = AV_PIX_FMT_BGR24;
-else if (bits_pixel == 8)
-    avctx-&gt;pix_fmt = AV_PIX_FMT_GRAY8;
-else {
-    av_log(avctx, AV_LOG_ERROR, &quot;Invalid pixel format.\n&quot;);
-    return AVERROR_INVALIDDATA;
-}
-</pre></div>
-
-</li><li>Avoid assignments in conditions where it makes sense:
-
-<div class="example user-c user-good">
-<pre class="example-preformatted">// Good
-video_enc-&gt;chroma_intra_matrix = av_mallocz(sizeof(*video_enc-&gt;chroma_intra_matrix) * 64)
-if (!video_enc-&gt;chroma_intra_matrix)
-    return AVERROR(ENOMEM);
-</pre></div>
-
-<div class="example user-c user-bad">
-<pre class="example-preformatted">// Bad style
-if (!(video_enc-&gt;chroma_intra_matrix = av_mallocz(sizeof(*video_enc-&gt;chroma_intra_matrix) * 64)))
-    return AVERROR(ENOMEM);
-</pre></div>
-
-<div class="example user-c user-good">
-<pre class="example-preformatted">// Ok
-while ((entry = av_dict_iterate(options, entry)))
-    av_log(ctx, AV_LOG_INFO, &quot;Item '%s': '%s'\n&quot;, entry-&gt;key, entry-&gt;value);
-</pre></div>
-
-</li><li>When declaring a pointer variable, the <code class="code">*</code> goes with the variable not the type:
-
-<div class="example user-c user-good">
-<pre class="example-preformatted">// Good
-AVStream *stream;
-</pre></div>
-
-<div class="example user-c user-bad">
-<pre class="example-preformatted">// Bad style
-AVStream* stream;
-</pre></div>
-
-</li></ul>
-
-<p>If you work on a file that does not follow these guidelines consistently,
-change the parts that you are editing to follow these guidelines but do
-not make unrelated changes in the file to make it conform to these.
-</p>
 <a name="Vim-configuration"></a>
-<h4 class="subsection">2.2.2 Vim configuration<span class="pull-right"><a class="anchor hidden-xs" href="#Vim-configuration" aria-hidden="true">#</a> <a class="anchor hidden-xs"href="#toc-Vim-configuration" aria-hidden="true">TOC</a></span></h4>
+<h4 class="subsection">2.2.1 Vim configuration<span class="pull-right"><a class="anchor hidden-xs" href="#Vim-configuration" aria-hidden="true">#</a> <a class="anchor hidden-xs"href="#toc-Vim-configuration" aria-hidden="true">TOC</a></span></h4>
 <p>In order to configure Vim to follow FFmpeg formatting conventions, paste
 the following snippet into your <samp class="file">.vimrc</samp>:
 </p><div class="example">
@@ -307,7 +212,7 @@ autocmd InsertEnter * match ForbiddenWhitespace /\t\|\s\+\%#\@&lt;!$/
 </pre></div>
 
 <a name="Emacs-configuration"></a>
-<h4 class="subsection">2.2.3 Emacs configuration<span class="pull-right"><a class="anchor hidden-xs" href="#Emacs-configuration" aria-hidden="true">#</a> <a class="anchor hidden-xs"href="#toc-Emacs-configuration" aria-hidden="true">TOC</a></span></h4>
+<h4 class="subsection">2.2.2 Emacs configuration<span class="pull-right"><a class="anchor hidden-xs" href="#Emacs-configuration" aria-hidden="true">#</a> <a class="anchor hidden-xs"href="#toc-Emacs-configuration" aria-hidden="true">TOC</a></span></h4>
 <p>For Emacs, add these roughly equivalent lines to your <samp class="file">.emacs.d/init.el</samp>:
 </p><div class="example lisp">
 <pre class="lisp-preformatted">(c-add-style &quot;ffmpeg&quot;
@@ -938,7 +843,7 @@ should be covered by tests. That includes demuxers, muxers, decoders, encoders
 filters, bitstream filters, parsers. If its not possible to do that, add
 an explanation why to your patchset, its ok to not test if theres a reason.
 
-</li><li> If you added NASM code please check that things still work with &ndash;disable-x86asm.
+</li><li> If you added YASM code please check that things still work with &ndash;disable-yasm.
 
 </li><li> Test your code with valgrind and or Address Sanitizer to ensure it&rsquo;s free
 of leaks, out of array accesses, etc.

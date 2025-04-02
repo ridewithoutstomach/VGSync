@@ -1,3 +1,22 @@
+<!--
+  This file is part of VGSync.
+
+  Copyright (C) 2025 by Bernd Eller
+
+  VGSync is free software: you can redistribute it and/or modify
+  it under the terms of the GNU General Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  (at your option) any later version.
+
+  VGSync is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+  See the GNU General Public License for more details.
+
+  You should have received a copy of the GNU General Public License
+  along with VGSync. If not, see <https://www.gnu.org/licenses/>.
+-->
+
 <!DOCTYPE html>
 <html>
 <head>
@@ -178,7 +197,970 @@
   <div id="keyWarning">No valid API key! Please set your key in the application config.</div>
 
   <script>
-  const _0x4095bb=_0x3495;(function(_0x43258c,_0x30599f){const _0x453dcb=_0x3495,_0x4d4f0e=_0x43258c();while(!![]){try{const _0x474bd1=parseInt(_0x453dcb(0x1bd))/0x1*(-parseInt(_0x453dcb(0x19d))/0x2)+-parseInt(_0x453dcb(0x1e6))/0x3*(-parseInt(_0x453dcb(0x146))/0x4)+-parseInt(_0x453dcb(0x1e4))/0x5*(-parseInt(_0x453dcb(0x174))/0x6)+parseInt(_0x453dcb(0x195))/0x7+parseInt(_0x453dcb(0x1df))/0x8+-parseInt(_0x453dcb(0x1d6))/0x9+-parseInt(_0x453dcb(0x173))/0xa*(parseInt(_0x453dcb(0x1d7))/0xb);if(_0x474bd1===_0x30599f)break;else _0x4d4f0e['push'](_0x4d4f0e['shift']());}catch(_0x4598e8){_0x4d4f0e['push'](_0x4d4f0e['shift']());}}}(_0x3620,0xb14e0));let colorSizeMap={'black':0x4,'red':0x4,'blue':0x4,'yellow':0x6};function getSizeForFeature(_0x2b1b24){const _0x52bf8a=_0x3495;let _0x5d3e2d=_0x2b1b24['get'](_0x52bf8a(0x1b5));if(!_0x5d3e2d)_0x5d3e2d=_0x52bf8a(0x1dc);let _0x4b8a1b=colorSizeMap[_0x5d3e2d];if(!_0x4b8a1b)_0x4b8a1b=0x4;return _0x4b8a1b;}let debugMode=!![];function dbg(_0x5ed3be){const _0x2014ba=_0x3495;if(debugMode)console[_0x2014ba(0x14e)]('[DEBUG]\x20'+_0x5ed3be);}let mapTilerKey='',bingKey='',mapboxKey='',currentMapMode=0x0,map,osmLayer,satLayer,vectorLayer,channelObj=null,featuresMapIndex={},featuresMapSid={},moveMode=![],modifyInteraction=null,addNewPointMode=![],markB_idx=-0x1,markE_idx=-0x1,videoIsPlaying=![],selectedCoord=null,selectedIndex=null,directionsMode=![],speedInputContainer=null,speedInput=null,mapboxProfile='cycling',profileIndex=0x0;const profileList=[_0x4095bb(0x18c),'walking',_0x4095bb(0x166)],profileNames=[_0x4095bb(0x1d4),_0x4095bb(0x1b6),_0x4095bb(0x1e5)];let loadingCounter=0x0;function getMaxIndex(){const _0x310c74=_0x4095bb;let _0x3a5f5f=Object[_0x310c74(0x1ed)](featuresMapIndex)[_0x310c74(0x1e0)](_0x421c14=>parseInt(_0x421c14));if(!_0x3a5f5f[_0x310c74(0x148)])return-0x1;return Math[_0x310c74(0x152)](..._0x3a5f5f);}function pyLog(_0x351ec5){const _0xb67a9=_0x4095bb;channelObj&&channelObj[_0xb67a9(0x189)]?channelObj[_0xb67a9(0x189)](_0x351ec5):console['log']('[JS->Py\x20fallback]\x20'+_0x351ec5);}function showKeyWarning(_0x28b6c3){const _0x4d40aa=_0x4095bb,_0x443f08=document[_0x4d40aa(0x1d1)](_0x4d40aa(0x17f));if(!_0x443f08)return;_0x443f08['innerText']=_0x28b6c3,_0x443f08['style'][_0x4d40aa(0x177)]=_0x4d40aa(0x18a);}function hideKeyWarning(){const _0x546413=_0x4095bb,_0x3c0ca2=document['getElementById']('keyWarning');if(!_0x3c0ca2)return;_0x3c0ca2['style'][_0x546413(0x177)]=_0x546413(0x196);}function showLoading(_0x35505b=_0x4095bb(0x14b)){const _0x196f07=_0x4095bb;loadingCounter++;const _0x59fee4=document['getElementById'](_0x196f07(0x176));if(!_0x59fee4)return;_0x59fee4['innerText']=_0x35505b,_0x59fee4['style'][_0x196f07(0x177)]=_0x196f07(0x18a);}function hideLoading(){const _0x32c62d=_0x4095bb;loadingCounter>0x0&&loadingCounter--;if(loadingCounter===0x0){const _0x5b2d00=document['getElementById']('loadingIndicator');if(!_0x5b2d00)return;_0x5b2d00['style']['display']=_0x32c62d(0x196);}}window['onload']=function(){const _0xa27ed=_0x4095bb;typeof qt!==_0xa27ed(0x1ad)&&qt['webChannelTransport']?new QWebChannel(qt[_0xa27ed(0x1b8)],function(_0x12c2a4){const _0x57e90e=_0xa27ed;channelObj=_0x12c2a4[_0x57e90e(0x180)][_0x57e90e(0x17a)];}):console['log'](_0xa27ed(0x1bc));speedInputContainer=document[_0xa27ed(0x1d1)](_0xa27ed(0x1ac)),speedInput=document[_0xa27ed(0x1d1)]('speedInput'),initMap();let _0x28af25=document['getElementById'](_0xa27ed(0x1c7));_0x28af25&&_0x28af25['addEventListener'](_0xa27ed(0x168),cycleMapMode);let _0x1d1770=document[_0xa27ed(0x1d1)](_0xa27ed(0x1c8));_0x1d1770&&_0x1d1770[_0xa27ed(0x187)](_0xa27ed(0x168),()=>{enableMoveMode(!moveMode);});let _0x96b86f=document[_0xa27ed(0x1d1)](_0xa27ed(0x165));_0x96b86f&&_0x96b86f[_0xa27ed(0x187)]('click',()=>{const _0x2efb33=_0xa27ed;channelObj&&channelObj[_0x2efb33(0x19a)]&&channelObj[_0x2efb33(0x19a)]();});let _0x7056f2=document[_0xa27ed(0x1d1)]('btnNewPoint');_0x7056f2&&_0x7056f2[_0xa27ed(0x187)]('click',()=>{const _0x422e41=_0xa27ed;addNewPointMode=!addNewPointMode,document[_0x422e41(0x16b)][_0x422e41(0x1d3)][_0x422e41(0x15e)]=addNewPointMode?_0x422e41(0x1d0):'';});let _0x1336c9=document[_0xa27ed(0x1d1)](_0xa27ed(0x185));_0x1336c9&&_0x1336c9['addEventListener']('click',()=>{startDirectionsMode();});let _0x378c5c=document[_0xa27ed(0x1d1)](_0xa27ed(0x1e1));_0x378c5c&&_0x378c5c[_0xa27ed(0x187)]('click',cycleProfile);};function cycleProfile(){const _0x3cdcb2=_0x4095bb;profileIndex=(profileIndex+0x1)%0x3,mapboxProfile=profileList[profileIndex];let _0x71734f=document['getElementById']('btnProfile');_0x71734f&&(_0x71734f[_0x3cdcb2(0x1a1)]=profileNames[profileIndex]),dbg(_0x3cdcb2(0x1bf)+mapboxProfile);}function cycleMapMode(){const _0xfb4ce1=_0x4095bb;currentMapMode=(currentMapMode+0x1)%0x3;let _0x3e7888=[_0xfb4ce1(0x1a3),_0xfb4ce1(0x1cf),_0xfb4ce1(0x149)],_0x547fab=document['getElementById'](_0xfb4ce1(0x1c7));_0x547fab[_0xfb4ce1(0x1a1)]=_0x3e7888[currentMapMode],currentMapMode===0x0?(hideKeyWarning(),osmLayer[_0xfb4ce1(0x16a)](!![]),satLayer[_0xfb4ce1(0x16a)](![])):(osmLayer['setVisible'](![]),satLayer[_0xfb4ce1(0x16a)](!![]),satLayer[_0xfb4ce1(0x175)](createSatelliteSource()));}function initMap(){const _0x4a24f3=_0x4095bb;osmLayer=new ol[(_0x4a24f3(0x1a6))]['Tile']({'source':new ol[(_0x4a24f3(0x19f))][(_0x4a24f3(0x1a3))](),'visible':currentMapMode===0x0}),satLayer=new ol[(_0x4a24f3(0x1a6))][(_0x4a24f3(0x14d))]({'source':createSatelliteSource(),'visible':currentMapMode!==0x0}),vectorLayer=new ol[(_0x4a24f3(0x1a6))]['Vector']({'source':new ol[(_0x4a24f3(0x19f))][(_0x4a24f3(0x1a8))]()}),map=new ol[(_0x4a24f3(0x15c))]({'target':_0x4a24f3(0x1e0),'layers':[osmLayer,satLayer,vectorLayer],'view':new ol[(_0x4a24f3(0x1c1))]({'center':ol[_0x4a24f3(0x1b9)]['fromLonLat']([0xa,0x32]),'zoom':0x5,'maxZoom':0x1e})}),initModify(),map['on'](_0x4a24f3(0x1d8),function(_0xf0b96b){const _0x125d82=_0x4a24f3;if(addNewPointMode){addNewPointMode=![],document[_0x125d82(0x16b)][_0x125d82(0x1d3)]['cursor']='',insertNewPointOnLineOrEnd(_0xf0b96b);return;}if(directionsMode){directionsMode=![];let _0x2b6b80=document[_0x125d82(0x1d1)]('btnDirections');_0x2b6b80&&(_0x2b6b80[_0x125d82(0x1d3)][_0x125d82(0x1b2)]=_0x125d82(0x1ba));document[_0x125d82(0x16b)][_0x125d82(0x1d3)]['cursor']='';speedInputContainer&&(speedInputContainer['style'][_0x125d82(0x177)]=_0x125d82(0x196));let _0x15e419=ol[_0x125d82(0x1b9)][_0x125d82(0x178)](_0xf0b96b[_0x125d82(0x1d2)]);pyLog('Directions:\x20Zielpunkt\x20B\x20=>\x20'+_0x15e419);selectedCoord&&fetchAndInsertDirections(selectedCoord,_0x15e419);return;}selectedCoord=null,selectedIndex=null;if(!channelObj)return;map[_0x125d82(0x156)](_0xf0b96b['pixel'],function(_0x4b4253){const _0x23e792=_0x125d82;let _0xd95f66=_0x4b4253['get']('index'),_0x34eb58=_0x4b4253[_0x23e792(0x143)](_0x23e792(0x1cd)),_0x16d905=_0x4b4253[_0x23e792(0x194)]();_0x16d905&&_0x16d905[_0x23e792(0x186)]()===_0x23e792(0x170)&&(selectedCoord=ol[_0x23e792(0x1b9)][_0x23e792(0x178)](_0x16d905[_0x23e792(0x17b)]()));if(_0xd95f66!==undefined)return selectedIndex=_0xd95f66,dbg(_0x23e792(0x1ea)+_0xd95f66),channelObj['pointClicked']&&channelObj[_0x23e792(0x199)](_0xd95f66),!![];if(_0x34eb58)return dbg(_0x23e792(0x188)+_0x34eb58),channelObj['pointClicked']&&channelObj['pointClicked'](_0x34eb58),!![];return![];});});}function createSatelliteSource(){const _0x5f5d24=_0x4095bb;hideKeyWarning();if(currentMapMode===0x0)return new ol[(_0x5f5d24(0x19f))][(_0x5f5d24(0x1a3))]();else{if(currentMapMode===0x1){if(!mapTilerKey||mapTilerKey[_0x5f5d24(0x147)]()==='')return dbg(_0x5f5d24(0x1a0)),showKeyWarning(_0x5f5d24(0x190)),new ol[(_0x5f5d24(0x19f))]['OSM']();return new ol['source'][(_0x5f5d24(0x1db))]({'url':'https://api.maptiler.com/tiles/satellite/{z}/{x}/{y}.jpg?key='+mapTilerKey,'tileSize':0x200,'maxZoom':0x15});}else{if(!mapboxKey||mapboxKey[_0x5f5d24(0x147)]()==='')return dbg('No\x20mapboxKey\x20=>\x20fallback\x20OSM'),showKeyWarning(_0x5f5d24(0x18b)),new ol[(_0x5f5d24(0x19f))][(_0x5f5d24(0x1a3))]();return new ol['source']['XYZ']({'url':'https://api.mapbox.com/styles/v1/mapbox/satellite-v9/tiles/{z}/{x}/{y}?access_token='+mapboxKey,'tileSize':0x200,'maxZoom':0x16});}}}function setMapTilerKey(_0x464c45){mapTilerKey=_0x464c45;}function setBingKey(_0x402dbf){bingKey=_0x402dbf;}function setMapboxKey(_0xf7ff73){mapboxKey=_0xf7ff73;}function initModify(){const _0x38ba96=_0x4095bb;modifyInteraction=new ol['interaction'][(_0x38ba96(0x1ab))]({'source':vectorLayer[_0x38ba96(0x1da)]()}),modifyInteraction['on'](_0x38ba96(0x1c0),function(_0x1366f9){const _0x5f190a=_0x38ba96;let _0xb1a718=_0x1366f9[_0x5f190a(0x1c6)][_0x5f190a(0x18f)]();_0xb1a718['forEach'](_0x26730c=>{const _0x1d84ad=_0x5f190a;let _0x5bb2d9=_0x26730c['get'](_0x1d84ad(0x1a4)),_0x3a399d=_0x26730c[_0x1d84ad(0x143)]('stable_id'),_0xa81574=_0x26730c[_0x1d84ad(0x194)]()[_0x1d84ad(0x17b)](),_0x241396=ol['proj'][_0x1d84ad(0x178)](_0xa81574);if(channelObj&&channelObj[_0x1d84ad(0x1dd)]){if(_0x3a399d!==undefined)channelObj['pointMoved'](_0x3a399d,_0x241396[0x1],_0x241396[0x0]);else _0x5bb2d9!==undefined&&channelObj[_0x1d84ad(0x1dd)](_0x5bb2d9,_0x241396[0x1],_0x241396[0x0]);}});});}function _0x3495(_0x359e86,_0xf47b4a){const _0x36202a=_0x3620();return _0x3495=function(_0x3495d8,_0x26ebb2){_0x3495d8=_0x3495d8-0x143;let _0x59bda0=_0x36202a[_0x3495d8];return _0x59bda0;},_0x3495(_0x359e86,_0xf47b4a);}function enableMoveMode(_0x23a132){const _0x63496d=_0x4095bb;moveMode=_0x23a132;let _0x49ff47=document[_0x63496d(0x1d1)](_0x63496d(0x1c8));if(!map||!modifyInteraction)return;moveMode?(map['addInteraction'](modifyInteraction),_0x49ff47[_0x63496d(0x1d3)]['backgroundColor']=_0x63496d(0x1eb)):(map[_0x63496d(0x14f)](modifyInteraction),_0x49ff47[_0x63496d(0x1d3)][_0x63496d(0x1b2)]='rgba(200,200,200,0.5)');}function insertNewPointOnLineOrEnd(_0x715edb){const _0x1b8f58=_0x4095bb;let _0x463341=getMaxIndex();if(_0x463341===-0x1){let _0x34d293=ol[_0x1b8f58(0x1b9)][_0x1b8f58(0x178)](_0x715edb[_0x1b8f58(0x1d2)]);channelObj&&channelObj['newPointInserted']&&channelObj[_0x1b8f58(0x198)](_0x34d293[0x1],_0x34d293[0x0],-0x1);addNewPointMode=![],document[_0x1b8f58(0x16b)][_0x1b8f58(0x1d3)][_0x1b8f58(0x15e)]='';return;}if(selectedIndex==null){alert(_0x1b8f58(0x164)),addNewPointMode=![],document[_0x1b8f58(0x16b)][_0x1b8f58(0x1d3)][_0x1b8f58(0x15e)]='';return;}if(_0x463341===0x0){let _0x1cc2f2=ol['proj'][_0x1b8f58(0x178)](_0x715edb['coordinate']);channelObj&&channelObj['newPointInserted']&&channelObj[_0x1b8f58(0x198)](_0x1cc2f2[0x1],_0x1cc2f2[0x0],-0x1);selectedIndex=null,addNewPointMode=![],document[_0x1b8f58(0x16b)][_0x1b8f58(0x1d3)][_0x1b8f58(0x15e)]='';return;}if(selectedIndex===0x0){let _0x146765=ol[_0x1b8f58(0x1b9)][_0x1b8f58(0x178)](_0x715edb['coordinate']);channelObj&&channelObj[_0x1b8f58(0x198)]&&channelObj[_0x1b8f58(0x198)](_0x146765[0x1],_0x146765[0x0],-0x2);selectedIndex=null,addNewPointMode=![],document[_0x1b8f58(0x16b)][_0x1b8f58(0x1d3)][_0x1b8f58(0x15e)]='';return;}else{let _0x3ce7bd=getMaxIndex();if(selectedIndex===_0x3ce7bd&&_0x3ce7bd>=0x0){let _0x2dbf6c=ol['proj']['toLonLat'](_0x715edb[_0x1b8f58(0x1d2)]);channelObj&&channelObj[_0x1b8f58(0x198)]&&channelObj['newPointInserted'](_0x2dbf6c[0x1],_0x2dbf6c[0x0],-0x1);selectedIndex=null,addNewPointMode=![],document[_0x1b8f58(0x16b)][_0x1b8f58(0x1d3)][_0x1b8f58(0x15e)]='';return;}let _0x15a07f=null,_0x20a928=null;map['forEachFeatureAtPixel'](_0x715edb['pixel'],(_0x23b73d,_0x5de67d)=>{const _0x457ef0=_0x1b8f58;let _0x18d12a=_0x23b73d[_0x457ef0(0x194)]();if(_0x18d12a['getType']()===_0x457ef0(0x18e))return _0x15a07f=_0x23b73d,_0x20a928=_0x18d12a['getClosestPoint'](_0x715edb[_0x457ef0(0x1d2)]),!![];return![];},{'hitTolerance':0xa});if(!_0x15a07f||!_0x20a928){let _0x322c1b=ol['proj'][_0x1b8f58(0x178)](_0x715edb[_0x1b8f58(0x1d2)]);channelObj&&channelObj[_0x1b8f58(0x198)]&&channelObj[_0x1b8f58(0x198)](_0x322c1b[0x1],_0x322c1b[0x0],-0x1);selectedIndex=null,addNewPointMode=![],document[_0x1b8f58(0x16b)][_0x1b8f58(0x1d3)][_0x1b8f58(0x15e)]='';return;}let _0x3eb1d7=_0x15a07f['getGeometry']()[_0x1b8f58(0x17b)]();if(_0x3eb1d7[_0x1b8f58(0x148)]<0x2){let _0x499040=ol[_0x1b8f58(0x1b9)][_0x1b8f58(0x178)](_0x715edb['coordinate']);channelObj['newPointInserted'](_0x499040[0x1],_0x499040[0x0],-0x1);}else{let _0xee3d49=findSegmentIndexForClosestCoord(_0x3eb1d7,_0x20a928),_0x5dbf96=ol[_0x1b8f58(0x1b9)]['toLonLat'](_0x20a928);channelObj[_0x1b8f58(0x198)](_0x5dbf96[0x1],_0x5dbf96[0x0],_0xee3d49);}selectedIndex=null,addNewPointMode=![],document['body'][_0x1b8f58(0x1d3)][_0x1b8f58(0x15e)]='';}}function findSegmentIndexForClosestCoord(_0x31f125,_0x199d80){let _0x543afb=Infinity,_0x2a1e3c=0x0;for(let _0xc89026=0x0;_0xc89026<_0x31f125['length']-0x1;_0xc89026++){let _0x3768dc=pointSegmentDistance(_0x199d80,_0x31f125[_0xc89026],_0x31f125[_0xc89026+0x1]);_0x3768dc<_0x543afb&&(_0x543afb=_0x3768dc,_0x2a1e3c=_0xc89026);}return _0x2a1e3c;}function pointSegmentDistance(_0x46613d,_0x809019,_0x8aa38f){const _0x23b533=_0x4095bb;let _0x1e3920=_0x46613d[0x0],_0x5304ea=_0x46613d[0x1],_0x19b037=_0x809019[0x0],_0x4c2036=_0x809019[0x1],_0x12dac4=_0x8aa38f[0x0],_0x3fe314=_0x8aa38f[0x1],_0x5f39ae=_0x12dac4-_0x19b037,_0x47ec7e=_0x3fe314-_0x4c2036;if(_0x5f39ae===0x0&&_0x47ec7e===0x0)return Math[_0x23b533(0x1a9)](_0x1e3920-_0x19b037,_0x5304ea-_0x4c2036);let _0x54a513=((_0x1e3920-_0x19b037)*_0x5f39ae+(_0x5304ea-_0x4c2036)*_0x47ec7e)/(_0x5f39ae*_0x5f39ae+_0x47ec7e*_0x47ec7e);if(_0x54a513<0x0)_0x54a513=0x0;if(_0x54a513>0x1)_0x54a513=0x1;let _0x98bda3=_0x19b037+_0x54a513*_0x5f39ae,_0x3cab81=_0x4c2036+_0x54a513*_0x47ec7e;return Math[_0x23b533(0x1a9)](_0x1e3920-_0x98bda3,_0x5304ea-_0x3cab81);}function loadRoute(_0x3cdc7b,_0x158d1a=!![]){const _0x515b12=_0x4095bb;showLoading(_0x515b12(0x16c)),vectorLayer[_0x515b12(0x1da)]()[_0x515b12(0x182)](),featuresMapIndex={},featuresMapSid={};if(!_0x3cdc7b||!_0x3cdc7b[_0x515b12(0x1c6)]){console[_0x515b12(0x14e)]('[DEBUG]\x20no\x20routeGeoJson\x20=>\x20skip'),hideLoading();return;}for(let _0x54c4c8 of _0x3cdc7b['features']){let _0x2e9335=_0x54c4c8[_0x515b12(0x169)],_0x1321e8=_0x54c4c8[_0x515b12(0x1ec)]||{};if(!_0x2e9335)continue;if(_0x2e9335[_0x515b12(0x1b7)]==='LineString'){let _0x1ab1d7=_0x2e9335[_0x515b12(0x1cb)][_0x515b12(0x1e0)](_0x1b4aa3=>ol[_0x515b12(0x1b9)][_0x515b12(0x16d)](_0x1b4aa3)),_0x4785ba=new ol['Feature']({'geometry':new ol[(_0x515b12(0x15f))][(_0x515b12(0x18e))](_0x1ab1d7),'color':_0x1321e8['color']||_0x515b12(0x163)});vectorLayer[_0x515b12(0x1da)]()[_0x515b12(0x157)](_0x4785ba),updateFeatureStyle(_0x4785ba);}else{if(_0x2e9335[_0x515b12(0x1b7)]===_0x515b12(0x170)){let _0x3c992e=ol[_0x515b12(0x1b9)]['fromLonLat'](_0x2e9335[_0x515b12(0x1cb)]),_0x5cb830=_0x1321e8[_0x515b12(0x1a4)],_0x3e0f8d=_0x1321e8[_0x515b12(0x1cd)],_0x1470bf=_0x1321e8[_0x515b12(0x1b5)]||_0x515b12(0x1dc);if(_0x1470bf==='#000000')_0x1470bf=_0x515b12(0x1dc);else{if(_0x1470bf==='#FF0000')_0x1470bf=_0x515b12(0x15b);else{if(_0x1470bf===_0x515b12(0x153))_0x1470bf=_0x515b12(0x1e3);else{if(_0x1470bf===_0x515b12(0x1b1))_0x1470bf='yellow';}}}let _0x56e6be=_0x1470bf,_0x217eef=_0x1321e8[_0x515b12(0x1bb)]||0x4,_0x1aa66d=new ol[(_0x515b12(0x19c))]({'geometry':new ol[(_0x515b12(0x15f))][(_0x515b12(0x170))](_0x3c992e),'index':_0x5cb830,'stable_id':_0x3e0f8d,'color':_0x56e6be,'size':_0x217eef});vectorLayer[_0x515b12(0x1da)]()['addFeature'](_0x1aa66d),_0x5cb830!==undefined&&(featuresMapIndex[_0x5cb830]=_0x1aa66d),_0x3e0f8d&&(featuresMapSid[_0x3e0f8d]=_0x1aa66d),updateFeatureStyle(_0x1aa66d);}}}if(_0x158d1a){let _0x59853e=vectorLayer[_0x515b12(0x1da)]()[_0x515b12(0x155)]();!ol['extent'][_0x515b12(0x1b3)](_0x59853e)&&map['getView']()[_0x515b12(0x1c4)](_0x59853e,{'padding':[0x1e,0x1e,0x1e,0x1e],'maxZoom':0x14});}hideLoading();}function addOrUpdatePoint(_0x294a85,_0xde65e4,_0x33fe68,_0x35ddb8=_0x4095bb(0x197),_0x13f319=0x4){const _0x442951=_0x4095bb;showLoading(_0x442951(0x1e7));if(inColor===_0x442951(0x197))inColor=_0x442951(0x1dc);else{if(inColor===_0x442951(0x1e8))inColor=_0x442951(0x15b);else{if(inColor===_0x442951(0x153))inColor='blue';else{if(inColor===_0x442951(0x1b1))inColor=_0x442951(0x1c2);}}}let _0x16f11a=featuresMapSid[_0x294a85],_0x31491c=ol['proj']['fromLonLat']([_0x33fe68,_0xde65e4]);!_0x16f11a?(_0x16f11a=new ol[(_0x442951(0x19c))]({'geometry':new ol[(_0x442951(0x15f))][(_0x442951(0x170))](_0x31491c),'stable_id':_0x294a85,'color':_0x35ddb8,'size':_0x13f319}),vectorLayer[_0x442951(0x1da)]()[_0x442951(0x157)](_0x16f11a),featuresMapSid[_0x294a85]=_0x16f11a):(_0x16f11a[_0x442951(0x172)]('color',_0x35ddb8),_0x16f11a[_0x442951(0x194)]()[_0x442951(0x1be)](_0x31491c)),updateFeatureStyle(_0x16f11a),hideLoading();}function removePoint(_0x2df7c2){const _0x308f59=_0x4095bb;showLoading(_0x308f59(0x14a));let _0x2894e9=featuresMapSid[_0x2df7c2];if(!_0x2894e9){hideLoading();return;}vectorLayer['getSource']()[_0x308f59(0x1ae)](_0x2894e9),delete featuresMapSid[_0x2df7c2];for(let _0x276640 in featuresMapIndex){if(featuresMapIndex[_0x276640]===_0x2894e9){delete featuresMapIndex[_0x276640];break;}}hideLoading();}function updateFeatureStyle(_0x534f96){const _0xa9e878=_0x4095bb;let _0x45c457=_0x534f96[_0xa9e878(0x143)](_0xa9e878(0x1b5))||_0xa9e878(0x1dc),_0x2bc614=_0xa9e878(0x197);if(_0x45c457==='black')_0x2bc614='#000000';else{if(_0x45c457===_0xa9e878(0x15b))_0x2bc614=_0xa9e878(0x1e8);else{if(_0x45c457===_0xa9e878(0x1e3))_0x2bc614='#0000FF';else{if(_0x45c457===_0xa9e878(0x1c2))_0x2bc614=_0xa9e878(0x1b1);}}}let _0x37c4aa=getSizeForFeature(_0x534f96),_0x4c5e27=_0x534f96[_0xa9e878(0x194)]();_0x4c5e27['getType']()===_0xa9e878(0x18e)?_0x534f96[_0xa9e878(0x161)](new ol[(_0xa9e878(0x1d3))]['Style']({'stroke':new ol[(_0xa9e878(0x1d3))][(_0xa9e878(0x1d9))]({'color':_0x2bc614,'width':0x2})})):_0x534f96['setStyle'](new ol[(_0xa9e878(0x1d3))][(_0xa9e878(0x145))]({'image':new ol['style'][(_0xa9e878(0x158))]({'radius':_0x37c4aa,'fill':new ol[(_0xa9e878(0x1d3))][(_0xa9e878(0x19e))]({'color':_0x2bc614}),'stroke':new ol[(_0xa9e878(0x1d3))]['Stroke']({'color':_0xa9e878(0x151),'width':0x1})})}));}function updateAllPointsByColor(_0x8b5a88,_0x419130){const _0x25c89d=_0x4095bb;colorSizeMap[_0x8b5a88]=_0x419130;const _0x8a9f75=vectorLayer['getSource']()[_0x25c89d(0x1c5)]();_0x8a9f75[_0x25c89d(0x1c3)](_0x5a7408=>{const _0x238cc0=_0x25c89d;_0x5a7408[_0x238cc0(0x143)]('color')===_0x8b5a88&&updateFeatureStyle(_0x5a7408);});}function clear_marked_range(){unmark_range_markB_E(),markB_idx=-0x1,markE_idx=-0x1;}function set_markB_point(_0x1118a5){const _0xd4e1d7=_0x4095bb;if(markE_idx>=0x0&&_0x1118a5>=markE_idx){console[_0xd4e1d7(0x14e)](_0xd4e1d7(0x144)+_0x1118a5+_0xd4e1d7(0x17c)+markE_idx+_0xd4e1d7(0x154));return;}unmark_range_markB_E(),markB_idx=_0x1118a5,mark_new_range_markB_E();}function set_markE_point(_0x511535){const _0x237721=_0x4095bb;if(markB_idx>=0x0&&_0x511535<=markB_idx){console[_0x237721(0x14e)](_0x237721(0x1de)+_0x511535+_0x237721(0x1a5)+markB_idx+'\x20=>\x20skip');return;}unmark_range_markB_E(),markE_idx=_0x511535,mark_new_range_markB_E();}function unmark_range_markB_E(){const _0x210be6=_0x4095bb;if(markB_idx>=0x0&&markE_idx>=0x0){let _0x46407a=Math[_0x210be6(0x1b0)](markB_idx,markE_idx),_0x5f4720=Math['max'](markB_idx,markE_idx);unmark_range(_0x46407a,_0x5f4720);}else{if(markB_idx>=0x0)unmark_range(markB_idx,markB_idx);else markE_idx>=0x0&&unmark_range(markE_idx,markE_idx);}}function mark_new_range_markB_E(){const _0x2f832b=_0x4095bb;if(markB_idx>=0x0&&markE_idx>=0x0){let _0x485c19=Math['min'](markB_idx,markE_idx),_0x2b0296=Math[_0x2f832b(0x152)](markB_idx,markE_idx);mark_range_in_red(_0x485c19,_0x2b0296);}else{if(markB_idx>=0x0)mark_range_in_red(markB_idx,markB_idx);else markE_idx>=0x0&&mark_range_in_red(markE_idx,markE_idx);}}function unmark_range(_0x389aed,_0x9cd5db){const _0x4bca9e=_0x4095bb;for(let _0x28f32a=_0x389aed;_0x28f32a<=_0x9cd5db;_0x28f32a++){let _0x55f8c5=featuresMapIndex[_0x28f32a];_0x55f8c5&&(_0x55f8c5[_0x4bca9e(0x172)]('color',_0x4bca9e(0x1dc)),updateFeatureStyle(_0x55f8c5));}}function mark_range_in_red(_0x1feb46,_0x11ac14){const _0x580e63=_0x4095bb;for(let _0x1576e4=_0x1feb46;_0x1576e4<=_0x11ac14;_0x1576e4++){let _0x163b71=featuresMapIndex[_0x1576e4];_0x163b71&&(_0x163b71[_0x580e63(0x172)]('color','red'),updateFeatureStyle(_0x163b71));}}function highlightPoint(_0x72d88c,_0x2a11a8,_0x4cac9e,_0x31ab06=![]){const _0x3858ce=_0x4095bb;let _0x2cf188=featuresMapIndex[_0x72d88c];if(!_0x2cf188)return;_0x2cf188[_0x3858ce(0x172)]('color',_0x2a11a8);typeof _0x4cac9e===_0x3858ce(0x15d)?_0x2cf188[_0x3858ce(0x172)](_0x3858ce(0x1bb),_0x4cac9e):_0x2cf188[_0x3858ce(0x179)]('size');updateFeatureStyle(_0x2cf188);if(_0x31ab06){let _0x47620d=_0x2cf188[_0x3858ce(0x194)]()[_0x3858ce(0x17b)]();map[_0x3858ce(0x1af)]()[_0x3858ce(0x171)]({'center':_0x47620d,'duration':0x258});}else videoIsPlaying&&checkAndCenterIfNeeded(_0x72d88c,0x32);}function setVideoPlayState(_0x2c8f36){const _0x18bc12=_0x4095bb;videoIsPlaying=_0x2c8f36,dbg(_0x18bc12(0x1a2)+_0x2c8f36);}function checkAndCenterIfNeeded(_0x4ffd9d,_0x27e62e=0x32){const _0x551b97=_0x4095bb;let _0x48b5d3=featuresMapIndex[_0x4ffd9d];if(!_0x48b5d3)return;let _0x505693=_0x48b5d3['getGeometry']()[_0x551b97(0x17b)](),_0x38cc95=map[_0x551b97(0x1d5)](_0x505693),_0x3e83c3=map['getSize']();if(!_0x3e83c3)return;let _0x38e893=_0x3e83c3[0x0],_0xeb4ff4=_0x3e83c3[0x1];(_0x38cc95[0x0]<_0x27e62e||_0x38cc95[0x0]>_0x38e893-_0x27e62e||_0x38cc95[0x1]<_0x27e62e||_0x38cc95[0x1]>_0xeb4ff4-_0x27e62e)&&map[_0x551b97(0x1af)]()[_0x551b97(0x171)]({'center':_0x505693,'duration':0x258});}function startDirectionsMode(){const _0x257769=_0x4095bb;let _0x2d8ce9=document['getElementById'](_0x257769(0x185));if(directionsMode){directionsMode=![];if(_0x2d8ce9)_0x2d8ce9[_0x257769(0x1d3)][_0x257769(0x1b2)]='rgba(200,200,200,0.5)';document[_0x257769(0x16b)][_0x257769(0x1d3)][_0x257769(0x15e)]='';if(speedInputContainer)speedInputContainer[_0x257769(0x1d3)]['display']=_0x257769(0x196);pyLog(_0x257769(0x162));return;}if(!selectedCoord){alert(_0x257769(0x16f));return;}let _0x385ca6=Object[_0x257769(0x1ed)](featuresMapIndex);if(_0x385ca6['length']<0x1){alert(_0x257769(0x1ca));return;}_0x385ca6[_0x257769(0x159)]((_0x1dd349,_0x185052)=>parseInt(_0x1dd349)-parseInt(_0x185052));let _0x550283=_0x385ca6[_0x257769(0x148)];if(_0x550283===0x1){}else{let _0x863db5=parseInt(_0x385ca6[0x0]),_0x1ab26b=parseInt(_0x385ca6[_0x385ca6['length']-0x1]);if(selectedIndex!==_0x863db5&&selectedIndex!==_0x1ab26b){alert('Directions\x20are\x20only\x20allowed\x20from\x20the\x20first\x20or\x20last\x20point\x20(or\x20if\x20there\x20is\x20only\x20one\x20point)!');return;}}if(!mapboxKey||mapboxKey[_0x257769(0x147)]()===''){alert(_0x257769(0x1a7));return;}speedInputContainer&&(speedInputContainer[_0x257769(0x1d3)][_0x257769(0x177)]=_0x257769(0x18a));directionsMode=!![];if(_0x2d8ce9)_0x2d8ce9[_0x257769(0x1d3)]['backgroundColor']=_0x257769(0x1eb);document[_0x257769(0x16b)][_0x257769(0x1d3)][_0x257769(0x15e)]=_0x257769(0x1d0),pyLog(_0x257769(0x1aa));}async function fetchAndInsertDirections(_0x2f059f,_0x49245c){const _0x4dc147=_0x4095bb;showLoading(_0x4dc147(0x192));let _0x9343f8=parseFloat(speedInput[_0x4dc147(0x160)]);(isNaN(_0x9343f8)||_0x9343f8<=0x0)&&(_0x9343f8=0x14);pyLog(_0x4dc147(0x17e)+_0x9343f8+_0x4dc147(0x17d));let _0xc06cbf=_0x4dc147(0x150)+mapboxProfile+'/'+_0x2f059f[0x0]+','+_0x2f059f[0x1]+';'+_0x49245c[0x0]+','+_0x49245c[0x1]+_0x4dc147(0x16e)+mapboxKey;pyLog('Mapbox\x20Directions\x20URL\x20=>\x20'+_0xc06cbf);try{let _0x5242e2=await fetch(_0xc06cbf),_0x31b83b=await _0x5242e2[_0x4dc147(0x183)]();if(!_0x31b83b[_0x4dc147(0x1cc)]||_0x31b83b[_0x4dc147(0x1cc)][_0x4dc147(0x148)]===0x0){pyLog(_0x4dc147(0x1ce));return;}let _0x36aaa0=_0x31b83b[_0x4dc147(0x1cc)][0x0][_0x4dc147(0x169)][_0x4dc147(0x1cb)];if(!_0x36aaa0||_0x36aaa0[_0x4dc147(0x148)]<0x2){pyLog(_0x4dc147(0x191));return;}let _0x2f10d7=_0x9343f8/3.6,_0x2d7d4a=densifyLineStringTimeBased(_0x36aaa0,_0x2f10d7);pyLog(_0x4dc147(0x193)+_0x2d7d4a[_0x4dc147(0x148)]+_0x4dc147(0x18d)),_0x2d7d4a[_0x4dc147(0x1c3)](_0x18511d=>{const _0x9a2a8b=_0x4dc147;let _0x1537f4=_0x18511d[0x1],_0x415c24=_0x18511d[0x0];channelObj&&channelObj[_0x9a2a8b(0x198)]&&channelObj[_0x9a2a8b(0x198)](_0x1537f4,_0x415c24,-0x1);});}catch(_0x4a7ec0){console[_0x4dc147(0x167)](_0x4a7ec0),pyLog(_0x4dc147(0x19b)+_0x4a7ec0);}finally{hideLoading();}}function _0x3620(){const _0x25f07e=['geometry','setVisible','body','Loading\x20route\x20...','fromLonLat','?geometries=geojson&overview=full&access_token=','No\x20start\x20point\x20selected.\x20Please\x20select\x20a\x20point\x20first!','Point','animate','set','4210kMzfxb','3780WKCnaB','setSource','loadingIndicator','display','toLonLat','unset','mapBridge','getCoordinates','\x20cannot\x20be\x20>=\x20E=','\x20km/h\x20=>\x20time-based\x20densify.','Using\x20speed\x20=>\x20','keyWarning','objects','end','clear','json','atan2','btnDirections','getType','addEventListener','clicked\x20stable_id=','jsLog','block','No\x20valid\x20API\x20key\x20for\x20Mapbox!','cycling','\x20new\x20points.','LineString','getArray','No\x20valid\x20API\x20key\x20for\x20MapTiler!','Route\x20invalid/too\x20short!','Please\x20wait,\x20we\x20are\x20calculating\x20the\x20new\x20points!','Time-based\x20=>\x20created\x20','getGeometry','5046216UsFpSi','none','#000000','newPointInserted','pointClicked','syncNoArgSlot','Directions\x20error\x20=>\x20','Feature','9822qCaLNx','Fill','source','No\x20mapTilerKey\x20=>\x20fallback\x20OSM','textContent','[DEBUG]\x20setVideoPlayState\x20=>\x20','OSM','index','\x20cannot\x20be\x20<=\x20B=','layer','No\x20mapboxKey\x20=>\x20directions\x20not\x20possible!','Vector','hypot','Directions\x20Mode\x20=>\x20next\x20click\x20is\x20Destination\x20B.\x20Then\x20time-based\x20insertion.','Modify','speedInputContainer','undefined','removeFeature','getView','min','#FFFF00','backgroundColor','isEmpty','sin','color','Foot','type','webChannelTransport','proj','rgba(200,200,200,0.5)','size','[DEBUG]\x20normal\x20Browser\x20=>\x20no\x20QWebChannel\x20=>\x20fallback','93hDCMdL','setCoordinates','Profile\x20switched\x20=>\x20','modifyend','View','yellow','forEach','fit','getFeatures','features','mapViewBtn','moveBtn','sqrt','No\x20route\x20points\x20=>\x20Directions\x20not\x20possible!','coordinates','routes','stable_id','No\x20route\x20found!','MapTiler','crosshair','getElementById','coordinate','style','Bike','getPixelFromCoordinate','7077618FSbNck','29491TdUFCB','singleclick','Stroke','getSource','XYZ','black','pointMoved','[map]\x20E=','9028840yRvZvr','map','btnProfile','cumStart','blue','1365QKABKS','Car','9cSyeDD','Updating\x20point...','#FF0000','cos','clicked\x20index=','rgba(255,100,100,0.5)','properties','keys','get','[map]\x20B=','Style','1435444snBjoV','trim','length','Mapbox','Removing\x20point...','Loading...','dist','Tile','log','removeInteraction','https://api.mapbox.com/directions/v5/mapbox/','#fff','max','#0000FF','\x20=>\x20skip','getExtent','forEachFeatureAtPixel','addFeature','Circle','sort','push','red','Map','number','cursor','geom','value','setStyle','Directions\x20mode\x20turned\x20OFF\x20=>\x20no\x20destination\x20needed','#000','No\x20point\x20selected\x20⇒\x20cannot\x20insert\x20new\x20point.','btnSyncNoArg','driving','error','click'];_0x3620=function(){return _0x25f07e;};return _0x3620();}function densifyLineStringTimeBased(_0x131977,_0x1bc184){const _0x4cc1c6=_0x4095bb;if(_0x131977[_0x4cc1c6(0x148)]<0x2)return _0x131977;let _0x2e06d8=[],_0x24d802=0x0;for(let _0x3623ea=0x0;_0x3623ea<_0x131977['length']-0x1;_0x3623ea++){let _0x188315=_0x131977[_0x3623ea],_0x5cc396=_0x131977[_0x3623ea+0x1],_0x4cb377=geoDistanceInMeters(_0x188315,_0x5cc396);_0x2e06d8[_0x4cc1c6(0x15a)]({'start':_0x188315,'end':_0x5cc396,'dist':_0x4cb377,'cumStart':_0x24d802}),_0x24d802+=_0x4cb377;}let _0x1cdec5=[_0x131977[0x0]];if(_0x24d802<0.01)return _0x1cdec5;let _0x488db3=0x0;while(!![]){_0x488db3+=_0x1bc184;if(_0x488db3>=_0x24d802)break;let _0x54d273=getCoordAtDist(_0x2e06d8,_0x488db3);_0x1cdec5['push'](_0x54d273);}return _0x1cdec5[_0x4cc1c6(0x15a)](_0x131977[_0x131977[_0x4cc1c6(0x148)]-0x1]),_0x1cdec5;}function getCoordAtDist(_0x227f15,_0x2edf17){const _0x5bcff7=_0x4095bb;for(let _0x484a83=0x0;_0x484a83<_0x227f15[_0x5bcff7(0x148)];_0x484a83++){let _0x40965d=_0x227f15[_0x484a83],_0x566fff=_0x40965d[_0x5bcff7(0x1e2)],_0x2c44c1=_0x40965d['cumStart']+_0x40965d[_0x5bcff7(0x14c)];if(_0x2edf17>=_0x566fff&&_0x2edf17<=_0x2c44c1){let _0x432d7c=(_0x2edf17-_0x566fff)/_0x40965d[_0x5bcff7(0x14c)];return interpolateCoord(_0x40965d['start'],_0x40965d[_0x5bcff7(0x181)],_0x432d7c);}}let _0xc752f5=_0x227f15[_0x227f15[_0x5bcff7(0x148)]-0x1];return _0xc752f5['end'];}function geoDistanceInMeters(_0x162913,_0x3b7e1a){const _0x3cf436=_0x4095bb;let _0x300c9d=0x6136b8,_0x5c5c1d=_0x162913[0x1]*Math['PI']/0xb4,_0x7566bf=_0x162913[0x0]*Math['PI']/0xb4,_0x10ff48=_0x3b7e1a[0x1]*Math['PI']/0xb4,_0x122823=_0x3b7e1a[0x0]*Math['PI']/0xb4,_0xfecf2a=_0x10ff48-_0x5c5c1d,_0x47bc78=_0x122823-_0x7566bf,_0x69a86d=Math[_0x3cf436(0x1b4)](_0xfecf2a/0x2)**0x2+Math['cos'](_0x5c5c1d)*Math[_0x3cf436(0x1e9)](_0x10ff48)*Math['sin'](_0x47bc78/0x2)**0x2;return _0x300c9d*0x2*Math[_0x3cf436(0x184)](Math[_0x3cf436(0x1c9)](_0x69a86d),Math[_0x3cf436(0x1c9)](0x1-_0x69a86d));}function interpolateCoord(_0x9e963e,_0x36e01e,_0x23f4d0){let _0x43bb9b=_0x9e963e[0x0]+(_0x36e01e[0x0]-_0x9e963e[0x0])*_0x23f4d0,_0x197de7=_0x9e963e[0x1]+(_0x36e01e[0x1]-_0x9e963e[0x1])*_0x23f4d0;return[_0x43bb9b,_0x197de7];}function setDirectionsEnabled(_0x54c255){const _0x21b4a8=_0x4095bb,_0x1b00bd=document[_0x21b4a8(0x1d1)](_0x21b4a8(0x185)),_0x4180f2=document[_0x21b4a8(0x1d1)](_0x21b4a8(0x1e1));if(_0x1b00bd)_0x1b00bd[_0x21b4a8(0x1d3)][_0x21b4a8(0x177)]=_0x54c255?_0x21b4a8(0x18a):_0x21b4a8(0x196);if(_0x4180f2)_0x4180f2[_0x21b4a8(0x1d3)][_0x21b4a8(0x177)]=_0x54c255?_0x21b4a8(0x18a):_0x21b4a8(0x196);}
+    /***********************************************************
+     * 0) Globale Variablen & Hilfsfunktionen
+     ***********************************************************/
+	let colorSizeMap = {
+		"black": 4,	
+		"red": 4,
+		"blue": 4,
+		"yellow": 6
+	};
+
+	// Kleine Helferfunktion, um die Größe aus colorSizeMap zu holen:
+	
+	function getSizeForFeature(feature) {
+		// Hier lassen wir uns vom Feature die Farbe geben (z.B. "blue")
+		let c = feature.get("color");
+		if (!c) c = "black";
+		let s = colorSizeMap[c];
+		if (!s) s = 4; // Fallback
+		return s;
+	} 
+	 
+	 
+    let debugMode = true;
+    function dbg(msg){ if(debugMode) console.log("[DEBUG] " + msg); }
+
+    let mapTilerKey = "";
+    let bingKey     = "";
+    let mapboxKey   = "";
+
+    // 0=OSM, 1=MapTiler, 2=Mapbox, 3=Bing
+    let currentMapMode = 0;
+
+    let map;
+    let osmLayer;
+    let satLayer;
+    let vectorLayer;
+
+    let channelObj = null;
+
+    let featuresMapIndex = {};
+    let featuresMapSid   = {};
+
+    let moveMode= false;
+    let modifyInteraction= null;
+    let addNewPointMode= false;
+
+    let markB_idx= -1;
+    let markE_idx= -1;
+
+    let videoIsPlaying= false;
+
+    // => Ausgewählter Punkt => Start
+    let selectedCoord = null;
+    let selectedIndex = null;
+
+    // => Toggle: Directions an/aus
+    let directionsMode = false;
+
+    // => Speed-Input DOM
+    let speedInputContainer = null;
+    let speedInput = null;
+
+    // NEU: Profil
+    let mapboxProfile = "cycling"; // default
+    // => 0: "cycling", 1: "walking", 2:"driving"
+    let profileIndex= 0;
+    const profileList= ["cycling","walking","driving"];
+    const profileNames= ["Bike","Foot","Car"];
+
+    // -------------------------------------------------
+    // NEU: Loading-Counter => Referenzzählung
+    // -------------------------------------------------
+    let loadingCounter = 0;
+
+	function getMaxIndex() {
+      // alle keys von featuresMapIndex holen, in Zahlen umwandeln
+      let keys = Object.keys(featuresMapIndex).map(k => parseInt(k));
+      if (!keys.length) return -1;
+       return Math.max(...keys);
+    }
+	
+    function pyLog(message){
+      if(channelObj && channelObj.jsLog){
+        channelObj.jsLog(message);
+      } else {
+        console.log("[JS->Py fallback] " + message);
+      }
+    }
+
+    function showKeyWarning(msg){
+      const kw = document.getElementById("keyWarning");
+      if(!kw) return;
+      kw.innerText = msg;
+      kw.style.display = "block";
+    }
+    function hideKeyWarning(){
+      const kw = document.getElementById("keyWarning");
+      if(!kw) return;
+      kw.style.display = "none";
+    }
+
+    function showLoading(msg="Loading..."){
+      loadingCounter++;
+      const elem = document.getElementById("loadingIndicator");
+      if(!elem) return;
+      elem.innerText = msg;
+      elem.style.display = "block";
+    }
+    function hideLoading(){
+      if(loadingCounter>0){
+        loadingCounter--;
+      }
+      if(loadingCounter===0){
+        const elem = document.getElementById("loadingIndicator");
+        if(!elem) return;
+        elem.style.display = "none";
+      }
+    }
+
+    /***********************************************************
+     * window.onload
+     ***********************************************************/
+    window.onload = function(){
+      if(typeof qt !== "undefined" && qt.webChannelTransport){
+        new QWebChannel(qt.webChannelTransport, function(channel){
+          channelObj = channel.objects.mapBridge;
+        });
+      } else {
+        console.log("[DEBUG] normal Browser => no QWebChannel => fallback");
+      }
+
+      // Speed-Input DOM
+      speedInputContainer = document.getElementById("speedInputContainer");
+      speedInput = document.getElementById("speedInput");
+
+      initMap();
+
+      let mvBtn = document.getElementById("mapViewBtn");
+      if(mvBtn){
+        mvBtn.addEventListener("click", cycleMapMode);
+      }
+
+      let moveB= document.getElementById("moveBtn");
+      if(moveB){
+        moveB.addEventListener("click", ()=>{
+          enableMoveMode(!moveMode);
+        });
+      }
+
+      let syncB= document.getElementById("btnSyncNoArg");
+      if(syncB){
+        syncB.addEventListener("click", ()=>{
+          if(channelObj && channelObj.syncNoArgSlot){
+            channelObj.syncNoArgSlot();
+          }
+        });
+      }
+
+      let newB= document.getElementById("btnNewPoint");
+      if(newB){
+        newB.addEventListener("click", ()=>{
+          addNewPointMode= !addNewPointMode;
+          document.body.style.cursor = addNewPointMode ? "crosshair" : "";
+        });
+      }
+
+      let dirB= document.getElementById("btnDirections");
+      if(dirB){
+        dirB.addEventListener("click", ()=>{
+          startDirectionsMode();
+        });
+      }
+
+      // NEU: Profil-Button
+      let profB= document.getElementById("btnProfile");
+      if(profB){
+        profB.addEventListener("click", cycleProfile);
+      }
+    };
+
+    /***********************************************************
+     * cycleProfile() => Bike->Foot->Car
+     ***********************************************************/
+    function cycleProfile(){
+      profileIndex= (profileIndex+1) % 3;  // 0->1->2->0
+      mapboxProfile= profileList[profileIndex];
+      let profB= document.getElementById("btnProfile");
+      if(profB){
+        profB.textContent= profileNames[profileIndex];
+      }
+      dbg("Profile switched => " + mapboxProfile);
+    }
+
+    /***********************************************************
+     * 1) cycleMapMode => 0..3
+     ***********************************************************/
+    function cycleMapMode(){
+      currentMapMode = (currentMapMode + 1) % 3;
+      let names = ["OSM","MapTiler","Mapbox"];
+      let btn = document.getElementById("mapViewBtn");
+      btn.textContent = names[currentMapMode];
+
+      if(currentMapMode===0){
+        hideKeyWarning();
+        osmLayer.setVisible(true);
+        satLayer.setVisible(false);
+      } else {
+        osmLayer.setVisible(false);
+        satLayer.setVisible(true);
+        satLayer.setSource(createSatelliteSource());
+      }
+    }
+
+    /***********************************************************
+     * 2) initMap
+     ***********************************************************/
+    function initMap(){
+      osmLayer = new ol.layer.Tile({
+        source: new ol.source.OSM(),
+        visible: (currentMapMode===0)
+      });
+      satLayer = new ol.layer.Tile({
+        source: createSatelliteSource(),
+        visible: (currentMapMode!==0)
+      });
+      vectorLayer = new ol.layer.Vector({
+        source: new ol.source.Vector()
+      });
+
+      map = new ol.Map({
+        target: "map",
+        layers: [osmLayer, satLayer, vectorLayer],
+        view: new ol.View({
+          center: ol.proj.fromLonLat([10,50]),
+          zoom: 5,
+          maxZoom: 30
+        })
+      });
+
+      initModify();
+
+      map.on("singleclick", function(evt){
+        if(addNewPointMode){
+          addNewPointMode= false;
+          document.body.style.cursor="";
+          insertNewPointOnLineOrEnd(evt);
+          return;
+        }
+
+        if(directionsMode){
+          directionsMode=false;
+          let dirBtn= document.getElementById("btnDirections");
+          if(dirBtn){
+            dirBtn.style.backgroundColor="rgba(200,200,200,0.5)";
+          }
+          document.body.style.cursor="";
+          if(speedInputContainer){
+            speedInputContainer.style.display="none";
+          }
+
+          let destCoord= ol.proj.toLonLat(evt.coordinate);
+          pyLog("Directions: Zielpunkt B => "+destCoord);
+          if(selectedCoord){
+            fetchAndInsertDirections(selectedCoord, destCoord);
+          }
+          return;
+        }
+
+        // Normaler Klick => Feature
+        selectedCoord=null;
+        selectedIndex=null;
+
+        if(!channelObj) return;
+        map.forEachFeatureAtPixel(evt.pixel, function(feature){
+          let idx= feature.get("index");
+          let sid= feature.get("stable_id");
+          let geom= feature.getGeometry();
+          if(geom && geom.getType()==="Point"){
+            selectedCoord= ol.proj.toLonLat(geom.getCoordinates());
+          }
+          if(idx!==undefined){
+            selectedIndex= idx;
+            dbg("clicked index="+idx);
+            if(channelObj.pointClicked){
+              channelObj.pointClicked(idx);
+            }
+            return true;
+          }
+          if(sid){
+            dbg("clicked stable_id="+sid);
+            if(channelObj.pointClicked){
+              channelObj.pointClicked(sid);
+            }
+            return true;
+          }
+          return false;
+        });
+      });
+    }
+
+    /***********************************************************
+     * 3) createSatelliteSource()
+     ***********************************************************/
+    function createSatelliteSource(){
+      hideKeyWarning();
+      if(currentMapMode===0){
+        return new ol.source.OSM();
+      }
+      else if(currentMapMode===1){
+        if(!mapTilerKey || mapTilerKey.trim()===""){
+          dbg("No mapTilerKey => fallback OSM");
+          showKeyWarning("No valid API key for MapTiler!");
+          return new ol.source.OSM();
+        }
+        return new ol.source.XYZ({
+          url: "https://api.maptiler.com/tiles/satellite/{z}/{x}/{y}.jpg?key="+mapTilerKey,
+          tileSize: 512,
+          maxZoom: 21
+        });
+      }
+      else{
+        if(!mapboxKey || mapboxKey.trim()===""){
+          dbg("No mapboxKey => fallback OSM");
+          showKeyWarning("No valid API key for Mapbox!");
+          return new ol.source.OSM();
+        }
+        return new ol.source.XYZ({
+          url: "https://api.mapbox.com/styles/v1/mapbox/satellite-v9/tiles/{z}/{x}/{y}?access_token="+mapboxKey,
+          tileSize: 512,
+          maxZoom: 22
+        });
+      }
+      
+    }
+
+    /***********************************************************
+     * 4) setMapTilerKey, setBingKey, setMapboxKey
+     ***********************************************************/
+    function setMapTilerKey(newKey){ mapTilerKey=newKey; }
+    function setBingKey(newKey){ bingKey=newKey; }
+    function setMapboxKey(newKey){ mapboxKey=newKey; }
+
+    /***********************************************************
+     * 5) initModify => Move
+     ***********************************************************/
+    function initModify(){
+      modifyInteraction= new ol.interaction.Modify({
+        source: vectorLayer.getSource()
+      });
+      modifyInteraction.on("modifyend", function(evt){
+        let arr= evt.features.getArray();
+        arr.forEach(f=>{
+          let idx= f.get("index");
+          let sid= f.get("stable_id");
+          let coords= f.getGeometry().getCoordinates();
+          let ll= ol.proj.toLonLat(coords);
+          if(channelObj && channelObj.pointMoved){
+            if(sid!==undefined){
+              channelObj.pointMoved(sid, ll[1], ll[0]);
+            } else if(idx!==undefined){
+              channelObj.pointMoved(idx, ll[1], ll[0]);
+            }
+          }
+        });
+      });
+    }
+    function enableMoveMode(enable){
+      moveMode= enable;
+      let b= document.getElementById("moveBtn");
+      if(!map || !modifyInteraction) return;
+      if(moveMode){
+        map.addInteraction(modifyInteraction);
+        b.style.backgroundColor="rgba(255,100,100,0.5)";
+      } else {
+        map.removeInteraction(modifyInteraction);
+        b.style.backgroundColor="rgba(200,200,200,0.5)";
+      }
+    }
+
+    /***********************************************************
+     * 6) insertNewPointOnLineOrEnd
+     ***********************************************************/
+    
+	function insertNewPointOnLineOrEnd(evt){
+    // Prüfe, ob vorher ein Punkt ausgewählt wurde (selectedIndex != null).
+    // Falls selectedIndex===0 => => wir setzen idx = -2 (Vor dem ersten).
+    // Falls selectedIndex=== letzterIndex => => idx = -1 => am Ende.
+	let maxIdx = getMaxIndex();
+	if (maxIdx === -1) {
+		// => Hier darf man ohne Selektion einen neuen *ersten* Punkt setzen.
+		let ll = ol.proj.toLonLat(evt.coordinate);
+		if (channelObj && channelObj.newPointInserted) {
+		channelObj.newPointInserted(ll[1], ll[0], -1);
+		}
+		addNewPointMode = false;
+		document.body.style.cursor = "";
+		return;
+	}
+	
+	
+    if (selectedIndex == null) {
+        alert("No point selected ⇒ cannot insert new point.");
+        addNewPointMode = false;
+        document.body.style.cursor = "";
+        return;
+    }
+	
+	if (maxIdx === 0) {
+		// => es gibt nur diesen einen Punkt
+		let ll = ol.proj.toLonLat(evt.coordinate);
+		if (channelObj && channelObj.newPointInserted) {
+		// => Immer hinten anfügen (idx = -1)
+		channelObj.newPointInserted(ll[1], ll[0], -1);
+		}
+		selectedIndex = null;
+		addNewPointMode = false;
+		document.body.style.cursor = "";
+		return;
+	}
+	
+    if (selectedIndex === 0) {
+        // => Vorne einfügen
+        let ll = ol.proj.toLonLat(evt.coordinate);
+        if (channelObj && channelObj.newPointInserted) {
+            channelObj.newPointInserted(ll[1], ll[0], -2); 
+            // -2 signalisiert "vor dem ersten Punkt"
+        }
+        // Danach selectedIndex zurücksetzen
+        selectedIndex = null;
+        addNewPointMode = false;
+        document.body.style.cursor = "";
+        return;
+    }
+    else {
+        // Prüfen, ob er den letzten geklickt hat – das macht (index = -1)
+        let mIdx = getMaxIndex();
+        if (selectedIndex === mIdx && mIdx >= 0) {
+            // => "hinten" anfügen => idx=-1
+            let ll = ol.proj.toLonLat(evt.coordinate);
+            if (channelObj && channelObj.newPointInserted) {
+                channelObj.newPointInserted(ll[1], ll[0], -1);
+            }
+            selectedIndex = null;
+            addNewPointMode = false;
+            document.body.style.cursor = "";
+            return;
+        }
+        // --- Sonst "alte" Logik => Zwischen zwei Punkten oder Ende ---
+        let foundLine = null;
+        let closestCoord = null;
+        map.forEachFeatureAtPixel(evt.pixel, (feature, layer) => {
+            let geom = feature.getGeometry();
+            if (geom.getType() === "LineString") {
+                foundLine = feature;
+                closestCoord = geom.getClosestPoint(evt.coordinate);
+                return true; 
+            }
+            return false;
+        }, {
+            hitTolerance: 10
+        });
+
+        if (!foundLine || !closestCoord) {
+            // => index = -1 => "am Ende"
+            let ll = ol.proj.toLonLat(evt.coordinate);
+            if (channelObj && channelObj.newPointInserted) {
+                channelObj.newPointInserted(ll[1], ll[0], -1);
+            }
+            selectedIndex = null;
+            addNewPointMode = false;
+            document.body.style.cursor = "";
+            return;
+        }
+        
+        // Hier: Zwischen Segmenten
+        let coords = foundLine.getGeometry().getCoordinates();
+        if (coords.length < 2) {
+            let ll = ol.proj.toLonLat(evt.coordinate);
+            channelObj.newPointInserted(ll[1], ll[0], -1);
+        } else {
+            let seg = findSegmentIndexForClosestCoord(coords, closestCoord);
+            let cLL = ol.proj.toLonLat(closestCoord);
+            channelObj.newPointInserted(cLL[1], cLL[0], seg);
+        }
+        selectedIndex = null;
+        addNewPointMode = false;
+        document.body.style.cursor = "";
+    }
+}
+
+	
+    function findSegmentIndexForClosestCoord(coords, p){
+      let minDist= Infinity;
+      let bestI=0;
+      for(let i=0; i<coords.length-1; i++){
+        let d= pointSegmentDistance(p, coords[i], coords[i+1]);
+        if(d<minDist){
+          minDist=d; bestI=i;
+        }
+      }
+      return bestI;
+    }
+    function pointSegmentDistance(p,a,b){
+      let px=p[0], py=p[1];
+      let ax=a[0], ay=a[1];
+      let bx=b[0], by=b[1];
+      let dx=bx-ax, dy=by-ay;
+      if(dx===0&&dy===0){
+        return Math.hypot(px-ax,py-ay);
+      }
+      let t=((px-ax)*dx+(py-ay)*dy)/(dx*dx+dy*dy);
+      if(t<0)t=0;if(t>1)t=1;
+      let cx=ax+t*dx, cy=ay+t*dy;
+      return Math.hypot(px-cx, py-cy);
+    }
+
+    /***********************************************************
+     * 7) loadRoute(...) => index + stable_id
+     ***********************************************************/
+    function loadRoute(routeGeoJson, doFit=true){
+      showLoading("Loading route ...");
+      vectorLayer.getSource().clear();
+      featuresMapIndex={};
+      featuresMapSid={};
+
+      if(!routeGeoJson || !routeGeoJson.features){
+        console.log("[DEBUG] no routeGeoJson => skip");
+        hideLoading();
+        return;
+      }
+      for(let feat of routeGeoJson.features){
+        let g= feat.geometry;
+        let p= feat.properties||{};
+        if(!g) continue;
+
+        if(g.type==="LineString"){
+          let coords= g.coordinates.map(c=>ol.proj.fromLonLat(c));
+          let lineF= new ol.Feature({
+            geometry: new ol.geom.LineString(coords),
+            color: p.color||"#000"
+          });
+          vectorLayer.getSource().addFeature(lineF);
+          updateFeatureStyle(lineF);
+        } 
+        else if(g.type==="Point"){
+          let coords= ol.proj.fromLonLat(g.coordinates);
+          let idx= p.index;
+          let sid= p.stable_id;
+          //let color= p.color||"#000000";
+		  let rawColor = p.color || "black"; // default = "black" statt "#000000"
+			if (rawColor === "#000000") rawColor = "black";
+			else if (rawColor === "#FF0000") rawColor = "red";
+			else if (rawColor === "#0000FF") rawColor = "blue";
+			else if (rawColor === "#FFFF00") rawColor = "yellow";
+			let color = rawColor;
+		  
+          let size= p.size||4;
+
+          let f= new ol.Feature({
+            geometry: new ol.geom.Point(coords),
+            index: idx,
+            stable_id: sid,
+            color: color,
+            size: size
+          });
+          vectorLayer.getSource().addFeature(f);
+
+          if(idx!==undefined){
+            featuresMapIndex[idx]= f;
+          }
+          if(sid){
+            featuresMapSid[sid]= f;
+          }
+          updateFeatureStyle(f);
+        }
+      }
+
+      if(doFit){
+        let ext= vectorLayer.getSource().getExtent();
+        if(!ol.extent.isEmpty(ext)){
+          map.getView().fit(ext,{padding:[30,30,30,30],maxZoom:20});
+        }
+      }
+      hideLoading();
+    }
+
+    /***********************************************************
+     * 8) addOrUpdatePoint, removePoint, updateFeatureStyle
+     ***********************************************************/
+    function addOrUpdatePoint(stable_id, lat, lon, color="#000000", size=4){
+      showLoading("Updating point...");
+	  if (inColor === "#000000") inColor = "black";
+		else if (inColor === "#FF0000") inColor = "red";
+		else if (inColor === "#0000FF") inColor = "blue";
+		else if (inColor === "#FFFF00") inColor = "yellow";
+	  
+      let f= featuresMapSid[stable_id];
+      let coord= ol.proj.fromLonLat([lon, lat]);
+      if(!f){
+        f= new ol.Feature({
+          geometry: new ol.geom.Point(coord),
+          stable_id: stable_id,
+          color: color,
+          size: size
+        });
+        vectorLayer.getSource().addFeature(f);
+        featuresMapSid[stable_id]= f;
+      } else {
+        f.set("color", color);
+        
+        f.getGeometry().setCoordinates(coord);
+      }
+      updateFeatureStyle(f);
+      hideLoading();
+    }
+
+    function removePoint(stable_id){
+      showLoading("Removing point...");
+      let f= featuresMapSid[stable_id];
+      if(!f){
+        hideLoading();
+        return;
+      }
+      vectorLayer.getSource().removeFeature(f);
+      delete featuresMapSid[stable_id];
+
+      for(let k in featuresMapIndex){
+        if(featuresMapIndex[k]===f){
+          delete featuresMapIndex[k];
+          break;
+        }
+      }
+      hideLoading();
+    }
+
+    function updateFeatureStyle(feature){
+	// 'color' ist z.B. "blue", "yellow", ...
+	let c = feature.get("color") || "black";
+
+	// Hier definieren wir, wie wir Name => Hex abbilden:
+	let hex = "#000000";
+	if      (c === "black")   hex = "#000000";
+	else if (c === "red")     hex = "#FF0000";
+	else if (c === "blue")    hex = "#0000FF";
+	else if (c === "yellow")  hex = "#FFFF00";
+
+	let s = getSizeForFeature(feature); // holt aus colorSizeMap[...] die Größe
+
+	let geom = feature.getGeometry();
+	if (geom.getType() === "LineString") {
+		feature.setStyle(new ol.style.Style({
+		stroke: new ol.style.Stroke({color: hex, width: 2})
+		}));
+	} else {
+		feature.setStyle(new ol.style.Style({
+		image: new ol.style.Circle({
+			radius: s,
+			fill: new ol.style.Fill({ color: hex }),
+			stroke: new ol.style.Stroke({ color: "#fff", width: 1 })
+		})
+		}));
+	}
+	}
+
+
+    /***********************************************************
+     * 9) FUNKTION: updateAllPointsByColor(col, newSize)
+     ***********************************************************/
+    function updateAllPointsByColor(col, newSize) {
+	// z.B. col = "blue"
+	// in colorSizeMap['blue'] = newSize
+	colorSizeMap[col] = newSize;
+
+	const feats = vectorLayer.getSource().getFeatures();
+	feats.forEach(f => {
+		// Falls Feature dieselbe Farbe hat => neu stylen
+		if (f.get("color") === col) {
+		updateFeatureStyle(f);
+		}
+	});
+	}
+
+
+    /***********************************************************
+     * 10) Mark B..E, show_blue, show_yellow
+     ***********************************************************/
+    function clear_marked_range(){
+      unmark_range_markB_E();
+      markB_idx=-1;
+      markE_idx=-1;
+    }
+    function set_markB_point(new_b){
+      if(markE_idx>=0 && new_b>=markE_idx){
+        console.log(`[map] B=${new_b} cannot be >= E=${markE_idx} => skip`);
+        return;
+      }
+      unmark_range_markB_E();
+      markB_idx= new_b;
+      mark_new_range_markB_E();
+    }
+    function set_markE_point(new_e){
+      if(markB_idx>=0 && new_e<=markB_idx){
+        console.log(`[map] E=${new_e} cannot be <= B=${markB_idx} => skip`);
+        return;
+      }
+      unmark_range_markB_E();
+      markE_idx= new_e;
+      mark_new_range_markB_E();
+    }
+    function unmark_range_markB_E(){
+      if(markB_idx>=0 && markE_idx>=0){
+        let s= Math.min(markB_idx, markE_idx);
+        let e= Math.max(markB_idx, markE_idx);
+        unmark_range(s,e);
+      } else if(markB_idx>=0){
+        unmark_range(markB_idx,markB_idx);
+      } else if(markE_idx>=0){
+        unmark_range(markE_idx,markE_idx);
+      }
+    }
+    function mark_new_range_markB_E(){
+      if(markB_idx>=0 && markE_idx>=0){
+        let s= Math.min(markB_idx, markE_idx);
+        let e= Math.max(markB_idx, markE_idx);
+        mark_range_in_red(s,e);
+      } else if(markB_idx>=0){
+        mark_range_in_red(markB_idx,markB_idx);
+      } else if(markE_idx>=0){
+        mark_range_in_red(markE_idx,markE_idx);
+      }
+    }
+    function unmark_range(start_i, end_i){
+      for(let i=start_i; i<=end_i; i++){
+        let f= featuresMapIndex[i];
+        if(f){
+          //f.set("color","#000000");
+          f.set("color", "black");
+          updateFeatureStyle(f);
+        }
+      }
+    }
+    function mark_range_in_red(start_i, end_i){
+      for(let i=start_i; i<=end_i; i++){
+        let f= featuresMapIndex[i];
+        if(f){
+          //f.set("color","#FF0000");
+		  f.set("color", "red");
+          
+          updateFeatureStyle(f);
+        }
+      }
+    }
+    function highlightPoint(index, color, size, do_center=false){
+      let f= featuresMapIndex[index];
+      if(!f) return;
+      f.set("color",color);
+	  
+	  if (typeof size === "number") {
+        f.set("size", size);
+		} else {
+			// Falls None/undefined => unset("size"), 
+			// dann nimmt updateFeatureStyle(...) fallback via colorSizeMap
+			f.unset("size");
+		}
+	  
+      
+      updateFeatureStyle(f);
+      if(do_center){
+        let c= f.getGeometry().getCoordinates();
+        map.getView().animate({center:c,duration:600});
+      } else {
+        if(videoIsPlaying){
+          checkAndCenterIfNeeded(index,50);
+        }
+      }
+    }
+    
+
+    function setVideoPlayState(isPlaying){
+      videoIsPlaying= isPlaying;
+      dbg("[DEBUG] setVideoPlayState => "+isPlaying);
+    }
+    function checkAndCenterIfNeeded(index, marginPx=50){
+      let f= featuresMapIndex[index];
+      if(!f) return;
+      let coords= f.getGeometry().getCoordinates();
+      let pixel= map.getPixelFromCoordinate(coords);
+      let size= map.getSize();
+      if(!size) return;
+      let w= size[0], h= size[1];
+      if(pixel[0]<marginPx||pixel[0]>(w-marginPx)||
+         pixel[1]<marginPx||pixel[1]>(h-marginPx)){
+        map.getView().animate({center:coords,duration:600});
+      }
+    }
+
+    /***********************************************************
+     * 11) Directions mit Geschwindigkeitsangabe => Toggle
+     ***********************************************************/
+    function startDirectionsMode(){
+      let dirBtn= document.getElementById("btnDirections");
+
+      // => Falls directionsMode ALREADY true => toggeln => aus
+      if(directionsMode){
+        directionsMode= false;
+        if(dirBtn) dirBtn.style.backgroundColor= "rgba(200,200,200,0.5)";
+        document.body.style.cursor="";
+        if(speedInputContainer) speedInputContainer.style.display="none";
+        pyLog("Directions mode turned OFF => no destination needed");
+        return;
+      }
+
+      // => Code wie bisher (Sicherheits-Check)
+      if(!selectedCoord){
+        alert("No start point selected. Please select a point first!");
+        return;
+      }
+      let keys= Object.keys(featuresMapIndex);
+      if(keys.length<1){
+        alert("No route points => Directions not possible!");
+        return;
+      }
+      keys.sort((a,b)=> parseInt(a)-parseInt(b));
+      let n= keys.length;
+      if(n===1){
+        // nur ein Punkt => ok
+      } else {
+        let firstIdx= parseInt(keys[0]);
+        let lastIdx= parseInt(keys[keys.length-1]);
+        if(selectedIndex!==firstIdx && selectedIndex!==lastIdx){
+          alert("Directions are only allowed from the first or last point (or if there is only one point)!");
+          return;
+        }
+      }
+
+      if(!mapboxKey || mapboxKey.trim()===""){
+        alert("No mapboxKey => directions not possible!");
+        return;
+      }
+
+      // => Speed-Feld einblenden
+      if(speedInputContainer){
+        speedInputContainer.style.display="block";
+      }
+      directionsMode=true;
+      if(dirBtn) dirBtn.style.backgroundColor= "rgba(255,100,100,0.5)"; // Farbe wie Move
+      document.body.style.cursor="crosshair";
+      pyLog("Directions Mode => next click is Destination B. Then time-based insertion.");
+    }
+
+    /***********************************************************
+     * fetchAndInsertDirections => mit Loading-Counter
+     ***********************************************************/
+    async function fetchAndInsertDirections(coordA, coordB){
+      showLoading("Please wait, we are calculating the new points!");
+      let spVal= parseFloat(speedInput.value);
+      if(isNaN(spVal)||spVal<=0){
+        spVal=20;
+      }
+      pyLog("Using speed => "+spVal+" km/h => time-based densify.");
+
+      let url= "https://api.mapbox.com/directions/v5/mapbox/"
+               + mapboxProfile + "/"
+               + coordA[0]+","+coordA[1]+";"
+               + coordB[0]+","+coordB[1]
+               + "?geometries=geojson&overview=full&access_token="+mapboxKey;
+      pyLog("Mapbox Directions URL => "+url);
+
+      try{
+        let resp= await fetch(url);
+        let data= await resp.json();
+        if(!data.routes||data.routes.length===0){
+          pyLog("No route found!");
+          return;
+        }
+        let coords= data.routes[0].geometry.coordinates;
+        if(!coords||coords.length<2){
+          pyLog("Route invalid/too short!");
+          return;
+        }
+        let speedMs= spVal/3.6;
+        let resultCoords= densifyLineStringTimeBased(coords, speedMs);
+        pyLog("Time-based => created "+resultCoords.length+" new points.");
+
+        resultCoords.forEach(ll=>{
+          let lat= ll[1];
+          let lon= ll[0];
+          if(channelObj && channelObj.newPointInserted){
+            channelObj.newPointInserted(lat, lon, -1);
+          }
+        });
+
+      }catch(err){
+        console.error(err);
+        pyLog("Directions error => "+err);
+      }
+      finally {
+        hideLoading();
+      }
+    }
+
+    function densifyLineStringTimeBased(lonLatArray, speedMs){
+      if(lonLatArray.length<2) return lonLatArray;
+      let segs=[];
+      let totalDist=0;
+      for(let i=0; i<lonLatArray.length-1; i++){
+        let a= lonLatArray[i];
+        let b= lonLatArray[i+1];
+        let d= geoDistanceInMeters(a,b);
+        segs.push({start:a, end:b, dist:d, cumStart: totalDist});
+        totalDist+= d;
+      }
+      let result=[ lonLatArray[0] ];
+      if(totalDist<0.01){
+        return result;
+      }
+      let s=0;
+      while(true){
+        s+= speedMs;
+        if(s>= totalDist) break;
+        let coord= getCoordAtDist(segs, s);
+        result.push(coord);
+      }
+      result.push(lonLatArray[lonLatArray.length-1]);
+      return result;
+    }
+    function getCoordAtDist(segs, s){
+      for(let i=0; i<segs.length; i++){
+        let seg= segs[i];
+        let s0= seg.cumStart;
+        let s1= seg.cumStart+seg.dist;
+        if(s>=s0 && s<=s1){
+          let frac= (s-s0)/seg.dist;
+          return interpolateCoord(seg.start, seg.end, frac);
+        }
+      }
+      let last= segs[segs.length-1];
+      return last.end;
+    }
+    function geoDistanceInMeters(ll1, ll2){
+      let R=6371000;
+      let lat1= ll1[1]*Math.PI/180, lon1= ll1[0]*Math.PI/180;
+      let lat2= ll2[1]*Math.PI/180, lon2= ll2[0]*Math.PI/180;
+      let dLat= lat2-lat1;
+      let dLon= lon2-lon1;
+      let a= Math.sin(dLat/2)**2 + Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLon/2)**2;
+      return R*2*Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    }
+    function interpolateCoord(a,b,f){
+      let lon= a[0] + (b[0]-a[0])*f;
+      let lat= a[1] + (b[1]-a[1])*f;
+      return [lon,lat];
+    }
+
+    /***********************************************************
+     * 13) setDirectionsEnabled(...) => Versteckt/zeigt Buttons
+     ***********************************************************/
+    function setDirectionsEnabled(isEnabled) {
+      const dirBtn  = document.getElementById("btnDirections");
+      const profBtn = document.getElementById("btnProfile");
+
+      if (dirBtn)  dirBtn.style.display  = isEnabled ? "block" : "none";
+      if (profBtn) profBtn.style.display = isEnabled ? "block" : "none";
+    }
   </script>
 </body>
 </html>

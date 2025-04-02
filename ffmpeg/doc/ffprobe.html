@@ -1,6 +1,6 @@
 <!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
 <html>
-<!-- Created by , GNU Texinfo 7.1 -->
+<!-- Created by , GNU Texinfo 7.1.1 -->
   <head>
     <meta charset="utf-8">
     <title>
@@ -918,20 +918,6 @@ while other writers always print them. This option enables one to control this b
 Valid values are <code class="code">always</code>/<code class="code">1</code>, <code class="code">never</code>/<code class="code">0</code> and <code class="code">auto</code>/<code class="code">-1</code>.
 Default is <var class="var">auto</var>.
 </p>
-</dd>
-<dt><samp class="option">-analyze_frames</samp></dt>
-<dd><p>Analyze frames and/or their side data up to the provided read interval,
-providing additional information that may be useful at a stream level.
-Must be paired with the <samp class="option">-show_streams</samp> option or it will have no effect.
-</p>
-<p>Currently, the additional fields provided by this option when enabled are the
-<code class="code">closed_captions</code> and <code class="code">film_grain</code> fields.
-</p>
-<p>For example, to analyze the first 20 seconds and populate these fields:
-</p><div class="example">
-<pre class="example-preformatted">ffprobe -show_streams -analyze_frames -read_intervals &quot;%+20&quot; INPUT
-</pre></div>
-
 </dd>
 <dt><samp class="option">-bitexact</samp></dt>
 <dd><p>Force bitexact output, useful to produce output which is not dependent

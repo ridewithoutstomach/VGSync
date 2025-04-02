@@ -1,3 +1,22 @@
+# -*- coding: utf-8 -*-
+#
+# This file is part of VGSync.
+#
+# Copyright (C) 2025 by Bernd Eller
+#
+# VGSync is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# VGSync is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+# See the GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with VGSync. If not, see <https://www.gnu.org/licenses/>.
+#
 # config.py
 
 import os
@@ -7,14 +26,11 @@ import tempfile
 import shutil
 from PySide6.QtCore import QSettings
 
-from license_check import load_license  # <-- dein cryptography-basiertes Script
-
-
 ##############################################################################
 # 1) Versions-Konfiguration & Modus
 ##############################################################################
 
-APP_VERSION = "3.25"
+APP_VERSION = "3.26"
 
 # Falls du nur über den Server prüfen willst, ob diese APP_VERSION freigegeben ist,
 # setze das hier auf True.
@@ -65,75 +81,18 @@ def _get_license_path() -> str:
 ##############################################################################
 
 # Ob wir einen Lizenz-Fingerprint abgleichen sollen (alter Mechanismus).
-FINGERPRINT_CHECK_ENABLED = True
-
-# Zum Umschalten ins Demo-Mode.
-DEMO_MODE = False  # Wird ggf. im Hauptprogramm oder hier auf True gesetzt.
 
 # Temp-Ordner
 base_temp = tempfile.gettempdir()
 TMP_KEYFRAME_DIR = os.path.join(base_temp, "my_vgsync_keyframes")
 MY_GLOBAL_TMP_DIR = os.path.join(base_temp, "my_cut_segments_global")
 
-LICENSE_FILE = _get_license_path()
 
-HARDCODED_FINGERPRINT = ""
+
+
 LOCAL_VERSION = ""
-REGISTERED_NAME = ""
-REGISTERED_EMAIL = ""
-
-##############################################################################
-# 4) Lizenz-Daten laden oder ignorieren - inkl. Demo-Fallback
-##############################################################################
-
-def _init_license_data():
-    """
-    Lädt (falls SERVER_VERSION_CHECK_ONLY=False) die license.lic
-    und setzt globale Variablen. Schlägt das Laden fehl und 
-    FINGERPRINT_CHECK_ENABLED=True, gehen wir in den DEMO_MODE.
-    """
-    global HARDCODED_FINGERPRINT, LOCAL_VERSION
-    global REGISTERED_NAME, REGISTERED_EMAIL, DEMO_MODE
-
-    if SERVER_VERSION_CHECK_ONLY:
-        # Nur Servercheck => license.lic ignorieren
-        LOCAL_VERSION = APP_VERSION
-        HARDCODED_FINGERPRINT = ""
-        REGISTERED_NAME = "ServerCheckUser"
-        REGISTERED_EMAIL = "unknown@example.com"
-    else:
-        # Normale Vorgehensweise: license.lic laden, aber Demo-Fallback falls nicht möglich.
-        try:
-            licdata = load_license(LICENSE_FILE)
-            print(f"[DEBUG a) license.lic data => {licdata}")
-            HARDCODED_FINGERPRINT = licdata["fingerprint"]
-            LOCAL_VERSION         = licdata["version"]
-            REGISTERED_NAME       = licdata["registered_name"]
-            REGISTERED_EMAIL      = licdata["registered_email"]
-
-        except Exception as e:
-            print(f"[WARN] License invalid or file missing: {e}")
-            if FINGERPRINT_CHECK_ENABLED:
-                # => Demomodus erzwingen
-                #print("[INFO] FINGERPRINT_CHECK_ENABLED = True => We switch to DEMO_MODE because no valid license was found.")
-                DEMO_MODE = True
-                # Setze LOCAL_VERSION = APP_VERSION, damit der Servercheck dennoch auf die 
-                # in APP_VERSION eingestellte Version geht.
-                LOCAL_VERSION = APP_VERSION
-                HARDCODED_FINGERPRINT = ""
-                REGISTERED_NAME = "DemoUser"
-                REGISTERED_EMAIL = "unknown@example.com"
-            else:
-                # Falls Fingerprint-Check abgeschaltet ist, kannst du hier 
-                # entscheiden, was passieren soll. Evtl. kein Demo-Modus?
-                print("[INFO] FINGERPRINT_CHECK_ENABLED = False => We'll just run without license.")
-                LOCAL_VERSION = APP_VERSION
-                HARDCODED_FINGERPRINT = ""
-                REGISTERED_NAME = "NoLicenseFile"
-                REGISTERED_EMAIL = "unknown@example.com"
 
 
-_init_license_data()
 
 ##############################################################################
 # 5) Zusatz-Funktionen für QSettings usw.
