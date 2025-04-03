@@ -26,6 +26,8 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox
 from PySide6.QtCore import QSettings
 import ctypes
 
+
+
 def add_to_process_path(path_str: str):
     if not path_str:
         return
@@ -76,6 +78,84 @@ def find_ffmpeg_folder() -> str:
         return os.path.dirname(ffmpeg_exec)
 
     return ""
+
+def ensure_mpv(parent_widget) -> bool:
+    """
+    Stellt sicher, dass libmpv-2.dll verfügbar ist.
+    1) Versucht per find_mpv_folder() etwas zu finden.
+    2) Wenn nichts gefunden -> Dialog zum Ordnerauswählen.
+    3) Prüft Gültigkeit -> Speichert in QSettings -> passt PATH an.
+    
+    Gibt True zurück, wenn am Ende alles korrekt gefunden/eingestellt wurde,
+    sonst False.
+    """
+    s = QSettings("VGSync", "VGSync")
+    folder = find_mpv_folder()
+
+    if folder and is_valid_mpv_folder(folder):
+        # Falls der Pfad aus QSettings oder Fallback kam,
+        # und QSettings derzeit etwas anderes gespeichert hat:
+        stored_in_settings = s.value("paths/mpv", "", type=str)
+        if stored_in_settings != folder:
+            s.setValue("paths/mpv", folder)
+    else:
+        # => Info-Meldung anzeigen, bevor wir den Datei-Dialog öffnen
+        QMessageBox.information(
+            parent_widget,
+            "MPV library required",
+            "Please select the folder where libmpv-2.dll is located.\n"
+            "Example (Windows):\n"
+            "  C:\\mpv\\lib\n\n"
+            "This is needed for preview and playback."
+        )
+        chosen = QFileDialog.getExistingDirectory(parent_widget, "Select MPV Folder")
+        if not chosen:
+            return False
+        if not is_valid_mpv_folder(chosen):
+            QMessageBox.critical(
+                parent_widget,
+                "MPV Missing",
+                f"No valid libmpv-2.dll found in:\n{chosen}"
+            )
+            return False
+
+        # => store
+        s.setValue("paths/mpv", chosen)
+        folder = chosen
+
+    # Nun folder und libmpv-2.dll in PATH eintragen
+    mpv_dll_path = os.path.join(folder, "libmpv-2.dll")
+    os.environ["MPV_LIBRARY_PATH"] = mpv_dll_path
+    add_to_process_path(folder)
+
+    # Debug-Ausgaben (optional)
+    print("[DEBUG] Final MPV folder =", folder)
+    print("[DEBUG] MPV_LIBRARY_PATH =", os.environ["MPV_LIBRARY_PATH"])
+
+    return True
+
+    
+def find_mpv_folder() -> str:
+    """
+    Sucht nach libmpv-2.dll:
+      1) QSettings
+      2) lokaler Fallback mpv/lib
+    Gibt einen Ordnerpfad zurück oder "" wenn nichts gefunden.
+    """
+    s = QSettings("VGSync", "VGSync")
+    stored_folder = s.value("paths/mpv", "", type=str)
+    if is_valid_mpv_folder(stored_folder):
+        return stored_folder
+
+    # Lokaler Fallback, z.B. <base_dir>/mpv/lib
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    fallback_dir = os.path.join(base_dir, "mpv", "lib")
+    if is_valid_mpv_folder(fallback_dir):
+        return fallback_dir
+
+    return ""
+    
+    
 
 def ensure_ffmpeg(parent_widget) -> bool:
     """
@@ -153,32 +233,5 @@ def is_valid_mpv_folder(folder: str) -> bool:
 
 
 def ensure_mpv_library(parent_widget, base_dir: str) -> None:
-    """
-    Liest aus QSettings ("paths/mpv") den Ordnerpfad. 
-    Falls valide -> nutzt diesen. 
-    Sonst -> fallback auf mitgelieferte DLL im Ordner mpv/lib.
     
-    Richtet dann `os.environ["MPV_LIBRARY_PATH"]` und PATH entsprechend ein.
-    """
-    s = QSettings("VGSync", "VGSync")
-    stored_folder = s.value("paths/mpv", "", type=str)
-
-    # Default (mitgeliefert):
-    mpv_default_dir = os.path.join(base_dir, "mpv", "lib")
-    mpv_default_dll = os.path.join(mpv_default_dir, "libmpv-2.dll")
-
-    if stored_folder and is_valid_mpv_folder(stored_folder):
-        # User hat einen eigenen Pfad angegeben und er ist gültig
-        chosen_dir = stored_folder
-    else:
-        # Fallback: unsere mitgelieferte DLL
-        chosen_dir = mpv_default_dir
-
-    # MPV_LIBRARY_PATH + PATH setzen:
-    os.environ["MPV_LIBRARY_PATH"] = os.path.join(chosen_dir, "libmpv-2.dll")
-    old_path = os.environ.get("PATH", "")
-    new_path = chosen_dir + os.pathsep + old_path
-    os.environ["PATH"] = new_path
-
-    print("[DEBUG] Final MPV folder =", chosen_dir)
-    print("[DEBUG] MPV_LIBRARY_PATH =", os.environ["MPV_LIBRARY_PATH"])    
+    ensure_mpv(parent_widget)

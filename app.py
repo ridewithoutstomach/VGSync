@@ -40,7 +40,9 @@ def resource_path(rel_path: str) -> str:
 # ---------------------------------------------------------
 # Zuerst mpv-Pfad einstellen, bevor wir "import mpv" machen
 import path_manager
-path_manager.ensure_mpv_library(parent_widget=None, base_dir=base_dir)
+
+# wurde nach untern verschoben, damit wir den Pfad or dem laden angeben können ( mac)
+#path_manager.ensure_mpv_library(parent_widget=None, base_dir=base_dir)
 
 # ---------------------------------------------------------
 # Jetzt erst den Rest importieren
@@ -63,7 +65,7 @@ from config import (
     set_disclaimer_accepted
 )
 from views.disclaimer_dialog import DisclaimerDialog
-from views.mainwindow import MainWindow
+#from views.mainwindow import MainWindow
 
 # NTP, JSON, etc.
 import ntplib
@@ -110,7 +112,13 @@ def main():
     QGuiApplication.setAttribute(Qt.AA_UseSoftwareOpenGL)
 
     app = QApplication(sys.argv)
-
+    
+    # Zuerst mpv-Pfad einstellen, bevor wir "import mpv" machen
+    path_manager.ensure_mpv_library(parent_widget=None, base_dir=base_dir)
+    # dann erst mainwindow starten:
+    
+    from views.mainwindow import MainWindow
+    
     # Tray-Icon (nur Windows)
     if platform.system() == "Windows":
         # Pfad: icon/icon_icon.ico
@@ -134,6 +142,9 @@ def main():
             "All your previous settings have been reset."
         )
 
+
+    
+    
     # FFmpeg sicherstellen
     if not path_manager.ensure_ffmpeg(None):
         QMessageBox.critical(None, "Missing FFmpeg", "Cannot proceed without FFmpeg.")
