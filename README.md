@@ -9,8 +9,11 @@ VGSync is a Python-based desktop application designed to synchronize GPX data wi
 ## Requirements
 
 - Python 3.10 (64-bit)
-- `mpv` binary (included in `mpv/`)
-- `ffmpeg` binary (included in `ffmpeg/`)
+- `mpv` binary (must be placed in `mpv/`)
+- `ffmpeg` binary (must be placed  in `ffmpeg/`)
+
+Binaries are not included in the Git repository due to size limitations.
+You must download and extract them manually as described below.
 
 ## Installation
 
@@ -19,6 +22,13 @@ We strongly recommend using a Python virtual environment to isolate dependencies
 python -m venv venv
 venv\Scripts\activate
 pip install -r requirements.txt
+
+To run VGSync, you must manually download and extract the following ZIP files:
+
+Download ffmpeg.zip → extract into the folder: ffmpeg/
+Download mpv.zip → extract into the folder: mpv/
+
+he folders ffmpeg/ and mpv/ already contain a VGSync_*.txt file to help you locate the correct path.
 
 ## Running the Applicaton:
 
