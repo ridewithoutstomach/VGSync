@@ -68,7 +68,7 @@ from views.disclaimer_dialog import DisclaimerDialog
 #from views.mainwindow import MainWindow
 
 # NTP, JSON, etc.
-import ntplib
+#import ntplib
 import json
 from datetime import datetime as dt, timezone
 

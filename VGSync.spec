@@ -2,7 +2,7 @@
 
 
 a = Analysis(
-    ['app.py'],
+    ['VGSync.py'],
     pathex=[],
     binaries=[],
     datas=[],
@@ -21,7 +21,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='app',
+    name='VGSync',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -32,7 +32,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['C:\\Users\\berel\\Documents\\GPX_Syncer\\V3.0\\v3.26_GPL_GIT\\icon_icon.ico'],
+    icon=['C:\\Users\\berel\\Documents\\GPX_Syncer\\V3.0\\v3.27\\icon_icon.ico'],
 )
 coll = COLLECT(
     exe,
@@ -41,5 +41,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='app',
+    name='VGSync',
 )

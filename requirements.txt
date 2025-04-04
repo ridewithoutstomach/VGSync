@@ -1,3 +1,14 @@
-PySide6
-cryptography
-pkg_resources
+altgraph==0.17.4
+packaging==24.2
+pefile==2023.2.7
+pyinstaller==6.12.0
+pyinstaller-hooks-contrib==2025.2
+PySide6==6.8.2.1
+PySide6_Addons==6.8.2.1
+PySide6_Essentials==6.8.2.1
+python-dateutil==2.9.0.post0
+python-mpv==1.0.7
+pywin32-ctypes==0.2.3
+setuptools==78.1.0
+shiboken6==6.8.2.1
+six==1.17.0

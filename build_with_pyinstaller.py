@@ -73,8 +73,8 @@ def build_windows():
     app_version = load_app_version()
     print(f"[INFO] APP_VERSION: {app_version}")
 
-    exe_name = "app"
-    main_script = "app.py"
+    exe_name = "VGSync"
+    main_script = "VGSync.py"
 
     # Icon-Datei prüfen
     icon_file = os.path.join(BASE_DIR, "icon_icon.ico")
