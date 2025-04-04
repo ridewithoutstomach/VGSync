@@ -38,7 +38,7 @@ import subprocess
 import re
 import uuid
 import hashlib
-import win32com.client  # pywin32
+#import win32com.client  # pywin32
 
 
 from PySide6.QtCore import QUrl
