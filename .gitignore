@@ -21,3 +21,6 @@ sammel_py.py
 *.zip
 *.7z
 Mac_Install.txt
+ffmpeg/bin/ffmpeg.exe
+ffmpeg/bin/ffprobe.exe
+mpv/lib/libmpv-2.dll
