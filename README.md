@@ -6,52 +6,73 @@ VGSync is a Python-based desktop application designed to synchronize GPX data wi
 - Platform: Windows 64-bit only
 - License: GNU General Public License v3.0 or later (GPL-3.0-or-later)
 
+---
+
 ## Requirements
 
 - Python 3.10 (64-bit)
 - `mpv` binary (must be placed in `mpv/`)
-- `ffmpeg` binary (must be placed  in `ffmpeg/`)
+- `ffmpeg` binary (must be placed in `ffmpeg/`)
 
-Binaries are not included in the Git repository due to size limitations.
-You must download and extract them manually as described below.
+> Binaries are **not included in the Git repository** due to size limitations.  
+> You must download and extract them manually from the GitHub [Releases](https://github.com/ridewithoutstomach/VGSync/releases).
+
+---
 
 ## Installation
 
-We strongly recommend using a Python virtual environment to isolate dependencies.
+We strongly recommend using a Python virtual environment:
 
+```bash
 python -m venv venv
 venv\Scripts\activate
 pip install -r requirements.txt
+```
 
-To run VGSync, you must manually download and extract the following ZIP files:
+### 🔧 Install External Binaries
 
-Download ffmpeg.zip → extract into the folder: ffmpeg/
-Download mpv.zip → extract into the folder: mpv/
+Download the following ZIP files from the latest [VGSync Release](https://github.com/ridewithoutstomach/VGSync/releases/tag/v3.27):
 
-he folders ffmpeg/ and mpv/ already contain a VGSync_*.txt file to help you locate the correct path.
+- [ffmpeg.zip](https://github.com/ridewithoutstomach/VGSync/releases/download/v3.27/ffmpeg.zip) → extract to `ffmpeg/`
+- [mpv.zip](https://github.com/ridewithoutstomach/VGSync/releases/download/v3.27/mpv.zip) → extract to `mpv/`
 
-## Running the Applicaton:
+The folders `ffmpeg/` and `mpv/` contain `VGSync_ffmpeg.txt` and `VGSync_mpv.txt` as guidance.
 
+---
+
+## Running the Application
+
+```bash
 python VGSync.py
+```
+
+---
 
 ## Building the Windows Executable
 
+```bash
 python build_with_pyinstaller.py
+```
 
-The resulting Exe is named:
-VGSync.exe ( in the folder dist/VGSync_VERSION
+The resulting `.exe` file will be located at:
+
+```
+dist/VGSync_3.27/VGSync.exe
+```
+
+---
 
 ## Third-Party Components
 
-This project includes the following third-party open-source binaries:
+This project includes and relies on the following third-party components:
 
 ### FFmpeg
 
 - Version: 7.1 "Péter"
 - License: GPLv3
 - Website: https://ffmpeg.org
-- Binaries included in: ffmpeg/
-- Original source code included in: third-party-src/FFmpeg-7.1-source.zip
+- Binaries provided in: `ffmpeg/`
+- Original source code included in: `third-party-src/FFmpeg-7.1-source.zip`
 - Release notes are included in the source archive
 
 ### mpv
@@ -59,11 +80,13 @@ This project includes the following third-party open-source binaries:
 - Version: 0.40.0
 - License: LGPLv2.1+
 - Website: https://mpv.io
-- Binaries included in: mpv/
-- Original source code included in: third-party-src/mpv-0.40.0-source.zip
+- Binaries provided in: `mpv/`
+- Original source code included in: `third-party-src/mpv-0.40.0-source.zip`
 - Release notes are included in the source archive
 
-All third-party components are redistributed in accordance with their respective licenses. Their original license and documentation files are provided in the corresponding folders. The complete and unmodified source code is included in the third-party-src/ directory and will be retained and made available for at least three (3) years in accordance with GPL and LGPL requirements.
+All third-party components are redistributed in accordance with their respective licenses. The complete and unmodified source code is included in the `third-party-src/` directory and will be retained and made available for at least three (3) years in accordance with GPL and LGPL requirements.
+
+---
 
 ## License
 
@@ -75,9 +98,11 @@ You are free to:
 - Study and modify the source code
 - Redistribute modified versions under the same license
 
-The full text of the license is included in the file LICENSE.
+The full text of the license is included in the file `LICENSE`.
 
 This distribution includes the full source code of VGSync, along with all required third-party binaries and their sources, in compliance with GPL requirements.
+
+---
 
 ## Contact
 

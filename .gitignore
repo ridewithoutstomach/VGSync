@@ -20,12 +20,7 @@ output_final.mp4
 requirements.txt
 requirements_old.txt
 sammel_py.py
-
-# Ignore all ZIPs globally...
 *.zip
-# ...but DO allow source archives in third-party-src/
-!third-party-src/
-!third-party-src/*.zip
 *.7z
 *.dll
 *.z7
