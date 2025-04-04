@@ -10,7 +10,7 @@ VGSync is a Python-based desktop application designed to synchronize GPX data wi
 
 ## Requirements
 
-- Python 3.10 (64-bit)
+- Python 3.10.9 (64-bit) / Python 3.12.0 (64-bit)
 - `mpv` binary (must be placed in `mpv/`)
 - `ffmpeg` binary (must be placed in `ffmpeg/`)
 
