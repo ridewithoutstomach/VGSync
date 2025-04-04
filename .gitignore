@@ -34,6 +34,8 @@ mpv/lib/libmpv-2.dll
 # Nur README.txt behalten, sonst alles ignorieren
 ffmpeg/*
 ffmpeg/**/*
+ffmpeg/doc/
+ffmpeg/doc/**
 !ffmpeg/VGSync_ffmpeg.txt
 
 mpv/*
