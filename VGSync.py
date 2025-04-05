@@ -23,6 +23,25 @@ import sys
 import shutil
 import platform
 
+
+# ++ADD++  (Mac-spezifischer Monkeypatch + locale Setting)
+current_os = platform.system()
+if current_os == "Darwin":
+    import ctypes.util
+    import locale
+
+    old_find_library = ctypes.util.find_library
+
+    def custom_find_library(name: str) -> str:
+        if name == "mpv":
+            # Beispiel: Pfad zur Homebrew-liegenden libmpv.2.dylib
+            return "/opt/homebrew/lib/libmpv.2.dylib"
+        return old_find_library(name)
+
+    ctypes.util.find_library = custom_find_library
+    locale.setlocale(locale.LC_NUMERIC, "C")
+# ++ADD++ Ende Mac-Patch
+
 base_dir = os.path.dirname(os.path.abspath(__file__))
 
 ## das ist für die map:
@@ -113,9 +132,35 @@ def main():
 
     app = QApplication(sys.argv)
     
+    
+    current_os = platform.system()
+    
     # Zuerst mpv-Pfad einstellen, bevor wir "import mpv" machen
-    path_manager.ensure_mpv_library(parent_widget=None, base_dir=base_dir)
+    #path_manager.ensure_mpv_library(parent_widget=None, base_dir=base_dir)
     # dann erst mainwindow starten:
+    
+    # ++ADD++: Windows/macOS Pfad-Check:
+    if current_os == "Windows":
+        if not path_manager.ensure_mpv(None):
+            QMessageBox.critical(None, "Missing MPV (Windows)", "MPV (libmpv-2.dll) wurde nicht gefunden.")
+            sys.exit(1)
+        if not path_manager.ensure_ffmpeg(None):
+            QMessageBox.critical(None, "Missing FFmpeg (Windows)", "FFmpeg wurde nicht gefunden.")
+            sys.exit(1)
+
+    elif current_os == "Darwin":
+        if not path_manager.ensure_mpv_mac(None):
+            QMessageBox.critical(None, "Missing MPV (macOS)", "libmpv.dylib wurde nicht gefunden.")
+            sys.exit(1)
+        if not path_manager.ensure_ffmpeg_mac(None):
+            QMessageBox.critical(None, "Missing FFmpeg (macOS)", "FFmpeg wurde nicht gefunden.")
+            sys.exit(1)
+    else:
+        QMessageBox.critical(None, "Unsupported OS", f"Dein Betriebssystem ({current_os}) wird derzeit nicht unterstützt.")
+        sys.exit(1)
+        ##
+    # ++ADD++ Ende
+    
     
     from views.mainwindow import MainWindow
     
@@ -146,10 +191,10 @@ def main():
     
     
     # FFmpeg sicherstellen
-    if not path_manager.ensure_ffmpeg(None):
-        QMessageBox.critical(None, "Missing FFmpeg", "Cannot proceed without FFmpeg.")
-        sys.exit(1)
-    print("[DEBUG] After ensure_ffmpeg =>", shutil.which("ffmpeg"))
+    #if not path_manager.ensure_ffmpeg(None):
+    #    QMessageBox.critical(None, "Missing FFmpeg", "Cannot proceed without FFmpeg.")
+    #    sys.exit(1)
+    #print("[DEBUG] After ensure_ffmpeg =>", shutil.which("ffmpeg"))
 
     # Zusätzlicher Check
     parent_widget = QWidget()

@@ -17,7 +17,7 @@
 # You should have received a copy of the GNU General Public License
 # along with VGSync. If not, see <https://www.gnu.org/licenses/>.
 #
-
+#test
 import platform
 import mpv
 import math

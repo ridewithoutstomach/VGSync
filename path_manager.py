@@ -235,3 +235,206 @@ def is_valid_mpv_folder(folder: str) -> bool:
 def ensure_mpv_library(parent_widget, base_dir: str) -> None:
     
     ensure_mpv(parent_widget)
+    
+    
+### mac:
+def is_valid_mpv_folder_mac(folder: str) -> bool:
+    """
+    Prüft, ob in dem Ordner 'folder' eine libmpv.dylib/libmpv.1.dylib vorhanden ist
+    und ob sie sich via ctypes laden lässt.
+    """
+    if not folder or not os.path.isdir(folder):
+        return False
+
+    possible_names = ["libmpv.1.dylib", "libmpv.dylib", "libmpv.2.dylib"]  # je nach Version
+    found_any = False
+    dll_path = ""
+    for name in possible_names:
+        test_path = os.path.join(folder, name)
+        if os.path.isfile(test_path):
+            dll_path = test_path
+            found_any = True
+            break
+
+    if not found_any:
+        return False
+
+    # Test via ctypes:
+    try:
+        _ = ctypes.cdll.LoadLibrary(dll_path)
+        return True
+    except Exception as e:
+        print(f"[WARN macOS] libmpv konnte nicht geladen werden: {e}")
+        return False
+
+
+def find_mpv_folder_mac() -> str:
+    """
+    macOS: Sucht nach libmpv.dylib/libmpv.1.dylib:
+      1) QSettings (paths/mpv_mac)
+      2) Lokaler Fallback (<base_dir>/mpv/lib)
+      3) Mehrere Standardpfade (Homebrew, MacPorts, ...)
+      4) Falls nichts gefunden -> ""
+    """
+    s = QSettings("VGSync", "VGSync")
+    stored_folder = s.value("paths/mpv_mac", "", type=str)
+    if is_valid_mpv_folder_mac(stored_folder):
+        return stored_folder
+
+    # 2) Lokaler Fallback, falls du mpv beilegst in <base_dir>/mpv/lib
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    fallback_dir = os.path.join(base_dir, "mpv", "lib")
+    if is_valid_mpv_folder_mac(fallback_dir):
+        return fallback_dir
+
+    # 3) Liste mit Standardpfaden
+    possible_mpv_dirs = [
+        "/usr/local/lib",     # Homebrew (Intel)
+        "/opt/homebrew/lib",  # Homebrew (Apple Silicon)
+        "/opt/local/lib",     # MacPorts
+        # ggf. mehr
+    ]
+    for pathdir in possible_mpv_dirs:
+        if is_valid_mpv_folder_mac(pathdir):
+            return pathdir
+
+    # 4) Nichts gefunden
+    return ""
+
+
+def ensure_mpv_mac(parent_widget) -> bool:
+    """
+    Stellt sicher, dass libmpv.dylib (macOS) verfügbar ist.
+    1) Versucht per find_mpv_folder_mac() etwas zu finden.
+    2) Wenn nichts gefunden -> Dialog zum Ordnerauswählen.
+    3) Prüft Gültigkeit -> Speichert in QSettings -> passt PATH/MPV_LIBRARY_PATH an.
+    
+    Gibt True zurück, wenn alles gefunden/eingestellt wurde, sonst False.
+    """
+    s = QSettings("VGSync", "VGSync")
+    folder = find_mpv_folder_mac()
+
+    if folder and is_valid_mpv_folder_mac(folder):
+        # Falls der Pfad aus QSettings oder Fallback kam,
+        # und QSettings derzeit etwas anderes gespeichert hat:
+        stored_in_settings = s.value("paths/mpv_mac", "", type=str)
+        if stored_in_settings != folder:
+            s.setValue("paths/mpv_mac", folder)
+    else:
+        QMessageBox.information(
+            parent_widget,
+            "MPV library required (macOS)",
+            "Bitte wähle den Ordner, in dem libmpv.dylib/libmpv.1.dylib liegt.\n\n"
+            "Beispiel:\n"
+            "  /usr/local/lib\n"
+            "  /opt/homebrew/lib\n\n"
+            "Dies wird für Preview und Playback benötigt."
+        )
+        chosen = QFileDialog.getExistingDirectory(parent_widget, "Select MPV Folder (macOS)")
+        if not chosen:
+            return False
+        if not is_valid_mpv_folder_mac(chosen):
+            QMessageBox.critical(
+                parent_widget,
+                "MPV Missing (macOS)",
+                f"In {chosen} wurde keine gültige libmpv.dylib gefunden."
+            )
+            return False
+
+        # => store
+        s.setValue("paths/mpv_mac", chosen)
+        folder = chosen
+
+    # Nun folder + libmpv in PATH und MPV_LIBRARY_PATH eintragen
+    # Wir suchen nochmal den tatsächlichen Dateinamen:
+    possible_names = ["libmpv.1.dylib", "libmpv.dylib"]
+    for name in possible_names:
+        test_path = os.path.join(folder, name)
+        if os.path.isfile(test_path):
+            os.environ["MPV_LIBRARY_PATH"] = test_path
+            break
+
+    add_to_process_path(folder)  # optional; für macOS kann auch DYLD_LIBRARY_PATH nötig sein
+
+    print("[DEBUG] Final MPV folder (macOS) =", folder)
+    print("[DEBUG] MPV_LIBRARY_PATH (macOS) =", os.environ["MPV_LIBRARY_PATH"])
+    return True
+
+def find_ffmpeg_folder_mac() -> str:
+    """
+    macOS: Sucht nach ffmpeg (ohne .exe):
+      1) QSettings
+      2) which("ffmpeg")
+      3) Mehrere Standardpfade (Homebrew, MacPorts, ...)
+      4) Falls nichts gefunden -> ""
+    """
+    s = QSettings("VGSync", "VGSync")
+    stored_folder = s.value("paths/ffmpeg_mac", "", type=str)
+    if is_ffmpeg_in_folder(stored_folder):
+        return stored_folder
+
+    # 2) systemweiter PATH prüfen
+    ffmpeg_exec = shutil.which("ffmpeg")
+    if ffmpeg_exec:
+        return os.path.dirname(ffmpeg_exec)
+
+    # 3) Liste mit Standardpfaden (einfach erweiterbar)
+    possible_ffmpeg_dirs = [
+        "/usr/local/bin",     # Homebrew (Intel)
+        "/opt/homebrew/bin",  # Homebrew (Apple Silicon)
+        "/opt/local/bin",     # MacPorts
+        # Hier kannst du beliebige weitere Pfade ergänzen:
+        # "/Applications/ffmpeg/bin",
+        # "/User/DeinName/Programme/ffmpeg/bin",
+        # usw.
+    ]
+    for pathdir in possible_ffmpeg_dirs:
+        if is_ffmpeg_in_folder(pathdir):
+            return pathdir
+
+    # 4) Keiner der Pfade war erfolgreich
+    return ""
+
+
+
+def ensure_ffmpeg_mac(parent_widget) -> bool:
+    """
+    Stellt sicher, dass ffmpeg (macOS) verfügbar ist.
+    1) Versucht find_ffmpeg_folder_mac().
+    2) Falls nicht gefunden -> lässt User den Ordner wählen.
+    3) Prüft ffmpeg-Executable -> schreibt in QSettings -> PATH
+    """
+    s = QSettings("VGSync", "VGSync")
+    folder = find_ffmpeg_folder_mac()
+
+    if folder and is_ffmpeg_in_folder(folder):
+        stored_in_settings = s.value("paths/ffmpeg_mac", "", type=str)
+        if stored_in_settings != folder:
+            s.setValue("paths/ffmpeg_mac", folder)
+
+        add_to_process_path(folder)
+        return True
+    else:
+        QMessageBox.information(
+            parent_widget,
+            "FFmpeg Required (macOS)",
+            "Bitte wähle den Ordner, in dem ffmpeg liegt.\n\n"
+            "Beispiel:\n"
+            "  /usr/local/bin\n"
+            "  /opt/homebrew/bin\n\n"
+            "Ohne FFmpeg sind Video-Cutting und -Export nicht möglich."
+        )
+        chosen = QFileDialog.getExistingDirectory(parent_widget, "Select FFmpeg Folder (macOS)")
+        if not chosen:
+            return False
+        if not is_ffmpeg_in_folder(chosen):
+            QMessageBox.critical(
+                parent_widget,
+                "FFmpeg Missing (macOS)",
+                f"Keine gültige ffmpeg-Executable in:\n{chosen}"
+            )
+            return False
+
+        s.setValue("paths/ffmpeg_mac", chosen)
+        add_to_process_path(chosen)
+        return True    
