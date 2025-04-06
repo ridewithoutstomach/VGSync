@@ -47,6 +47,13 @@ The folders `ffmpeg/` and `mpv/` contain `VGSync_ffmpeg.txt` and `VGSync_mpv.txt
 python VGSync.py
 ```
 
+## Pre-Built Windows Executable
+
+If you prefer not to install Python or deal with dependencies manually, you can use the **pre-built Windows binary**:
+
+1. Download the ZIP file (`VGSync_3.27_Win_x64.zip` or similarly named `VGSync_[VERSION]_Win_x64.zip`) from the [GitHub Releases page](https://github.com/ridewithoutstomach/VGSync/releases).
+2. Extract the ZIP file into any folder of your choice.
+3. Double-click `VGSync.exe` to run the application.
 ---
 
 ## Building the Windows Executable
