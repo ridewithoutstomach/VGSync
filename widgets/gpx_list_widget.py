@@ -471,7 +471,7 @@ class GPXListWidget(QWidget):
         column = item.column()
         value = item.text()
         # Update your internal GPX data
-        print(f"Item at row {row}, column {column} changed to {value}")
+        print(f"[DEBUG] Item at row {row}, column {column} changed to {value}")
 
         self._original_value = None
 
@@ -485,6 +485,29 @@ class GPXListWidget(QWidget):
                 try:
                     rel_s = self._parse_hhmmss_milli(value)
                     new_dt = base_dt + timedelta(seconds=rel_s)
+                    next_dt = self._get_time_of_row(row + 1)
+
+                    if next_dt and new_dt >= next_dt:
+                        from PySide6.QtWidgets import QMessageBox
+                        QMessageBox.warning(
+                            self.table,  # parent widget
+                            "Invalid Range",
+                            "New time must be earlier than the next time"
+                        )
+                        self.set_gpx_data(self._gpx_data) # Reset to original value
+                        return
+                    prev_dt = self._get_time_of_row(row -1)
+
+                    if prev_dt and new_dt <= prev_dt:
+                        from PySide6.QtWidgets import QMessageBox
+                        QMessageBox.warning(
+                            self.table,  # parent widget
+                            "Invalid Range",
+                            "New time must be later than the previous time"
+                        )
+                        self.set_gpx_data(self._gpx_data) # Reset to original value
+                        return
+                    
                     self._gpx_data[row]["time"] = new_dt
                 except Exception as e:
                     print(f"Invalid time format in row {row}: {value} ({e})")
