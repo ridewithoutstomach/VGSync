@@ -33,8 +33,8 @@ pip install -r requirements.txt
 
 Download the following ZIP files from the latest [VGSync Release](https://github.com/ridewithoutstomach/VGSync/releases/tag/v3.27):
 
-- [ffmpeg.zip](https://github.com/ridewithoutstomach/VGSync/releases/download/binaries-ffmpeg-mpv-v1/ffmpeg.zip) → extract into: `ffmpeg/bin/`
-- [mpv.zip](https://github.com/ridewithoutstomach/VGSync/releases/download/binaries-ffmpeg-mpv-v1/mpv.zip) → extract into: `mpv/lib/`
+- [ffmpeg.zip](https://github.com/ridewithoutstomach/VGSync/releases/download/binaries-ffmpeg-mpv-v1/ffmpeg.zip) → extract into: `ffmpeg/`
+- [mpv.zip](https://github.com/ridewithoutstomach/VGSync/releases/download/binaries-ffmpeg-mpv-v1/mpv.zip) → extract into: `mpv/`
 
 
 The folders `ffmpeg/` and `mpv/` contain `VGSync_ffmpeg.txt` and `VGSync_mpv.txt` as guidance.
