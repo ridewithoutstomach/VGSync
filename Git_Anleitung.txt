@@ -192,5 +192,45 @@ Dann nochmal vergleichen wie oben.
 - Revert statt Reset bei Teamarbeit
 - Push regelmäßig zu GitHub
 
+==============================
+✅ Pull Request lokal mergen & auf GitHub übernehmen
+==============================
+
+1️⃣ Zuerst sicherstellen, dass du im richtigen Branch bist:
+    git checkout main
+
+2️⃣ Den Pull Request lokal mergen:
+    git merge pr-2
+
+💡 Wenn du dann plötzlich im Editor (z. B. vim) landest:
+
+    → Das ist normal! Git will eine Merge-Nachricht.
+
+    So kommst du in vim wieder raus:
+
+    - Drücke: i        → (Wechsel in den Eingabemodus, falls du etwas schreiben willst)
+    - Drücke: ESC      → (Zurück in den Befehl-Modus)
+    - Tippe:  :wq      → (write & quit)
+    - Bestätige mit Enter
+
+    Fertig! Der Merge ist abgeschlossen.
+
+    👉 Alternativ ohne Editor:
+        git merge pr-2 -m "Merge PR #2"
+
+3️⃣ Jetzt den neuen Stand auf GitHub hochladen:
+    git push origin main
+
+4️⃣ PR auf GitHub schließen:
+
+    - Gehe zum Pull Request auf GitHub
+    - Klicke auf: "Close pull request"
+
+    ✅ GitHub erkennt, dass der Code gemerged wurde (auch wenn du es lokal gemacht hast)
+
+🧠 Hinweis:
+Der Commit erscheint im Verlauf – der Autor sieht, dass sein Code übernommen wurde.
+
+
 
 
