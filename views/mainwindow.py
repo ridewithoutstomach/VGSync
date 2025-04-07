@@ -55,14 +55,15 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QGridLayout, QFrame,
     QFileDialog, QMessageBox, QVBoxLayout,
     QLabel, QProgressBar, QHBoxLayout, QPushButton, QDialog,
-    QApplication, QInputDialog, QSplitter, QSystemTrayIcon
+    QApplication, QInputDialog, QSplitter, QSystemTrayIcon,
+    QFormLayout, QComboBox, QSpinBox
 )
 from PySide6.QtWidgets import QDoubleSpinBox
 from PySide6.QtWidgets import QLineEdit, QDialogButtonBox
 
 
 
-
+from .encoder_setup_dialog import EncoderSetupDialog  # Import Dialog
 
 from config import TMP_KEYFRAME_DIR, MY_GLOBAL_TMP_DIR
 from widgets.video_editor_widget import VideoEditorWidget
@@ -261,14 +262,49 @@ class MainWindow(QMainWindow):
         
         setup_menu = menubar.addMenu("Config")
         
-        self.action_edit_video = QAction("Edit Video", self)
-        self.action_edit_video.setCheckable(True)
-       
-        self.action_edit_video.setChecked(False)
-        set_edit_video_enabled(False)   # QSettings überschreibe
         
-        self.action_edit_video.triggered.connect(self._on_toggle_edit_video)
-        setup_menu.addAction(self.action_edit_video)
+        # Neues Untermenü "Edit Video" mit drei checkbaren Actions
+        edit_video_menu = setup_menu.addMenu("Edit Video")
+
+        self.off_action = QAction("Off", self, checkable=True)
+        self.copy_action = QAction("Copy-Mode", self, checkable=True)
+        self.encode_action = QAction("Encode-Mode", self, checkable=True)
+
+        self.edit_mode_group = QActionGroup(self)
+        self.edit_mode_group.setExclusive(True)
+
+        self.edit_mode_group.addAction(self.off_action)
+        self.edit_mode_group.addAction(self.copy_action)
+        self.edit_mode_group.addAction(self.encode_action)
+
+        edit_video_menu.addAction(self.off_action)
+        edit_video_menu.addAction(self.copy_action)
+        edit_video_menu.addAction(self.encode_action)
+
+        # Standard = Off
+        self.off_action.setChecked(True)
+        self._edit_mode = "off"
+        self._userDeclinedIndexing = False  # Falls du es schon hattest
+
+        # Verknüpfe klick => _set_edit_mode(...)
+        self.off_action.triggered.connect(lambda: self._set_edit_mode("off"))
+        self.copy_action.triggered.connect(lambda: self._set_edit_mode("copy"))
+        self.encode_action.triggered.connect(lambda: self._set_edit_mode("encode"))
+       
+        
+        
+        
+        self.encoder_setup_action = QAction("Encoder-Setup", self)
+        self.encoder_setup_action.setEnabled(False)  # am Anfang ausgegraut
+        setup_menu.addAction(self.encoder_setup_action)
+        self.encoder_setup_action.triggered.connect(self._on_encoder_setup_clicked)
+        
+        self.overlay_setup_action = QAction("Overlay-Setup", self)
+        self.overlay_setup_action.setEnabled(False)  # Standard: ausgegraut
+        setup_menu.addAction(self.overlay_setup_action)
+        self.overlay_setup_action.triggered.connect(self._on_overlay_setup_clicked)
+        
+        
         
         
         self.action_auto_sync_video = QAction("AutoCutVideo+GPX", self)
@@ -1291,6 +1327,72 @@ class MainWindow(QMainWindow):
         )
 
         
+        
+    def _set_edit_mode(self, new_mode: str):
+        old_mode = self._edit_mode
+        if new_mode == old_mode:
+            return  # Nichts geändert
+
+        self._edit_mode = new_mode
+        if new_mode == "off":
+            self.video_control.set_editing_mode(False)
+            print("[DEBUG] => OFF")
+            self.encoder_setup_action.setEnabled(False)
+            self.video_control.show_ovl_button(False)
+            self.overlay_setup_action.setEnabled(False)
+        elif new_mode == "copy":
+            self.video_control.set_editing_mode(True)
+            print("[DEBUG] => COPY")
+            self.encoder_setup_action.setEnabled(False)
+            self.video_control.show_ovl_button(False)
+            self.overlay_setup_action.setEnabled(False)
+        elif new_mode == "encode":
+            self.video_control.set_editing_mode(True)
+            print("[DEBUG] => ENCODE")
+            self.encoder_setup_action.setEnabled(True)
+            self.video_control.show_ovl_button(True)
+            self.overlay_setup_action.setEnabled(True)
+
+        # Abfrage: nur wenn alter Modus 'off' war + neuer Modus copy/encode
+        if old_mode == "off" and new_mode in ("copy", "encode"):
+            answer = QMessageBox.question(
+                self,
+                "Index Videos?",
+                "Do you want to index all currently loaded videos now?\n"
+                "(Currently loaded videos: %d)\n\n"
+                "Any *new* video you load from now on will also be indexed automatically."
+                % len(self.playlist),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            if answer == QMessageBox.Yes:
+                # Selbst wenn playlist leer ist, tut das einfach nichts
+                for video_path in self.playlist:
+                    self.start_indexing_process(video_path)
+            else:
+                self._userDeclinedIndexing = True    
+    
+
+    def _on_encoder_setup_clicked(self):
+        # Hier öffnen wir den Dialog
+        dlg = EncoderSetupDialog(self)
+        if dlg.exec() == dlg.accepted:
+            print("[DEBUG] => Encoder-Setup saved.")
+        else:
+            print("[DEBUG] => Encoder-Setup canceled.")
+            
+    def _on_overlay_setup_clicked(self):
+        """
+        Wird aufgerufen, wenn im Menü "Overlay-Setup" geklickt wird.
+        Öffnet ein Dummy-Fenster (OverlaySetupDialog).
+        """
+        from .overlay_setup_dialog import OverlaySetupDialog  # wir importieren gleich die neue Klasse
+        dlg = OverlaySetupDialog(self)
+        if dlg.exec() == dlg.accepted:
+            print("[DEBUG] => Overlay-Setup: changes saved.")
+        else:
+            print("[DEBUG] => Overlay-Setup: canceled or closed.")
+        
 
     def _on_clear_ffmpeg_path(self):
         """
@@ -1313,75 +1415,7 @@ class MainWindow(QMainWindow):
             
         
         
-    def _on_toggle_edit_video(self, checked: bool):
-        """
-        Wird aufgerufen, wenn man im Menü 'Edit Video' an-/ab-hakt.
-        Wir speichern den Wert in QSettings. Falls True => fragen wir den User
-        nach Indexierung der aktuell geladenen Videos.
-        """
-        print(f"[DEBUG] _on_toggle_edit_video => {checked}")
-        #set_edit_video_enabled(checked)
-
-        # => Buttons im VideoControl an-/abschalten
-        self.video_control.set_editing_mode(checked)
-        self.video_editor.edit_status_label.setText("Edit: On")
-        self.video_editor.edit_status_label.setStyleSheet(
-            "background-color: rgba(0,0,0,120); "
-            "color: red; "
-            "font-size: 14px; "
-            "font-weight: bold;"
-            "padding: 2px 1px;"
-            )
-        if checked:
-            
-            # 1) Nachfrage: "Do you want to index all currently loaded videos now?"
-            
-            answer = QMessageBox.question(
-                self,
-                "Index Videos?",
-                "Do you want to index all currently loaded videos now?\n\n"
-                "Any new video you load from now on will also be indexed automatically.",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
-            )
-            if answer == QMessageBox.Yes:
-                # 2) Indexieren aller vorhandenen
-                for video_path in self.playlist:
-                    self.start_indexing_process(video_path)
-            else:
-                self._userDeclinedIndexing = True  
-                
-
-            # Info: Neu geladene Videos werden im add_to_playlist(...) automatisch indexiert,
-            # falls 'Edit Video' = True.
-
-        else:
-            self.video_editor.edit_status_label.setText("")
-            #self.video_editor.edit_status_label.setText("Edit:  Off")
-            #self.video_editor.edit_status_label.setStyleSheet(
-            #    "background-color: rgba(0,0,0,120); "
-            #    "color: grey; "
-            #    "font-size: 14px; "
-            #    "padding: 2px 1px;"
-            #    "font-weight: normal; "
-            #)
-
-            # Wurde auf false gestellt => wir machen nichts weiter,
-            # ab jetzt werden neue Videos NICHT mehr indexiert.
-            pass
-            
-        if self.gpx_control:
-            # Aktion: Synchronisieren
-            self.gpx_control.update_set_gpx2video_state(
-                video_edit_on=checked,
-                auto_sync_on=self._autoSyncVideoEnabled
-            )    
     
-    
-    
-        
-        
-   
 
     def on_set_begin_clicked(self):
        
@@ -1868,7 +1902,7 @@ class MainWindow(QMainWindow):
         
 
         # 2) autoSyncVideo?
-        if self._autoSyncVideoEnabled and self.action_edit_video.isChecked():
+        if self._autoSyncVideoEnabled and self._edit_mode in ("copy", "encode"):
             self.map_widget.view.page().runJavaScript("showLoading('Deleting GPX-Range...');")
             print("[DEBUG] autoSyncVideo=ON => rufe gpx_list.delete_selected_range()")
             self.gpx_widget.gpx_list.delete_selected_range()
@@ -1889,7 +1923,7 @@ class MainWindow(QMainWindow):
         Wird aufgerufen, wenn der Menüpunkt "AutoSyncVideo" an-/abgehakt wird.
         => Speichere den Zustand in self._autoSyncVideoEnabled
         """    
-        if checked and not self.action_edit_video.isChecked():
+        if checked and self._edit_mode == "off":
             # -> nicht erlaubt
             QMessageBox.warning(
                 self,
@@ -2907,7 +2941,7 @@ class MainWindow(QMainWindow):
             
             self.video_editor.set_playlist(self.playlist)
             
-            if self.action_edit_video.isChecked() and (not self._userDeclinedIndexing):
+            if self._edit_mode in ("copy", "encode") and (not self._userDeclinedIndexing):
                 self.start_indexing_process(filepath)
             else:
                 print("[DEBUG] Kein Indexing, weil der User es abgelehnt hat oder EditVideo=OFF.")                

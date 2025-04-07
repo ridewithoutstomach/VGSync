@@ -1,0 +1,196 @@
+==============================
+🧠 Die ultimative Git-Anleitung (Textversion)
+==============================
+
+INHALT
+------
+1. Git-Grundlagen
+2. Installation & Erste Konfiguration
+3. Grundlegender Workflow
+4. Wichtige Git-Befehle
+5. Beispiele & Szenarien
+6. Tipps & Best Practices
+7. Pull Requests testen, übernehmen oder verwerfen
+8. Tags, Branches & Versionen verstehen
+9. Einzelne Datei aus Branch übernehmen
+
+
+1️⃣ GIT-GRUNDLAGEN
+-------------------
+Git ist ein Versionskontrollsystem. Damit kannst du:
+- Änderungen versionieren und verwalten
+- Zu alten Ständen zurückspringen
+- Mit Branches sicher experimentieren
+- Mit anderen über GitHub zusammenarbeiten
+
+2️⃣ INSTALLATION & KONFIGURATION
+-------------------
+Windows: https://git-scm.com/download/win
+macOS:   brew install git
+Linux:   sudo apt-get install git
+
+Name & E-Mail setzen:
+    git config --global user.name "Dein Name"
+    git config --global user.email "deine.email@example.com"
+
+3️⃣ GRUNDLEGENDE BEFEHLE & WORKFLOW
+-------------------
+Neues Repo:
+    git init
+    git clone <URL>
+
+Änderungen vorbereiten:
+    git status
+    git add datei.txt
+    git commit -m "Änderung"
+
+Verlauf anzeigen:
+    git log
+    git log --oneline --graph --all --decorate
+
+Branch erstellen & wechseln:
+    git checkout -b mein-branch
+    git checkout main
+
+Mergen:
+    git merge mein-branch
+
+Push & Pull:
+    git push origin main
+    git pull
+
+Zwischenstände parken:
+    git stash
+    git stash pop
+
+4️⃣ WICHTIGE BEFEHLE (KURZÜBERSICHT)
+-------------------
+- git status	  				→ Zeigt den aktuellen Stand: Was ist geändert, was ist vorbereitet für Commit?
+- git add <Datei> / git add .			→ Nimmt alle Dateien in den nächsten Commit auf („staging“).
+- git commit -m "..."				→ Erstellt einen neuen Snapshot (Commit) mit Beschreibung.
+- git log / git log --oneline --graph		→ Zeigt den kompletten Verlauf deiner Commits.
+- git branch					→ Listet alle lokalen Branches. Der aktuelle ist mit * markiert.
+- git checkout -b <branch>			→ Erstellt einen neuen Branch und wechselt direkt hinein.
+- git merge <branch>				→ Holt Änderungen aus einem anderen Branch in den aktuellen.
+- git tag v1.0					→ Markiert den aktuellen Stand mit einer Versionsnummer (z. B. „v1.0“).
+- git push origin <branch|tag>			→ Schiebt einen Branch oder Tag zu GitHub („origin“).
+- git pull					→ Holt Änderungen von GitHub und integriert sie in den aktuellen Branch
+- git cherry-pick <commit oder branch>		→ Holt einen bestimmten Commit (z. B. von einem anderen Branch) in deinen aktuellen.
+- git stash					→ Speichert aktuelle Änderungen zwischen (z. B. bevor du Branch wechselst).
+- git reset / git revert			→ Holt die gespeicherten Änderungen wieder zurück
+- git branch -m NEUER_NAME			-> ändert den Namen des branches in dem du gerade bist
+
+5️⃣ BEISPIEL: TEST-BRANCH ERSTELLEN & IN MAIN ÜBERNEHMEN
+-------------------
+    git checkout -b testversion
+    git add .
+    git commit -m "Test abgeschlossen"
+    git checkout main
+    git merge testversion
+    git branch -d testversion
+
+Optional: Neue Version setzen
+    git tag v3.28
+    git push origin v3.28
+
+6️⃣ PULL REQUEST HOLEN & TESTEN
+-------------------
+Pull Request #1 testen:
+    git fetch origin pull/1/head:pr-1
+    git checkout pr-1
+
+Wenn PR gut:
+    git checkout main
+    git merge pr-1
+
+Wenn PR ablehnen:
+    Auf GitHub → "Close pull request"
+    Lokal:
+        git checkout main
+        git branch -D pr-1
+
+7️⃣ WAS BEDEUTEN `main` UND `v3.27`
+-------------------
+- `main` ist der aktuelle Entwicklungsstand
+- `v3.27` ist ein Tag = ein Marker auf einen alten Stand
+
+Änderungen seit `v3.27` anzeigen:
+    git log --oneline v3.27..main
+
+Beispielausgabe:
+    9922a38 update README
+    7c0b1be Update Info
+
+Wenn du das siehst:
+→ Es gab Änderungen nach dem Tag `v3.27` → Zeit für `v3.28`?
+
+Neuen Tag setzen:
+    git tag v3.28
+    git push origin v3.28
+
+8️⃣ NUR EINE DATEI AUS EINEM BRANCH ÜBERNEHMEN
+-------------------
+Beispiel: Du hast `README.md` im Branch `testbranch` geändert.
+
+In `testbranch`:
+    git add README.md
+    git commit -m "Update README"
+
+Dann in `main`:
+    git checkout main
+    git cherry-pick testbranch
+
+Nur der eine Commit wird übernommen!
+
+
+========================
+🕵️ Prüfen: Wurde Datei im PR geändert?
+=========================
+
+⚠️ WARNUNG: Niemals `git pull`, wenn du lokale Änderungen hast,
+die nicht committet oder gestasht sind.
+→ Erst `git status` machen
+→ Dann ggf. `git stash` oder `git commit`
+
+Ziel: Du willst wissen, ob z. B. die Datei "widgets/gpx_control_widget.py" im Pull Request verändert wurde.
+
+👉 Du bist im PR-Branch (z. B. pr-2)
+
+1️⃣ Dateiänderung gegenüber main anzeigen:
+    git diff main -- widgets/gpx_control_widget.py
+
+→ Wenn KEINE Ausgabe: Die Datei wurde im PR NICHT geändert.
+→ Wenn Ausgabe kommt: Du siehst genau, welche Zeilen neu/alt sind.
+
+2️⃣ Kurzform: Nur Dateinamen anzeigen, die im PR geändert wurden:
+    git diff --name-only main
+
+→ Zeigt dir ALLE geänderten Dateien im PR.
+→ Ist deine Datei NICHT dabei? Dann wurde sie auch NICHT geändert.
+
+3️⃣ Alle Commits anzeigen, die diese Datei jemals betroffen haben:
+    git log -- widgets/gpx_control_widget.py
+
+→ Hilft bei Rückverfolgung: In welchem Commit wurde was an der Datei gemacht?
+
+Optional:
+⚠️ Wenn du den PR gerade erst runtergeladen hast, stelle sicher, dass dein main aktuell ist:
+    git checkout main
+    git fetch -> checkt ob es was neues gibt	 
+    git status	
+    git checkout pr-2
+
+Dann nochmal vergleichen wie oben.
+
+
+9️⃣ TIPPS & BEST PRACTICES
+-------------------
+- Committe oft und mit Sinn
+- Halte `main` sauber
+- Nutze Branches für Neues
+- Verwende Tags für Versionen
+- Revert statt Reset bei Teamarbeit
+- Push regelmäßig zu GitHub
+
+
+

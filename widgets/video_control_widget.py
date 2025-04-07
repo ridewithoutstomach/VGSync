@@ -210,6 +210,14 @@ class VideoControlWidget(QWidget):
         self.sync_button.setFixedWidth(45)
         self.sync_button.clicked.connect(self.syncClicked.emit)
         layout.addWidget(self.sync_button)
+        
+        
+        self.ovl_button = QPushButton("Ovl")
+        self.ovl_button.setToolTip("Some Overlay or future function")
+        self.ovl_button.setFixedWidth(40)
+        self.ovl_button.clicked.connect(self._on_ovl_clicked)
+        layout.addWidget(self.ovl_button)
+        self.ovl_button.hide()   # Standard: ausgeblendet
 
         self.safe_button = QPushButton()
         self.safe_button.setFixedWidth(45)
@@ -234,6 +242,15 @@ class VideoControlWidget(QWidget):
         self.go_to_end_button.setVisible(enabled)
         self.undo_button.setVisible(enabled)
         
+        
+    def show_ovl_button(self, show: bool):
+        """
+        Zeigt oder versteckt den Ovl-Button.
+        """
+        if show:
+            self.ovl_button.show()
+        else:
+            self.ovl_button.hide()    
 
 
     def _on_markB_clicked(self):
@@ -401,3 +418,13 @@ class VideoControlWidget(QWidget):
         self.timeHMSSetClicked.emit(hh, mm, ss)
 
         dlg.close()
+        
+    def _on_ovl_clicked(self):
+        """
+        Wird aufgerufen, wenn der Ovl-Button geklickt wird.
+        Hier könntest du z.B. ein Signal feuern oder direkt eine Aktion machen.
+        """
+        print("[DEBUG] Ovl-Button clicked!")
+        # Beispiel: Du könntest ein Signal emitten oder einen Dialog öffnen.
+        # self.someOvlClicked.emit()   # falls du ein extra Signal willst
+    
