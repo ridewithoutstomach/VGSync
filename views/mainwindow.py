@@ -1639,154 +1639,163 @@ class MainWindow(QMainWindow):
         gpx_data = self._gpx_data
         if not gpx_data:
             gpx_data = []
-    
-        # --- NEU: Falls Directions aktiv und es ist eindeutig "erster" oder "letzter" Punkt selektiert ---
-        if self._directions_enabled:
-            # Prüfen, welcher GPX-Punkt in der Liste selektiert ist
-            row_selected = self.gpx_widget.gpx_list.table.currentRow()
-            n = len(gpx_data)
 
-            if row_selected >= 0 and n > 0:
-                is_first = (row_selected == 0)
-                is_last  = (row_selected == n-1)
+        row_selected = self.gpx_widget.gpx_list.table.currentRow()
 
-                if is_last:
-                    # => Wir wollen unbedingt ans Ende anfügen
-                    idx = -1
-                    # (markB=letzter, markE=neuer => B->E => "append")
-                elif is_first:
-                    # => Vor dem ersten einfügen
-                    idx = -2
-                    # (markE=erster, markB=neuer => B->E => "prepend")
-                # Falls weder erster noch letzter => idx bleibt wie vom JS gesendet (z.B. -1 oder "zwischen")
-    
-        # --- Nun das "alte" Einfüge-Verhalten ---
-        # Undo-Snapshot
-        old_data = copy.deepcopy(gpx_data)
-        self.gpx_widget.gpx_list._history_stack.append(old_data)
+        if self.video_editor.is_video_loaded(): #if video loaded, insert a new point at current video time without shift
+            video_time = self.video_editor.get_current_position_s()
+            print(f"[DEBUG] on_new_gpx_point_inserted idx {idx} at {video_time}")
+            self.ordered_insert_new_point(lat,lon,video_time)
 
-        now = datetime.now()  # Fallback, falls Zeit gar nicht existiert
+        else: #insert with shift
+            # --- NEU: Falls Directions aktiv und es ist eindeutig "erster" oder "letzter" Punkt selektiert ---
+            if self._directions_enabled:
+                # Prüfen, welcher GPX-Punkt in der Liste selektiert ist
+                n = len(gpx_data)
 
-        if idx == -2:
-            # =============== Punkt VOR dem ersten einfügen ===============
-            if not gpx_data:
-                # Noch gar nichts drin => erster Punkt
-                new_pt = {
-                    "lat": lat,
-                    "lon": lon,
-                    "ele": 0.0,
-                    "time": now,
-                    "delta_m": 0.0,
-                    "speed_kmh": 0.0,
-                    "gradient": 0.0,
-                    "rel_s": 0.0
-                }
-                gpx_data.append(new_pt)
+                if row_selected >= 0 and n > 0:
+                    is_first = (row_selected == 0)
+                    is_last  = (row_selected == n-1)
+
+                    if is_last:
+                        # => Wir wollen unbedingt ans Ende anfügen
+                        idx = -1
+                        # (markB=letzter, markE=neuer => B->E => "append")
+                    elif is_first:
+                        # => Vor dem ersten einfügen
+                        idx = -2
+                        # (markE=erster, markB=neuer => B->E => "prepend")
+                    # Falls weder erster noch letzter => idx bleibt wie vom JS gesendet (z.B. -1 oder "zwischen")
+        
+            # --- Nun das "alte" Einfüge-Verhalten ---
+            # Undo-Snapshot
+            old_data = copy.deepcopy(gpx_data)
+            self.gpx_widget.gpx_list._history_stack.append(old_data)
+
+            now = datetime.now()  # Fallback, falls Zeit gar nicht existiert
+
+            if idx == -2:
+                # =============== Punkt VOR dem ersten einfügen ===============
+                if not gpx_data:
+                    # Noch gar nichts drin => erster Punkt
+                    new_pt = {
+                        "lat": lat,
+                        "lon": lon,
+                        "ele": 0.0,
+                        "time": video_ts or now,
+                        "delta_m": 0.0,
+                        "speed_kmh": 0.0,
+                        "gradient": 0.0,
+                        "rel_s": 0.0
+                    }
+                    gpx_data.append(new_pt)
+                else:
+                    t_first = gpx_data[0]["time"]
+                    if not t_first:
+                        t_first = now
+                    # NEUEN Punkt "vorne" einfügen => 
+                    # wir geben ihm dieselbe Zeit wie den alten ersten oder 1s davor
+                    new_time = t_first  # oder t_first - timedelta(seconds=1)
+                    new_pt = {
+                        "lat": lat,
+                        "lon": lon,
+                        "ele": gpx_data[0].get("ele", 0.0),
+                        "time": video_ts or new_time,
+                        "delta_m": 0.0,
+                        "speed_kmh": 0.0,
+                        "gradient": 0.0,
+                        "rel_s": 0.0
+                    }
+                    gpx_data.insert(0, new_pt)
+        
+                    # jetzt alle nachfolgenden +1s verschieben
+                    if not video_ts:
+                        for i in range(1, len(gpx_data)):
+                            oldt = gpx_data[i]["time"]
+                            if oldt:
+                                gpx_data[i]["time"] = oldt + timedelta(seconds=1)
+                    
+            elif idx == -1:
+                # =============== Punkt NACH dem letzten einfügen ===============
+                if not gpx_data:
+                    # ganz leer => erster Punkt
+                    new_pt = {
+                        "lat": lat,
+                        "lon": lon,
+                        "ele": 0.0,
+                        "time": video_ts or now,
+                        "delta_m": 0.0,
+                        "speed_kmh": 0.0,
+                        "gradient": 0.0,
+                        "rel_s": 0.0
+                    }
+                    gpx_data.append(new_pt)
+                else:
+                    last_pt = gpx_data[-1]
+                    t_last = last_pt.get("time")
+                    if not t_last:
+                        t_last = now
+                    new_time = t_last + timedelta(seconds=1)
+                    new_pt = {
+                        "lat": lat,
+                        "lon": lon,
+                        "ele": last_pt.get("ele", 0.0),
+                        "time": video_ts or new_time, 
+                        "delta_m": 0.0,
+                        "speed_kmh": 0.0,
+                        "gradient": 0.0,
+                        "rel_s": 0.0
+                    }
+                    gpx_data.append(new_pt)
+        
             else:
-                t_first = gpx_data[0]["time"]
-                if not t_first:
-                    t_first = now
-                # NEUEN Punkt "vorne" einfügen => 
-                # wir geben ihm dieselbe Zeit wie den alten ersten oder 1s davor
-                new_time = t_first  # oder t_first - timedelta(seconds=1)
-                new_pt = {
-                    "lat": lat,
-                    "lon": lon,
-                    "ele": gpx_data[0].get("ele", 0.0),
-                    "time": new_time,
-                    "delta_m": 0.0,
-                    "speed_kmh": 0.0,
-                    "gradient": 0.0,
-                    "rel_s": 0.0
-                }
-                gpx_data.insert(0, new_pt)
-    
-                # jetzt alle nachfolgenden +1s verschieben
-                for i in range(1, len(gpx_data)):
-                    oldt = gpx_data[i]["time"]
-                    if oldt:
-                        gpx_data[i]["time"] = oldt + timedelta(seconds=1)
+                # =============== Punkt "zwischen" idx..idx+1 einfügen ===============
+                if idx < 0:
+                    idx = 0
+                if idx >= len(gpx_data):
+                    idx = len(gpx_data) -1  # safety
 
-        elif idx == -1:
-            # =============== Punkt NACH dem letzten einfügen ===============
-            if not gpx_data:
-                # ganz leer => erster Punkt
-                new_pt = {
-                    "lat": lat,
-                    "lon": lon,
-                    "ele": 0.0,
-                    "time": now,
-                    "delta_m": 0.0,
-                    "speed_kmh": 0.0,
-                    "gradient": 0.0,
-                    "rel_s": 0.0
-                }
-                gpx_data.append(new_pt)
-            else:
-                last_pt = gpx_data[-1]
-                t_last = last_pt.get("time")
-                if not t_last:
-                    t_last = now
-                new_time = t_last + timedelta(seconds=1)
-                new_pt = {
-                    "lat": lat,
-                    "lon": lon,
-                    "ele": last_pt.get("ele", 0.0),
-                    "time": new_time,
-                    "delta_m": 0.0,
-                    "speed_kmh": 0.0,
-                    "gradient": 0.0,
-                    "rel_s": 0.0
-                }
-                gpx_data.append(new_pt)
-    
-        else:
-            # =============== Punkt "zwischen" idx..idx+1 einfügen ===============
-            if idx < 0:
-                idx = 0
-            if idx >= len(gpx_data):
-                idx = len(gpx_data) -1  # safety
+                if not gpx_data:
+                    # Falls wirklich nix da => wie "ende"
+                    new_pt = {
+                        "lat": lat,
+                        "lon": lon,
+                        "ele": 0.0,
+                        "time": video_ts or now,
+                        "delta_m": 0.0,
+                        "speed_kmh": 0.0,
+                        "gradient": 0.0,
+                        "rel_s": 0.0
+                    }
+                    gpx_data.append(new_pt)
+                else:
+                    base_pt = gpx_data[idx]
+                    t_base = base_pt.get("time")
+                    if not t_base:
+                        t_base = now
+                    new_time = t_base + timedelta(seconds=1)
 
-            if not gpx_data:
-                # Falls wirklich nix da => wie "ende"
-                new_pt = {
-                    "lat": lat,
-                    "lon": lon,
-                    "ele": 0.0,
-                    "time": now,
-                    "delta_m": 0.0,
-                    "speed_kmh": 0.0,
-                    "gradient": 0.0,
-                    "rel_s": 0.0
-                }
-                gpx_data.append(new_pt)
-            else:
-                base_pt = gpx_data[idx]
-                t_base = base_pt.get("time")
-                if not t_base:
-                    t_base = now
-                new_time = t_base + timedelta(seconds=1)
+                    new_pt = {
+                        "lat": lat,
+                        "lon": lon,
+                        "ele": base_pt.get("ele", 0.0),
+                        "time": video_ts or new_time,
+                        "delta_m": 0.0,
+                        "speed_kmh": 0.0,
+                        "gradient": 0.0,
+                        "rel_s": 0.0
+                    }
+                    insert_pos = idx + 1
+                    if insert_pos > len(gpx_data):
+                        insert_pos = len(gpx_data)
+                    gpx_data.insert(insert_pos, new_pt)
 
-                new_pt = {
-                    "lat": lat,
-                    "lon": lon,
-                    "ele": base_pt.get("ele", 0.0),
-                    "time": new_time,
-                    "delta_m": 0.0,
-                    "speed_kmh": 0.0,
-                    "gradient": 0.0,
-                    "rel_s": 0.0
-                }
-                insert_pos = idx + 1
-                if insert_pos > len(gpx_data):
-                    insert_pos = len(gpx_data)
-                gpx_data.insert(insert_pos, new_pt)
-
-                # alle folgenden => +1s
-                for j in range(insert_pos+1, len(gpx_data)):
-                    t_old = gpx_data[j].get("time")
-                    if t_old:
-                        gpx_data[j]["time"] = t_old + timedelta(seconds=1)
+                    # alle folgenden => +1s
+                    if not video_ts:
+                        for j in range(insert_pos+1, len(gpx_data)):
+                            t_old = gpx_data[j].get("time")
+                            if t_old:
+                                gpx_data[j]["time"] = t_old + timedelta(seconds=1)      
 
         #  => recalc
         recalc_gpx_data(gpx_data)
@@ -4252,5 +4261,37 @@ class MainWindow(QMainWindow):
     def _on_map_minus(self):
         js_code = "mapZoomOut();"
         self.map_widget.view.page().runJavaScript(js_code)
+
+    def ordered_insert_new_point(self,lat: float, lon: float, video_time: float):
+        gpx_data = self._gpx_data or []
+        t_first = gpx_data[0].get("time", 0) if gpx_data else 0
+        video_ts = t_first + timedelta(seconds=video_time)
+
+        idx = 0
+        for i in range(0, len(gpx_data)):
+            if (gpx_data[i].get("time") > video_ts):
+                break
+            else:
+                idx = i
+
+        ele = 0
+        if idx > 0:
+            base_pt = gpx_data[idx]
+            ele = base_pt.get("ele", 0.0)
+
+        new_pt = {
+            "lat": lat,
+            "lon": lon,
+            "ele": ele,
+            "time": video_ts,
+            "delta_m": 0.0,
+            "speed_kmh": 0.0,
+            "gradient": 0.0,
+            "rel_s": 0.0
+        }
+        insert_pos = idx + 1
+        if insert_pos > len(gpx_data):
+            insert_pos = len(gpx_data)
+        gpx_data.insert(insert_pos, new_pt)
     
     
