@@ -19,8 +19,9 @@
 #
 
 import math
-from datetime import datetime
+from datetime import datetime, timedelta
 import platform
+import re
 
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtWidgets import (
@@ -123,6 +124,12 @@ class GPXListWidget(QWidget):
 
         # Wenn die Auswahl (Selektion) geändert wird
         self.table.itemSelectionChanged.connect(self._on_table_selection_changed)
+        
+        #time edit functionality 
+        self.table.setEditTriggers(QAbstractItemView.DoubleClicked)
+        self.table.itemChanged.connect(self._on_item_changed) 
+        self._original_value = None
+        self.table.itemDoubleClicked.connect(self._on_item_double_clicked)
         
     # ---------------------------------------------------
     # markB markE und Deselect
@@ -456,6 +463,63 @@ class GPXListWidget(QWidget):
         # 3) Jetzt erst das Signal -> MainWindow
         self.rowClickedInPause.emit(new_idx)
 
+    def _on_item_changed(self, item):
+        if self._updating_table or item.column() != 0 or self._original_value is None or self._original_value == item.text():
+            return
+
+        row = item.row()
+        column = item.column()
+        value = item.text()
+        # Update your internal GPX data
+        print(f"[DEBUG] Item at row {row}, column {column} changed to {value}")
+
+        self._original_value = None
+
+        match column:
+            case 0: 
+                 # Parse relative time and update GPX datetime
+                base_dt = self._gpx_data[0].get("time")
+                if base_dt is None:
+                    return  # Can't apply relative update
+
+                try:
+                    rel_s = self._parse_hhmmss_milli(value)
+                    new_dt = base_dt + timedelta(seconds=rel_s)
+                    next_dt = self._get_time_of_row(row + 1)
+
+                    if next_dt and new_dt >= next_dt:
+                        from PySide6.QtWidgets import QMessageBox
+                        QMessageBox.warning(
+                            self.table,  # parent widget
+                            "Invalid Range",
+                            "New time must be earlier than the next time"
+                        )
+                        self.set_gpx_data(self._gpx_data) # Reset to original value
+                        return
+                    prev_dt = self._get_time_of_row(row -1)
+
+                    if prev_dt and new_dt <= prev_dt:
+                        from PySide6.QtWidgets import QMessageBox
+                        QMessageBox.warning(
+                            self.table,  # parent widget
+                            "Invalid Range",
+                            "New time must be later than the previous time"
+                        )
+                        self.set_gpx_data(self._gpx_data) # Reset to original value
+                        return
+                    
+                    self._gpx_data[row]["time"] = new_dt
+                except Exception as e:
+                    print(f"Invalid time format in row {row}: {value} ({e})")
+
+        from core.gpx_parser import recalc_gpx_data
+        recalc_gpx_data(self._gpx_data)
+        self.set_gpx_data(self._gpx_data)
+
+    def _on_item_double_clicked(self, item):
+        if item.column() == 0:
+            self._original_value = item.text()
+
     def select_row_in_pause(self, row_idx: int):
         if self._video_is_playing:
             return
@@ -592,6 +656,7 @@ class GPXListWidget(QWidget):
     # 4) GPX-Daten
     # ---------------------------------------------------
     def set_gpx_data(self, data):
+        self._updating_table = True
         self._gpx_data = data
         
         n = len(data)
@@ -643,6 +708,8 @@ class GPXListWidget(QWidget):
             self._set_cell(row_idx, 7, f"{grd_val:.1f}")
             self._set_cell(row_idx, 8, "")
 
+        self._updating_table = False
+
     # ---------------------------------------------------
     # 5) get_closest_index_for_time
     # ---------------------------------------------------
@@ -680,11 +747,23 @@ class GPXListWidget(QWidget):
         ms = rest % 1000
         return f"{hh:02d}:{mm:02d}:{ss:02d}.{ms:03d}"
 
+    def _parse_hhmmss_milli(self, time_str: str) -> float:
+         # Match hh:mm:ss[.mmm] — milliseconds optional
+        match = re.match(r"^(\d+):(\d+):(\d+)(?:\.(\d{1,3}))?$", time_str.strip())
+        if not match:
+            raise ValueError("Time format must be hh:mm:ss or hh:mm:ss.mmm")
+
+        h, m, s, ms = match.groups()
+        h = int(h)
+        m = int(m)
+        s = int(s)
+        ms = int(ms) if ms else 0
+
+        return h * 3600 + m * 60 + s + ms / 1000.0
+
     def _set_cell(self, row, col, text):
         item = QTableWidgetItem(text)
-        flags = item.flags()
-        flags &= ~Qt.ItemIsEditable
-        item.setFlags(flags)
+        item.setFlags(item.flags() | Qt.ItemIsEditable if col==0 else item.flags() & ~Qt.ItemIsEditable)
         self.table.setItem(row, col, item)
 
     def _get_mainwindow(self):
