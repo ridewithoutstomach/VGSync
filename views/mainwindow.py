@@ -1886,6 +1886,7 @@ class MainWindow(QMainWindow):
         # 1) Video-Undo:
         self.map_widget.view.page().runJavaScript("showLoading('Undo GPX-Range...');")
         self.cut_manager.on_undo_clicked()
+        self._overlay_manager.undo_overlay()
 
         # 2) Falls autosync ON => GPX-Liste => undo_delete
         if self._autoSyncVideoEnabled:
