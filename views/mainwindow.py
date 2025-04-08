@@ -79,6 +79,8 @@ from managers.end_manager import EndManager
 from managers.cut_manager import VideoCutManager
 from core.gpx_parser import parse_gpx  # Hier hinzufügen!
 
+from managers.overlay_manager import OverlayManager
+
 # ggf. import_export_manager, safe_manager etc.
 from .dialogs import _IndexingDialog, _SafeExportDialog, DetachDialog
 from widgets.mini_chart_widget import MiniChartWidget
@@ -669,9 +671,12 @@ class MainWindow(QMainWindow):
         self.video_control.multiplier_value_changed.connect(self.on_multiplier_changed)
         self.video_control.backward_clicked.connect(self.step_manager.step_backward)
         self.video_control.forward_clicked.connect(self.step_manager.step_forward)
-
+        
+        self.video_control.overlayClicked.connect(self._on_overlay_button_clicked)
        
         self.cut_manager = VideoCutManager(self.video_editor, self.timeline, self)
+        self._overlay_manager = OverlayManager(self.timeline, self)
+        
         
         self.end_manager = EndManager(
             video_editor=self.video_editor,
@@ -739,7 +744,57 @@ class MainWindow(QMainWindow):
         self.map_widget.view.loadFinished.connect(self._on_map_page_loaded)
         self.video_editor.set_final_time_callback(self._compute_final_time)
         
-       
+    
+
+    def _on_overlay_button_clicked(self):
+        """
+        Wird aufgerufen, wenn der Ovl-Button aus VideoControlWidget geklickt wird.
+        """
+        # 1) Dialog öffnen => OverlayInsertDialog
+        dlg = OverlayInsertDialog(self)
+        if dlg.exec() != QDialog.Accepted:
+            return
+
+        chosen_id = dlg.chosen_overlay_id   # "1","2","3" oder "manual"
+        duration_s = dlg.duration_s
+        fade_in_s  = dlg.fade_in_s
+        fade_out_s = dlg.fade_out_s
+
+        # 2) Aktuelle Marker-Position (global_s) => timeline.marker_position()
+        start_s = self.timeline.marker_position()
+        end_s   = start_s + duration_s
+
+        # 3) QSettings abfragen je nach chosen_id
+        from PySide6.QtCore import QSettings
+        s = QSettings("VGSync", "VGSync")
+
+        if chosen_id in ("1","2","3"):
+            image = s.value(f"overlay/{chosen_id}/image",  "", str)
+            scale = s.value(f"overlay/{chosen_id}/scale",  1.0, float)
+            mapped_x = s.value(f"overlay/{chosen_id}/mapped_x", "0", str)
+            mapped_y = s.value(f"overlay/{chosen_id}/mapped_y", "0", str)
+        else:
+            # 'manual'
+            image = ""
+            scale = 1.0
+            mapped_x = "0"
+            mapped_y = "0"
+
+        overlay_dict = {
+            "start":    start_s,
+            "end":      end_s,
+            "fade_in":  fade_in_s,
+            "fade_out": fade_out_s,
+            "image":    image,
+            "scale":    scale,
+            "x":        mapped_x,
+            "y":        mapped_y
+        }
+        print("[DEBUG] Inserting overlay:", overlay_dict)
+
+        # 4) Im OverlayManager anlegen
+        self._overlay_manager.add_overlay(overlay_dict)
+        
     
     def _on_map_directions_toggled(self, checked: bool):
         """
@@ -4288,5 +4343,113 @@ class MainWindow(QMainWindow):
     def _on_map_minus(self):
         js_code = "mapZoomOut();"
         self.map_widget.view.page().runJavaScript(js_code)
-    
-    
+ 
+class OverlayInsertDialog(QDialog):
+    """
+    Dieser Dialog fragt den Benutzer:
+      - Auswahl Overlay (1..3 nur, wenn in QSettings/f overlay/<i>/image hinterlegt ist),
+        plus immer "manual" als Fallback.
+      - Dauer (Duration)
+      - Fade-In und Fade-Out (in Sekunden)
+
+    Beim Klicken auf OK werden die eingegebenen Werte in folgenden Attributen gespeichert:
+      self.chosen_overlay_id  -> "1", "2", "3" oder "manual"
+      self.duration_s         -> float
+      self.fade_in_s          -> float
+      self.fade_out_s         -> float
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Insert Overlay")
+
+        # Ergebnis-Attribute:
+        self.chosen_overlay_id = None
+        self.duration_s  = 0.0
+        self.fade_in_s   = 0.0
+        self.fade_out_s  = 0.0
+
+        # Hauptlayout
+        main_layout = QVBoxLayout(self)
+        self.setLayout(main_layout)
+
+        # -- 1) Auswahl des Overlay (ComboBox)
+        label_overlay = QLabel("Select Overlay:", self)
+        main_layout.addWidget(label_overlay)
+
+        self.combo_overlay = QComboBox(self)
+        main_layout.addWidget(self.combo_overlay)
+
+        # Dynamische Anzeige: Nur overlay/X, wenn ein Pfad in QSettings vorhanden
+        s = QSettings("VGSync", "VGSync")
+        for i in [1, 2, 3]:
+            image_val = s.value(f"overlay/{i}/image", "", str).strip()
+            if image_val:
+                # Wenn das image_val NICHT leer ist, fügen wir "overlay i" hinzu
+                self.combo_overlay.addItem(f"overlay {i}")
+
+        # Außerdem immer "manual"
+        self.combo_overlay.addItem("manual")
+
+        # -- 2) Dauer (Duration)
+        label_dur = QLabel("Duration (seconds):", self)
+        main_layout.addWidget(label_dur)
+
+        self.spin_duration = QDoubleSpinBox(self)
+        self.spin_duration.setRange(0.1, 9999.0)
+        self.spin_duration.setDecimals(2)
+        self.spin_duration.setValue(10.0)  # Default: 10s
+        main_layout.addWidget(self.spin_duration)
+
+        # -- 3) FadeIn / FadeOut
+        fade_layout = QHBoxLayout()
+        label_fade_in = QLabel("Fade In (s):", self)
+        self.spin_fadein = QDoubleSpinBox(self)
+        self.spin_fadein.setRange(0.0, 9999.0)
+        self.spin_fadein.setDecimals(2)
+        self.spin_fadein.setValue(2.0)
+
+        label_fade_out = QLabel("Fade Out (s):", self)
+        self.spin_fadeout = QDoubleSpinBox(self)
+        self.spin_fadeout.setRange(0.0, 9999.0)
+        self.spin_fadeout.setDecimals(2)
+        self.spin_fadeout.setValue(0.0)
+
+        fade_layout.addWidget(label_fade_in)
+        fade_layout.addWidget(self.spin_fadein)
+        fade_layout.addSpacing(20)
+        fade_layout.addWidget(label_fade_out)
+        fade_layout.addWidget(self.spin_fadeout)
+        main_layout.addLayout(fade_layout)
+
+        # -- 4) Dialog-Buttons (OK/Cancel)
+        btn_box = QDialogButtonBox(self)
+        btn_box.setStandardButtons(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        main_layout.addWidget(btn_box)
+
+        btn_box.accepted.connect(self._on_ok_clicked)
+        btn_box.rejected.connect(self.reject)
+
+        # Layout-Abschluss
+        main_layout.addStretch()
+
+    def _on_ok_clicked(self):
+        """
+        Wird aufgerufen, wenn man im Dialog auf OK klickt.
+        - Ermittelt chosen_overlay_id (z.B. '1','2','3' oder 'manual')
+        - Liest Duration, fade_in, fade_out
+        - Ruft self.accept() auf
+        """
+        txt = self.combo_overlay.currentText().lower()  # "overlay 1" / "manual" ...
+        if txt.startswith("overlay"):
+            # Bsp: "overlay 2" => -> "2"
+            arr = txt.split()  # ["overlay","2"]
+            self.chosen_overlay_id = arr[1] if len(arr) > 1 else "1"
+        else:
+            self.chosen_overlay_id = "manual"
+
+        self.duration_s  = self.spin_duration.value()
+        self.fade_in_s   = self.spin_fadein.value()
+        self.fade_out_s  = self.spin_fadeout.value()
+
+        self.accept()
+ 

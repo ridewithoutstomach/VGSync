@@ -63,6 +63,25 @@ class VideoTimelineWidget(QWidget):
         self._horizontal_offset = 0
         self._scroll_speed_px = 50
         self.setStyleSheet("background-color: #333333;")
+        self._overlay_intervals = []
+        
+        
+    def add_overlay_interval(self, start_s: float, end_s: float):
+        """
+        Speichert ein Overlay-Zeitintervall, damit wir es in Blau markieren können.
+        """
+        self._overlay_intervals.append((start_s, end_s))
+        self.update()
+
+    def remove_last_overlay_interval(self):
+        if self._overlay_intervals:
+            self._overlay_intervals.pop()
+            self.update()
+
+    def clear_overlay_intervals(self):
+        self._overlay_intervals.clear()
+        self.update()
+    
 
     def set_marker_position(self, time_s: float):
         if self.total_duration <= 0:
@@ -360,3 +379,23 @@ class VideoTimelineWidget(QWidget):
             if rect_width < 1:
                 rect_width = 1
             painter.fillRect(x_start, 0, rect_width, h, brush_black)
+
+        # Zeichnen der Overlay-Intervalle (blau)
+        if self.total_duration > 0 and self._overlay_intervals:
+            brush_blue = QBrush(QColor(0, 0, 255, 80))  # halbtransparentes Blau
+            pen_blue = QPen(QColor("blue"), 2)
+            painter.setPen(pen_blue)
+            painter.setBrush(brush_blue)
+            for (start_s, end_s) in self._overlay_intervals:
+                if end_s <= start_s:
+                    continue
+                start_ratio = start_s / self.total_duration
+                end_ratio   = end_s   / self.total_duration
+                x_start = (start_ratio * timeline_real_width) - self._horizontal_offset
+                x_end   = (end_ratio   * timeline_real_width) - self._horizontal_offset
+                if x_end < -50 or x_start > w+50:
+                    continue
+                rect_w = x_end - x_start
+                if rect_w < 2:
+                    rect_w = 2
+                painter.drawRect(x_start, 0, rect_w, h)

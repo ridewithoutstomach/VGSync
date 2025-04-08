@@ -46,6 +46,7 @@ class VideoControlWidget(QWidget):
     safeClicked              = Signal()
     syncClicked              = Signal()
     set_beginClicked         = Signal()  
+    overlayClicked        = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -424,7 +425,8 @@ class VideoControlWidget(QWidget):
         Wird aufgerufen, wenn der Ovl-Button geklickt wird.
         Hier könntest du z.B. ein Signal feuern oder direkt eine Aktion machen.
         """
-        print("[DEBUG] Ovl-Button clicked!")
+        self.overlayClicked.emit()
+        
         # Beispiel: Du könntest ein Signal emitten oder einen Dialog öffnen.
         # self.someOvlClicked.emit()   # falls du ein extra Signal willst
     
