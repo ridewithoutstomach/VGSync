@@ -74,6 +74,7 @@ import path_manager  # zweites Mal import ist okay
 from PySide6.QtWidgets import QApplication, QDialog, QMessageBox, QWidget, QSystemTrayIcon
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QGuiApplication, QIcon
+from PySide6.QtWebEngineWidgets import QWebEngineView #apparently we need to import it before the app starts
 
 # Dein eigenes Zeug:
 from config import (
