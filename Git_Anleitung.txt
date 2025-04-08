@@ -232,5 +232,93 @@ Dann nochmal vergleichen wie oben.
 Der Commit erscheint im Verlauf – der Autor sieht, dass sein Code übernommen wurde.
 
 
+==============================
+✅ Git: Versionen & Releases einfach erklärt
+==============================
+
+🎯 Ziel:
+Du willst...
+
+1. Einen aktuellen Entwicklungsstand auf GitHub haben
+2. Zwischendurch Versionen markieren (z. B. v3.3.0)
+3. Releases auf GitHub anzeigen & runterladbar machen
+4. Später zu alten Versionen zurückspringen
+5. Trotzdem weiterarbeiten können
+
+==============================
+🚀 Schritt-für-Schritt-Anleitung
+==============================
+
+1️⃣ Du arbeitest ganz normal im Branch 'main'
+
+    git add .
+    git commit -m "Neues Feature eingebaut"
+
+→ So speicherst du deine Änderungen wie gewohnt.
+
+---
+
+2️⃣ Wenn du sagst: "Das ist jetzt eine neue Version (z. B. v3.3.0)"
+
+Setze ein **Tag**:
+
+    git tag v3.3.0
+
+→ Damit merkst du dir den aktuellen Stand als "Version 3.3.0"
+
+---
+
+3️⃣ Hochladen auf GitHub
+
+    git push origin main
+    git push origin v3.3.0
+
+→ Jetzt ist dein neuester Code & die Version v3.3.0 auf GitHub
+
+---
+
+4️⃣ Optional: Release auf GitHub veröffentlichen (grafisch)
+
+    - Gehe zu https://github.com/<dein-nutzer>/<dein-repo>/releases
+    - Klicke auf „Draft a new release“
+    - Wähle den Tag (z. B. v3.3.0) aus
+    - Gib eine Beschreibung ein (z. B. "Release der neuen Testversion")
+    - Klicke auf „Publish release“
+
+✅ Jetzt ist dein Release öffentlich sichtbar  
+→ GitHub erstellt automatisch ZIP-Dateien und Anzeige unter „Releases“
+
+---
+
+5️⃣ Später zu einer alten Version springen
+
+    git checkout v3.2.0
+
+→ Du siehst den Stand dieser alten Version.  
+❗Achtung: Du bist im "Detached HEAD"-Modus → du kannst nur schauen, nicht direkt weiterarbeiten.
+
+Wenn du daraus weiterentwickeln willst:
+
+    git checkout -b neuer-zweig-v3.2.0
+
+→ Jetzt kannst du auf Basis der alten Version normal weiterarbeiten.
+
+---
+
+6️⃣ Zurück zum aktuellen Stand:
+
+    git checkout main
+
+Fertig.
+
+==============================
+🧠 Merksatz:
+Arbeite in 'main'.  
+Markiere Versionen mit `git tag vX.Y.Z`.  
+Lade alles mit `git push origin main && git push origin vX.Y.Z` hoch.  
+Erstelle optional ein Release auf GitHub für Download und Übersicht.
+
+
+
 
 
