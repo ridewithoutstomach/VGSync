@@ -596,17 +596,19 @@
 		return;
 	}
 	
-	/*
-    if (selectedIndex == null) {
-        alert("No point selected ⇒ cannot insert new point.");
-        addNewPointMode = false;
-        document.body.style.cursor = "";
-        return;
-    }*/
+	// => es gibt nur diesen einen Punkt
+	let ll = ol.proj.toLonLat(evt.coordinate);
+
+  if (selectedIndex == null) {
+    channelObj.newPointInserted(ll[1], ll[0], -3); //-3 will correspond to no selection (to display error if not in easy insert mode)
+    //alert("No point selected ⇒ cannot insert new point.");
+    addNewPointMode = false;
+    document.body.style.cursor = "";
+    return;
+  }
 	
 	if (maxIdx === 0) {
-		// => es gibt nur diesen einen Punkt
-		let ll = ol.proj.toLonLat(evt.coordinate);
+		
 		if (channelObj && channelObj.newPointInserted) {
 		// => Immer hinten anfügen (idx = -1)
 		channelObj.newPointInserted(ll[1], ll[0], -1);
@@ -619,7 +621,6 @@
 	
     if (selectedIndex === 0) {
         // => Vorne einfügen
-        let ll = ol.proj.toLonLat(evt.coordinate);
         if (channelObj && channelObj.newPointInserted) {
             channelObj.newPointInserted(ll[1], ll[0], -2); 
             // -2 signalisiert "vor dem ersten Punkt"
@@ -635,7 +636,6 @@
         let mIdx = getMaxIndex();
         if (selectedIndex === mIdx && mIdx >= 0) {
             // => "hinten" anfügen => idx=-1
-            let ll = ol.proj.toLonLat(evt.coordinate);
             if (channelObj && channelObj.newPointInserted) {
                 channelObj.newPointInserted(ll[1], ll[0], -1);
             }
@@ -661,7 +661,6 @@
 
         if (!foundLine || !closestCoord) {
             // => index = -1 => "am Ende"
-            let ll = ol.proj.toLonLat(evt.coordinate);
             if (channelObj && channelObj.newPointInserted) {
                 channelObj.newPointInserted(ll[1], ll[0], -1);
             }
@@ -674,7 +673,6 @@
         // Hier: Zwischen Segmenten
         let coords = foundLine.getGeometry().getCoordinates();
         if (coords.length < 2) {
-            let ll = ol.proj.toLonLat(evt.coordinate);
             channelObj.newPointInserted(ll[1], ll[0], -1);
         } else {
             let seg = findSegmentIndexForClosestCoord(coords, closestCoord);

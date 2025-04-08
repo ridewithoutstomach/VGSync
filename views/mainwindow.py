@@ -206,6 +206,7 @@ class MainWindow(QMainWindow):
         # Edit 
         self._video_at_end = False   # Merker, ob wir wirklich am Ende sind
         self._autoSyncVideoEnabled = False
+        self._autoSyncNewPointsWithVideoTime = False
         self.user_wants_editing = user_wants_editing
         
         
@@ -277,6 +278,11 @@ class MainWindow(QMainWindow):
         self.action_auto_sync_video.triggered.connect(self._on_auto_sync_video_toggled)
         setup_menu.addAction(self.action_auto_sync_video)
         
+        self.action_new_pts_video_time = QAction("New points at video time", self)
+        self.action_new_pts_video_time.setCheckable(True)
+        self.action_new_pts_video_time.setChecked(False)  # Standard = OFF
+        self.action_new_pts_video_time.triggered.connect(self._on_sync_point_video_time_toggled)
+        setup_menu.addAction(self.action_new_pts_video_time)
         
         timer_menu = setup_menu.addMenu("Time: Final/Glogal")
 
@@ -1642,12 +1648,18 @@ class MainWindow(QMainWindow):
 
         row_selected = self.gpx_widget.gpx_list.table.currentRow()
 
-        if self.video_editor.is_video_loaded(): #if video loaded, insert a new point at current video time without shift
+        if self._autoSyncNewPointsWithVideoTime and self.video_editor.is_video_loaded(): #if video loaded, insert a new point at current video time without shift
             video_time = self.video_editor.get_current_position_s()
-            print(f"[DEBUG] on_new_gpx_point_inserted idx {idx} at {video_time}")
             self.ordered_insert_new_point(lat,lon,video_time)
 
         else: #insert with shift
+            if idx == -3:
+                QMessageBox.information(
+                self,
+                "No point selected",
+                "No point selected ⇒ cannot insert new point."
+            )
+                
             # --- NEU: Falls Directions aktiv und es ist eindeutig "erster" oder "letzter" Punkt selektiert ---
             if self._directions_enabled:
                 # Prüfen, welcher GPX-Punkt in der Liste selektiert ist
@@ -1941,6 +1953,9 @@ class MainWindow(QMainWindow):
                 video_edit_on=self.action_edit_video.isChecked(),
                 auto_sync_on=checked
             )
+            
+    def _on_sync_point_video_time_toggled(self, checked: bool):
+        self._autoSyncNewPointsWithVideoTime = checked
         
     def on_delete_range_clicked(self):
         """
