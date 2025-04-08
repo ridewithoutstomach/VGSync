@@ -425,6 +425,7 @@ class VideoControlWidget(QWidget):
         Wird aufgerufen, wenn der Ovl-Button geklickt wird.
         Hier könntest du z.B. ein Signal feuern oder direkt eine Aktion machen.
         """
+
         self.overlayClicked.emit()
         
         # Beispiel: Du könntest ein Signal emitten oder einen Dialog öffnen.

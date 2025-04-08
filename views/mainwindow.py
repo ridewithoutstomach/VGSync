@@ -747,53 +747,8 @@ class MainWindow(QMainWindow):
     
 
     def _on_overlay_button_clicked(self):
-        """
-        Wird aufgerufen, wenn der Ovl-Button aus VideoControlWidget geklickt wird.
-        """
-        # 1) Dialog öffnen => OverlayInsertDialog
-        dlg = OverlayInsertDialog(self)
-        if dlg.exec() != QDialog.Accepted:
-            return
-
-        chosen_id = dlg.chosen_overlay_id   # "1","2","3" oder "manual"
-        duration_s = dlg.duration_s
-        fade_in_s  = dlg.fade_in_s
-        fade_out_s = dlg.fade_out_s
-
-        # 2) Aktuelle Marker-Position (global_s) => timeline.marker_position()
-        start_s = self.timeline.marker_position()
-        end_s   = start_s + duration_s
-
-        # 3) QSettings abfragen je nach chosen_id
-        from PySide6.QtCore import QSettings
-        s = QSettings("VGSync", "VGSync")
-
-        if chosen_id in ("1","2","3"):
-            image = s.value(f"overlay/{chosen_id}/image",  "", str)
-            scale = s.value(f"overlay/{chosen_id}/scale",  1.0, float)
-            mapped_x = s.value(f"overlay/{chosen_id}/mapped_x", "0", str)
-            mapped_y = s.value(f"overlay/{chosen_id}/mapped_y", "0", str)
-        else:
-            # 'manual'
-            image = ""
-            scale = 1.0
-            mapped_x = "0"
-            mapped_y = "0"
-
-        overlay_dict = {
-            "start":    start_s,
-            "end":      end_s,
-            "fade_in":  fade_in_s,
-            "fade_out": fade_out_s,
-            "image":    image,
-            "scale":    scale,
-            "x":        mapped_x,
-            "y":        mapped_y
-        }
-        print("[DEBUG] Inserting overlay:", overlay_dict)
-
-        # 4) Im OverlayManager anlegen
-        self._overlay_manager.add_overlay(overlay_dict)
+        marker_s = self.timeline.marker_position()
+        self._overlay_manager.ask_user_for_overlay(marker_s, parent=self)   
         
     
     def _on_map_directions_toggled(self, checked: bool):

@@ -19,6 +19,34 @@
 #
 
 # views/overlay_setup_dialog.py
+
+"""
+Dieser Dialog speichert bis zu 3 Overlays in QSettings. Beispielhafte Keys:
+
+"overlay/1/image"    -> Pfad zur Bilddatei (String)
+"overlay/1/scale"    -> Skalierungsfaktor (float, z.B. 1.0)
+"overlay/1/corner"   -> "top-left", "top-right", "bottom-left", "bottom-right", "center"
+"overlay/1/dx"       -> Abstand in x-Richtung
+"overlay/1/dy"       -> Abstand in y-Richtung
+
+"overlay/2/image"
+"overlay/2/scale"
+"overlay/2/corner"
+"overlay/2/dx"
+"overlay/2/dy"
+
+"overlay/3/image"
+"overlay/3/scale"
+"overlay/3/corner"
+"overlay/3/dx"
+"overlay/3/dy"
+
+Beim Klick auf "Save" erzeugen wir zusätzlich:
+"overlay/1/mapped_x"
+"overlay/1/mapped_y"
+usw. Damit wir in ffmpeg x=..., y=... direkt einsetzen können.
+"""
+
 import os
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QLabel, QPushButton, QLineEdit,
@@ -29,15 +57,14 @@ from PySide6.QtCore import QSettings, Qt
 
 class OverlaySetupDialog(QDialog):
     """
-    Dialog zur Konfiguration von bis zu 3 Overlays.
+    Ein Dialog, in dem wir 3 Overlays definieren können.
+    Für jeden Overlay i (1..3) speichern wir:
+      - image (Dateiname)
+      - scale (float)
+      - corner (Enum: "top-left", "top-right", "bottom-left", "bottom-right", "center")
+      - dx, dy (Abstände vom Rand in Pixeln)
 
-    Zu jedem Overlay i (1..3) werden folgende Keys gespeichert:
-      overlay/i/image
-      overlay/i/scale
-      overlay/i/corner
-      overlay/i/dx
-      overlay/i/dy
-    Außerdem berechnen wir mapped_x/mapped_y aus corner + dx,dy.
+    Zusätzlich erzeugen wir mapped_x und mapped_y-Ausdrücke für ffmpeg overlay=...
     """
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -49,17 +76,19 @@ class OverlaySetupDialog(QDialog):
 
         info_label = QLabel(
             "Configure up to 3 overlays.\n"
-            "Pick an image, scale, corner, dx/dy offsets.\n"
-            "We also store mapped_x/mapped_y for direct ffmpeg usage."
+            "Pick an image, scale it, choose corner, and offsets dx,dy.\n"
+            "We also store 'mapped_x' and 'mapped_y' for direct ffmpeg usage.\n"
+            "(Note: W,H = main video size; w,h = overlay size)"
         )
         main_layout.addWidget(info_label)
 
+        # Für 3 Overlays
         for i in range(1, 4):
             group_label = QLabel(f"Overlay {i}")
             group_label.setStyleSheet("font-weight: bold; margin-top: 8px;")
             main_layout.addWidget(group_label)
 
-            # 1) Image Pfad
+            # === 1) Image-Pfad
             row1 = QHBoxLayout()
             lbl_path = QLabel("Image path:")
             row1.addWidget(lbl_path)
@@ -69,23 +98,21 @@ class OverlaySetupDialog(QDialog):
             line_edit.setText(stored_path)
             row1.addWidget(line_edit)
 
-            # Die kleine Hilfsfunktion, die den bool 'checked' ignoriert 
-            # und stattdessen 'edit' benutzt.
-            def _make_browse(checked=None, edit=line_edit):
+            # Wichtig: Handler per Default-Argument binden, um Closure-Problem zu vermeiden
+            def on_browse(checked=None, edit=line_edit):
+            #def on_browse(edit=line_edit):
                 f, _ = QFileDialog.getOpenFileName(self, "Select overlay image")
                 if f:
                     edit.setText(f)
 
             btn_browse = QPushButton("...")
-            # Wichtig: wir verbinden 'clicked' mit _make_browse => 
-            # => Param 'checked' landet in 'checked=None'
-            btn_browse.clicked.connect(_make_browse)
+            btn_browse.clicked.connect(on_browse)
             row1.addWidget(btn_browse)
 
             main_layout.addLayout(row1)
             setattr(self, f"img_path_edit_{i}", line_edit)
 
-            # 2) Scale
+            # === 2) Scale
             row2 = QHBoxLayout()
             lbl_scale = QLabel("Scale:")
             row2.addWidget(lbl_scale)
@@ -97,10 +124,11 @@ class OverlaySetupDialog(QDialog):
             stored_scale = self.settings.value(f"overlay/{i}/scale", 1.0, type=float)
             scale_spin.setValue(stored_scale)
             row2.addWidget(scale_spin)
+
             main_layout.addLayout(row2)
             setattr(self, f"scale_spin_{i}", scale_spin)
 
-            # 3) corner
+            # === 3) corner (ComboBox)
             row3 = QHBoxLayout()
             lbl_corner = QLabel("Corner:")
             row3.addWidget(lbl_corner)
@@ -111,35 +139,38 @@ class OverlaySetupDialog(QDialog):
                 "top-right",
                 "bottom-left",
                 "bottom-right",
-                "center"
+                "center",
             ])
             stored_corner = self.settings.value(f"overlay/{i}/corner", "top-left", type=str)
-            idx = corner_combo.findText(stored_corner)
-            if idx >= 0:
-                corner_combo.setCurrentIndex(idx)
+            index_corner = corner_combo.findText(stored_corner)
+            if index_corner >= 0:
+                corner_combo.setCurrentIndex(index_corner)
             row3.addWidget(corner_combo)
+
             main_layout.addLayout(row3)
             setattr(self, f"corner_combo_{i}", corner_combo)
 
-            # 4) dx, dy
+            # === 4) dx, dy
             row4 = QHBoxLayout()
             lbl_dx = QLabel("dx:")
             row4.addWidget(lbl_dx)
+
             offset_x_spin = QSpinBox()
             offset_x_spin.setRange(0, 9999)
-            dx_val = self.settings.value(f"overlay/{i}/dx", 10, type=int)
-            offset_x_spin.setValue(dx_val)
+            stored_dx = self.settings.value(f"overlay/{i}/dx", 10, type=int)
+            offset_x_spin.setValue(stored_dx)
             row4.addWidget(offset_x_spin)
 
             lbl_dy = QLabel("dy:")
             row4.addWidget(lbl_dy)
+
             offset_y_spin = QSpinBox()
             offset_y_spin.setRange(0, 9999)
-            dy_val = self.settings.value(f"overlay/{i}/dy", 10, type=int)
-            offset_y_spin.setValue(dy_val)
+            stored_dy = self.settings.value(f"overlay/{i}/dy", 10, type=int)
+            offset_y_spin.setValue(stored_dy)
             row4.addWidget(offset_y_spin)
-            main_layout.addLayout(row4)
 
+            main_layout.addLayout(row4)
             setattr(self, f"offset_x_spin_{i}", offset_x_spin)
             setattr(self, f"offset_y_spin_{i}", offset_y_spin)
 
@@ -147,7 +178,7 @@ class OverlaySetupDialog(QDialog):
             line_sep.setFrameStyle(QLabel.HLine)
             main_layout.addWidget(line_sep)
 
-        # Buttons Save + Cancel
+        # Buttons: Save (statt OK), Cancel
         btn_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, parent=self)
         ok_button = btn_box.button(QDialogButtonBox.Ok)
         if ok_button:
@@ -159,23 +190,41 @@ class OverlaySetupDialog(QDialog):
 
     def _on_ok_clicked(self):
         """
-        Speichert alle Overlays in QSettings + mapped_x/y.
+        Speichert alle Overlays in QSettings und schließt den Dialog mit accept().
+        Dabei generieren wir aus corner/dx/dy die mapped_x und mapped_y für ffmpeg.
         """
         for i in range(1, 4):
-            image_val  = getattr(self, f"img_path_edit_{i}").text().strip()
-            scale_val  = getattr(self, f"scale_spin_{i}").value()
-            corner_val = getattr(self, f"corner_combo_{i}").currentText()
-            dx_val     = getattr(self, f"offset_x_spin_{i}").value()
-            dy_val     = getattr(self, f"offset_y_spin_{i}").value()
+            key_prefix = f"overlay/{i}"
+            image_key  = f"{key_prefix}/image"
+            scale_key  = f"{key_prefix}/scale"
+            corner_key = f"{key_prefix}/corner"
+            dx_key     = f"{key_prefix}/dx"
+            dy_key     = f"{key_prefix}/dy"
 
-            pref = f"overlay/{i}"
-            self.settings.setValue(f"{pref}/image",  image_val)
-            self.settings.setValue(f"{pref}/scale",  scale_val)
-            self.settings.setValue(f"{pref}/corner", corner_val)
-            self.settings.setValue(f"{pref}/dx",     dx_val)
-            self.settings.setValue(f"{pref}/dy",     dy_val)
+            mapped_x_key = f"{key_prefix}/mapped_x"
+            mapped_y_key = f"{key_prefix}/mapped_y"
 
-            # ffmpeg mapped_x/y
+            # Referenzen
+            line_edit = getattr(self, f"img_path_edit_{i}")
+            scale_spin = getattr(self, f"scale_spin_{i}")
+            corner_combo = getattr(self, f"corner_combo_{i}")
+            offset_x_spin = getattr(self, f"offset_x_spin_{i}")
+            offset_y_spin = getattr(self, f"offset_y_spin_{i}")
+
+            image_val = line_edit.text().strip()
+            scale_val = scale_spin.value()
+            corner_val = corner_combo.currentText()
+            dx_val = offset_x_spin.value()
+            dy_val = offset_y_spin.value()
+
+            # In QSettings speichern
+            self.settings.setValue(image_key,  image_val)
+            self.settings.setValue(scale_key,  scale_val)
+            self.settings.setValue(corner_key, corner_val)
+            self.settings.setValue(dx_key,     dx_val)
+            self.settings.setValue(dy_key,     dy_val)
+
+            # ffmpeg-compatible mapping
             if corner_val == "top-left":
                 x_expr = f"{dx_val}"
                 y_expr = f"{dy_val}"
@@ -193,11 +242,11 @@ class OverlaySetupDialog(QDialog):
                 x_expr = f"((W-w)/2)-{dx_val}"
                 y_expr = f"((H-h)/2)-{dy_val}"
 
-            self.settings.setValue(f"{pref}/mapped_x", x_expr)
-            self.settings.setValue(f"{pref}/mapped_y", y_expr)
+            self.settings.setValue(mapped_x_key, x_expr)
+            self.settings.setValue(mapped_y_key, y_expr)
 
-            print(f"[DEBUG] => Overlay {i}: image='{image_val}', scale={scale_val}, corner='{corner_val}', dx={dx_val}, dy={dy_val}")
-            print(f"[DEBUG] => Mapped: x='{x_expr}', y='{y_expr}'")
+            print(f"[DEBUG] Overlay {i}: image='{image_val}', scale={scale_val}, corner='{corner_val}', dx={dx_val}, dy={dy_val}")
+            print(f"         => mapped_x='{x_expr}', mapped_y='{y_expr}'")
 
         self.settings.sync()
         self.accept()
