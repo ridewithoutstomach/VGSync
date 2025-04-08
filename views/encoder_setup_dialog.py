@@ -1,4 +1,15 @@
 # views/encoder_setup_dialog.py
+
+"""
+"encoder/resolution"  -> String wie "1920x1080" (oder "1280x720" etc.)
+"encoder/container"   -> "x264" oder "x265" (String)
+"encoder/hwaccel"     -> z. B. "none", "nvidia_h264", "nvidia_hevc", "amd_h264", "intel_hevc" etc.
+"encoder/crf"         -> (float oder int, z. B. 20)
+"encoder/preset"      -> z. B. "fast", "medium", "slow" usw. (String)
+"encoder/fps"         -> z. B. 30 (int)
+"encoder/xfade"       -> xfade-Zeit in Sekunden (float oder int, z. B. 2
+
+"""
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QFormLayout, QHBoxLayout, QLabel, QComboBox, QSpinBox,
     QDialogButtonBox, QPushButton, QCheckBox, QLineEdit

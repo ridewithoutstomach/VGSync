@@ -1388,7 +1388,9 @@ class MainWindow(QMainWindow):
         """
         from .overlay_setup_dialog import OverlaySetupDialog  # wir importieren gleich die neue Klasse
         dlg = OverlaySetupDialog(self)
-        if dlg.exec() == dlg.accepted:
+        result = dlg.exec()
+        
+        if result == QDialog.Accepted:
             print("[DEBUG] => Overlay-Setup: changes saved.")
         else:
             print("[DEBUG] => Overlay-Setup: canceled or closed.")
