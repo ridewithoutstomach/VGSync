@@ -200,17 +200,17 @@
   </div>
 
   <!-- Street view -->
-  <div id="mapillaryViewer" style="position: absolute; bottom: 60px; left: 10px; width: 40%; height: 40%; z-index: 10000; border: 1px solid #ccc; background: #fff;">
-    <!-- Add this inside the Mapillary viewer container -->
+  <div id="mapillaryViewer" style="position: absolute; bottom: 50px; left: 10px; width: 35%; height: 40%; z-index: 10000; border: 1px solid #ccc; background: #fff;">
     <button onclick="mapillaryContainer.style.display='none'" style="position: absolute; top: 5px; right: 5px; z-index: 10001;">X</button>
   </div>
   <script>
+    var clientId = 'MLY|8819113018197708|743f493bf2919480b88204e2b4fa0e12';
     var {Viewer} = mapillary;
   
     var viewer = new Viewer({
-      accessToken: 'MLY|8819113018197708|743f493bf2919480b88204e2b4fa0e12',
+      accessToken: clientId,
       container: 'mapillaryViewer', // the ID of our container defined in the HTML body
-      imageId: '1151013448713326',
+      //imageId: '1151013448713326', //initial view
     });
   </script>
 
@@ -355,6 +355,9 @@
       speedInput = document.getElementById("speedInput");
 
       initMap();
+
+      viewer.activateCover();
+      viewer.moveTo('1151013448713326'); // initial view
 
       let mvBtn = document.getElementById("mapViewBtn");
       if(mvBtn){
@@ -516,10 +519,11 @@
           }
           return false;
         });
+
+        let ll = ol.proj.toLonLat(evt.coordinate);
+        navigateStreetView(ll[1], ll[0]);
       });
 
-      //const mapillaryClientId = "MLY|8819113018197708|743f493bf2919480b88204e2b4fa0e12";
-      //initMapillaryViewer(mapillaryClientId, 0, 0);
     }
 
     /***********************************************************
@@ -1185,30 +1189,38 @@
       if (profBtn) profBtn.style.display = isEnabled ? "block" : "none";
     }
 
-    let mapillaryViewer = null;
     const mapillaryContainer = document.getElementById("mapillaryViewer");
 
     // Function to initialize Mapillary Viewer
-    function initMapillaryViewer(clientId, lat, lon) {
-      pyLog("Mapillary Viewer initialized with clientId: " + clientId+"lat: "+lat+" lon: "+lon);
-      if (!mapillaryViewer) {
-        mapillaryViewer = new Mapillary.Viewer({
-          container: "mapillaryViewer",
-          clientId: clientId,
-          imageId: null, // Will be set dynamically
-        });
-      }
+    function navigateStreetView(lat, lon) {
+      pyLog("navigateStreetView lat: "+lat+" lon: "+lon);
+      radius=5
+      left = lon - (radius / 111320)  // 1 degree longitude ~= 111.32 km
+      bottom = lat - (radius / 110574)  // 1 degree latitude ~= 110.574 km
+      right = lon + (radius / 111320)
+      top_limit = lat + (radius / 110574)
 
+      if (!viewer) return;
+
+      pyLog(`https://graph.mapillary.com/images?access_token=${clientId}&fields=id&bbox=${left},${bottom},${right},${top_limit}`);	
       // Fetch the closest image to the clicked location
       fetch(
-        `https://graph.mapillary.com/images?access_token=${clientId}&fields=id&closeto=${lon},${lat}`
+        `https://graph.mapillary.com/images?access_token=${clientId}&fields=id&bbox=${left},${bottom},${right},${top_limit}`
       )
-        .then((response) => response.json())
-        .then((data) => {
+        .then((response) =>{
+pyLog("navigateStreetView response "+JSON.stringify(response));
+          if (!response.ok) {
+            throw new Error("Network response was not ok " + response.statusText);
+          }
+          return response.json();
+        })
+        .then((data) => { 
+          pyLog("navigateStreetView data "+JSON.stringify(data));
           if (data.data && data.data.length > 0) {
+            pyLog("navigateStreetView image id: "+data.data[0].id);
             const imageId = data.data[0].id;
-            mapillaryViewer.moveTo(imageId);
-            mapillaryContainer.style.display = "block"; // Show the viewer
+            viewer.moveTo(imageId);
+            //mapillaryContainer.style.display = "block"; // Show the viewer
           } else {
             alert("No Mapillary images found near this location.");
           }
