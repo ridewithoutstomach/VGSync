@@ -97,7 +97,7 @@ from config import APP_VERSION
 from path_manager import is_valid_mpv_folder
 from core.gpx_parser import recalc_gpx_data
 from config import reset_config
-
+from managers.encoder_manager import EncoderDialog
 
 from datetime import datetime, timedelta
 
@@ -3393,12 +3393,10 @@ class MainWindow(QMainWindow):
             with open(json_path, "w", encoding="utf-8") as f:
                 json.dump(export_data, f, indent=2)
 
-            QMessageBox.information(
-                self,
-                "Encoder JSON",
-                f"Encoder-Job JSON wurde in:\n{json_path}\ngeschrieben.\n"
-                "Hier können Sie es später per ffmpeg-Skript weiter verarbeiten."
-            )
+            dlg = EncoderDialog(parent=self)
+            dlg.run_encoding(json_path)
+            dlg.exec()
+            
             return
         
             
