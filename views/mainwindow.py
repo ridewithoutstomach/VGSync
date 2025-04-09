@@ -41,6 +41,9 @@ import hashlib
 #import win32com.client  # pywin32
 
 
+            
+
+
 from PySide6.QtCore import QUrl
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtCore import QSettings
@@ -66,6 +69,7 @@ from PySide6.QtWidgets import QLineEdit, QDialogButtonBox
 from .encoder_setup_dialog import EncoderSetupDialog  # Import Dialog
 
 from config import TMP_KEYFRAME_DIR, MY_GLOBAL_TMP_DIR
+
 from widgets.video_editor_widget import VideoEditorWidget
 from widgets.video_timeline_widget import VideoTimelineWidget
 from widgets.video_control_widget import VideoControlWidget
@@ -3322,6 +3326,82 @@ class MainWindow(QMainWindow):
         if not self.playlist:
             QMessageBox.warning(self, "Error", "No videos in playlist!")
             return
+            
+        # -------------------------------------------------
+        # NEUE LOGIK: Wenn Edit-Mode == "encode" => JSON schreiben
+        if self._edit_mode == "encode":
+            # 1) Daten aus QSettings lesen (Encoder Setup)
+            s = QSettings("VGSync","VGSync")
+            xfade_val   = s.value("encoder/xfade", 2, type=int)
+            hw_encode   = s.value("encoder/hw", "none", type=str)
+            container   = s.value("encoder/container", "x265", type=str)
+            crf_val     = s.value("encoder/crf", 25, type=int)
+            fps_val     = s.value("encoder/fps", 30, type=int)
+            preset_val  = s.value("encoder/preset", "fast", type=str)
+            width_val   = s.value("encoder/res_w", 1280, type=int)
+
+            # 2) Cuts => skip_instructions
+            #   Format [start_s, end_s, xfade]
+            cuts = self.cut_manager.get_cut_intervals()  # Liste (start_s, end_s)
+            skip_array = []
+            for (cstart, cend) in cuts:
+                skip_array.append([cstart, cend, xfade_val])
+
+            # 3) Overlays => overlay_instructions
+            #   Jedes Overlay = dict mit "start","end","fade_in","fade_out","image","scale","x","y"
+            all_ovls = self._overlay_manager.get_all_overlays()
+            overlay_list = []
+            for ovl in all_ovls:
+                overlay_list.append({
+                    "start":    ovl["start"],
+                    "end":      ovl["end"],
+                    "fade_in":  ovl.get("fade_in", 0),
+                    "fade_out": ovl.get("fade_out", 0),
+                    "image":    ovl.get("image",""),
+                    "scale":    ovl.get("scale",1.0),
+                    "x":        ovl.get("x","0"),
+                    "y":        ovl.get("y","0"),
+                })
+
+            # 4) Ziel-Dateinamen (können Sie frei anpassen)
+            merged_out = "merged.mp4"
+            final_out  = "final_out.mp4"
+
+            # 5) JSON-Dict bauen
+            export_data = {
+                "videos": self.playlist,
+                "skip_instructions": skip_array,
+                "overlay_instructions": overlay_list,
+                "merged_output": merged_out,
+                "final_output": final_out,
+                "hardware_encode": hw_encode,
+                # "encoder" könnte z.B. "libx264"/"libx265" heißen:
+                "encoder": f"lib{container}",  
+                "crf": crf_val,
+                "fps": fps_val,
+                "width": width_val,
+                "preset": preset_val
+            }
+
+            
+            #temp_dir = tempfile.gettempdir()
+            # 6) In unser VGSync-Temp speichern
+            
+            temp_dir = MY_GLOBAL_TMP_DIR
+            json_path = os.path.join(temp_dir, "vg_encoder_job.json")
+            
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump(export_data, f, indent=2)
+
+            QMessageBox.information(
+                self,
+                "Encoder JSON",
+                f"Encoder-Job JSON wurde in:\n{json_path}\ngeschrieben.\n"
+                "Hier können Sie es später per ffmpeg-Skript weiter verarbeiten."
+            )
+            return
+        
+            
 
         total_dur = self.real_total_duration
         sum_cuts = self.cut_manager.get_total_cuts()
