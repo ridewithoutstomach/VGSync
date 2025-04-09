@@ -30,6 +30,10 @@
   <!-- QWebChannel (für QtWebEngine) -->
   <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
 
+  <!-- Street view -->
+  <script src="https://unpkg.com/mapillary-js/dist/mapillary.min.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/mapillary-js/dist/mapillary.min.css" />
+
   <style>
     html, body {
       margin: 0; 
@@ -190,6 +194,12 @@
   <div id="speedInputContainer">
     <label for="speedInput">Speed (km/h):</label>
     <input type="number" id="speedInput" min="1" value="20" />
+  </div>
+
+  <!-- Street view -->
+  <div id="mapillaryViewer" style="position: absolute; bottom: 10px; right: 10px; width: 400px; height: 300px; z-index: 10000; display: none; border: 1px solid #ccc; background: #fff;">
+    <!-- Add this inside the Mapillary viewer container -->
+    <button onclick="mapillaryContainer.style.display='none'" style="position: absolute; top: 5px; right: 5px; z-index: 10001;">Close</button>
   </div>
 
   <!-- Loading + KeyWarning Overlays -->
@@ -495,6 +505,9 @@
           return false;
         });
       });
+
+      const mapillaryClientId = "MLY|8819113018197708|743f493bf2919480b88204e2b4fa0e12";
+      initMapillaryViewer(mapillaryClientId, 0, 0);
     }
 
     /***********************************************************
@@ -1159,6 +1172,49 @@
       if (dirBtn)  dirBtn.style.display  = isEnabled ? "block" : "none";
       if (profBtn) profBtn.style.display = isEnabled ? "block" : "none";
     }
+
+    let mapillaryViewer = null;
+    const mapillaryContainer = document.getElementById("mapillaryViewer");
+
+    // Function to initialize Mapillary Viewer
+    function initMapillaryViewer(clientId, lat, lon) {
+      pyLog("Mapillary Viewer initialized with clientId: " + clientId+"lat: "+lat+" lon: "+lon);
+      if (!mapillaryViewer) {
+        mapillaryViewer = new Mapillary.Viewer({
+          container: "mapillaryViewer",
+          clientId: clientId,
+          imageId: null, // Will be set dynamically
+        });
+      }
+
+      // Fetch the closest image to the clicked location
+      fetch(
+        `https://graph.mapillary.com/images?access_token=${clientId}&fields=id&closeto=${lon},${lat}`
+      )
+        .then((response) => response.json())
+        .then((data) => {
+          if (data.data && data.data.length > 0) {
+            const imageId = data.data[0].id;
+            mapillaryViewer.moveTo(imageId);
+            mapillaryContainer.style.display = "block"; // Show the viewer
+          } else {
+            alert("No Mapillary images found near this location.");
+          }
+        })
+        .catch((error) => {
+          console.error("Error fetching Mapillary images:", error);
+        });
+    }
+/*
+    map.on("singleclick", function (evt) {
+      const coord = ol.proj.toLonLat(evt.coordinate);
+      const lat = coord[1];
+      const lon = coord[0];
+
+      // Replace 'YOUR_MAPILLARY_CLIENT_ID' with your actual Mapillary Client ID
+      const mapillaryClientId = "MLY|8819113018197708|743f493bf2919480b88204e2b4fa0e12";
+      initMapillaryViewer(mapillaryClientId, lat, lon);
+    });*/
   </script>
 </body>
 </html>
