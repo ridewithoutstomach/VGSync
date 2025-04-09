@@ -523,6 +523,8 @@ class MainWindow(QMainWindow):
         
         self.timeline = VideoTimelineWidget()
         self.video_control = VideoControlWidget()
+        self.timeline.overlayRemoveRequested.connect(self._on_timeline_overlay_remove)
+
         
         left_timeline_control_layout.addWidget(self.timeline)
         left_timeline_control_layout.addWidget(self.video_control)
@@ -3217,6 +3219,9 @@ class MainWindow(QMainWindow):
     def _on_timeline_marker_moved(self, new_time_s: float):
         #self._jump_player_to_time(new_time_s)
         self.video_editor._jump_to_global_time(new_time_s)
+        
+    def _on_timeline_overlay_remove(self, start_s, end_s):
+        self._overlay_manager.remove_overlay_interval(start_s, end_s)    
 
     def on_time_hms_set_clicked(self, hh: int, mm: int, ss: int, ms=0):
         """

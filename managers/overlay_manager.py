@@ -423,3 +423,24 @@ class OverlayManager(QObject):
             self._manager.add_overlay(ovl_dict)
 
             self.accept()
+    def remove_overlay_interval(self, start_s, end_s):
+        if not self._overlays:
+            return
+        import copy
+        # Falls du Undo möchtest:
+        self._history_stack.append(copy.deepcopy(self._overlays))
+
+        found_i = -1
+        for i, ovl in enumerate(self._overlays):
+            # ovl hat "start", "end"
+            if abs(ovl["start"] - start_s) < 0.001 and abs(ovl["end"] - end_s) < 0.001:
+                found_i = i
+                break
+        if found_i >= 0:
+            self._overlays.pop(found_i)
+            self.timeline.clear_overlay_intervals()
+            for ovl in self._overlays:
+                self.timeline.add_overlay_interval(ovl["start"], ovl["end"])
+            self.overlaysChanged.emit()
+            print(f"[OverlayManager] removed overlay {start_s:.2f}..{end_s:.2f}")
+

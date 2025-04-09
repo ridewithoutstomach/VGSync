@@ -43,7 +43,8 @@ def _nice_number(value: float) -> float:
 
 class VideoTimelineWidget(QWidget):
     markerMoved = Signal(float)
-
+    overlayRemoveRequested = Signal(float, float)
+    
     def __init__(self, parent=None):
         super().__init__(parent)
         self.total_duration = 0.0
@@ -64,7 +65,7 @@ class VideoTimelineWidget(QWidget):
         self._scroll_speed_px = 50
         self.setStyleSheet("background-color: #333333;")
         self._overlay_intervals = []
-        
+        self.setContextMenuPolicy(Qt.DefaultContextMenu)
         
     def add_overlay_interval(self, start_s: float, end_s: float):
         """
@@ -399,3 +400,46 @@ class VideoTimelineWidget(QWidget):
                 if rect_w < 2:
                     rect_w = 2
                 painter.drawRect(x_start, 0, rect_w, h)
+                
+                    
+
+    def contextMenuEvent(self, event):
+        from PySide6.QtWidgets import QMessageBox
+        # 1) Falls kein Video oder Overlays => Abbruch
+        if self.total_duration <= 0:
+            event.ignore()
+            return
+        w = self.width()
+        if w <= 0:
+            event.ignore()
+            return
+        timeline_real_width = w * self._zoom_factor
+        x_timeline = event.pos().x() + self._horizontal_offset
+        if x_timeline < 0 or x_timeline > timeline_real_width:
+            event.ignore()
+            return
+        ratio = x_timeline / timeline_real_width
+        time_clicked = ratio * self.total_duration
+        # 2) Prüfen, ob time_clicked in einem Overlay-Intervall liegt
+        found_any = False
+        for (start_s, end_s) in self._overlay_intervals:
+            if start_s <= time_clicked <= end_s:
+                found_any = True
+                
+                reply = QMessageBox.question(
+                    None,
+                    "Remove Overlay?",
+                    f"Remove Overlay from {start_s:.1f}s to {end_s:.1f}s?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No
+                )
+                if reply == QMessageBox.Yes:
+                    self.overlayRemoveRequested.emit(start_s, end_s)
+                break
+        if not found_any:
+            event.ignore()
+        else:
+            event.accept()
+
+    
+            
