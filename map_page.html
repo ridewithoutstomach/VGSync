@@ -31,8 +31,11 @@
   <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
 
   <!-- Street view -->
-  <script src="https://unpkg.com/mapillary-js/dist/mapillary.min.js"></script>
-  <link rel="stylesheet" href="https://unpkg.com/mapillary-js/dist/mapillary.min.css" />
+  <script src="https://unpkg.com/mapillary-js@4.1.2/dist/mapillary.js"></script>
+  <link
+    href="https://unpkg.com/mapillary-js@4.1.2/dist/mapillary.css"
+    rel="stylesheet"
+  />
 
   <style>
     html, body {
@@ -197,10 +200,19 @@
   </div>
 
   <!-- Street view -->
-  <div id="mapillaryViewer" style="position: absolute; bottom: 10px; right: 10px; width: 400px; height: 300px; z-index: 10000; display: none; border: 1px solid #ccc; background: #fff;">
+  <div id="mapillaryViewer" style="position: absolute; bottom: 60px; left: 10px; width: 40%; height: 40%; z-index: 10000; border: 1px solid #ccc; background: #fff;">
     <!-- Add this inside the Mapillary viewer container -->
-    <button onclick="mapillaryContainer.style.display='none'" style="position: absolute; top: 5px; right: 5px; z-index: 10001;">Close</button>
+    <button onclick="mapillaryContainer.style.display='none'" style="position: absolute; top: 5px; right: 5px; z-index: 10001;">X</button>
   </div>
+  <script>
+    var {Viewer} = mapillary;
+  
+    var viewer = new Viewer({
+      accessToken: 'MLY|8819113018197708|743f493bf2919480b88204e2b4fa0e12',
+      container: 'mapillaryViewer', // the ID of our container defined in the HTML body
+      imageId: '1151013448713326',
+    });
+  </script>
 
   <!-- Loading + KeyWarning Overlays -->
   <div id="loadingIndicator">Loading ...</div>
@@ -506,8 +518,8 @@
         });
       });
 
-      const mapillaryClientId = "MLY|8819113018197708|743f493bf2919480b88204e2b4fa0e12";
-      initMapillaryViewer(mapillaryClientId, 0, 0);
+      //const mapillaryClientId = "MLY|8819113018197708|743f493bf2919480b88204e2b4fa0e12";
+      //initMapillaryViewer(mapillaryClientId, 0, 0);
     }
 
     /***********************************************************
