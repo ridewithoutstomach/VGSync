@@ -129,7 +129,8 @@ def check_ffmpeg_and_vlc_or_exit():
 
 def main():
     # Workaround bei manchen Grafikkarten
-    QGuiApplication.setAttribute(Qt.AA_UseSoftwareOpenGL)
+    #QGuiApplication.setAttribute(Qt.AA_UseSoftwareOpenGL)
+    #TODO: add setting to activate previous line
 
     app = QApplication(sys.argv)
     

@@ -210,7 +210,6 @@
     var viewer = new Viewer({
       accessToken: clientId,
       container: 'mapillaryViewer', // the ID of our container defined in the HTML body
-      //imageId: '1151013448713326', //initial view
     });
   </script>
 
@@ -356,7 +355,6 @@
 
       initMap();
 
-      viewer.activateCover();
       viewer.moveTo('1151013448713326'); // initial view
 
       let mvBtn = document.getElementById("mapViewBtn");
@@ -1194,7 +1192,7 @@
     // Function to initialize Mapillary Viewer
     function navigateStreetView(lat, lon) {
       pyLog("navigateStreetView lat: "+lat+" lon: "+lon);
-      radius=5
+      radius=2
       left = lon - (radius / 111320)  // 1 degree longitude ~= 111.32 km
       bottom = lat - (radius / 110574)  // 1 degree latitude ~= 110.574 km
       right = lon + (radius / 111320)
@@ -1202,18 +1200,11 @@
 
       if (!viewer) return;
 
-      pyLog(`https://graph.mapillary.com/images?access_token=${clientId}&fields=id&bbox=${left},${bottom},${right},${top_limit}`);	
-      // Fetch the closest image to the clicked location
+   // Fetch the closest image to the clicked location
       fetch(
         `https://graph.mapillary.com/images?access_token=${clientId}&fields=id&bbox=${left},${bottom},${right},${top_limit}`
       )
-        .then((response) =>{
-pyLog("navigateStreetView response "+JSON.stringify(response));
-          if (!response.ok) {
-            throw new Error("Network response was not ok " + response.statusText);
-          }
-          return response.json();
-        })
+        .then((response) => response.json())
         .then((data) => { 
           pyLog("navigateStreetView data "+JSON.stringify(data));
           if (data.data && data.data.length > 0) {
@@ -1229,16 +1220,7 @@ pyLog("navigateStreetView response "+JSON.stringify(response));
           console.error("Error fetching Mapillary images:", error);
         });
     }
-/*
-    map.on("singleclick", function (evt) {
-      const coord = ol.proj.toLonLat(evt.coordinate);
-      const lat = coord[1];
-      const lon = coord[0];
 
-      // Replace 'YOUR_MAPILLARY_CLIENT_ID' with your actual Mapillary Client ID
-      const mapillaryClientId = "MLY|8819113018197708|743f493bf2919480b88204e2b4fa0e12";
-      initMapillaryViewer(mapillaryClientId, lat, lon);
-    });*/
   </script>
 </body>
 </html>
