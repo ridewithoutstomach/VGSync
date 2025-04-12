@@ -175,6 +175,39 @@
       border-radius: 3px;
       max-width: 300px;
     }
+
+    #nostreetview-alert {
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background-color: #f44336;
+      color: white;
+      padding: 15px 25px;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+      opacity: 0;
+      transition: opacity 0.5s ease;
+      z-index: 9999;
+    }
+    #nostreetview-alert.show {
+      opacity: 1;
+    }
+
+    #mapillaryViewer {
+      resize: both;
+      overflow: auto;
+      cursor: move;
+    }
+
+    #mapillaryViewerHeader {
+      background: #eee;
+      padding: 4px;
+      cursor: move;
+      font-size: 0.85rem;
+      border-bottom: 1px solid #ccc;
+      user-select: none;
+    }
   </style>
 </head>
 <body>
@@ -200,17 +233,34 @@
   </div>
 
   <!-- Street view -->
-  <div id="mapillaryViewer" style="position: absolute; bottom: 50px; left: 10px; width: 35%; height: 40%; z-index: 10000; border: 1px solid #ccc; background: #fff;">
-    <button onclick="mapillaryContainer.style.display='none'" style="position: absolute; top: 5px; right: 5px; z-index: 10001;">X</button>
+  <div id="mapillaryViewer" style="position: absolute; bottom: 50px; left: 10px; width: 40%; height: 40%; z-index: 10000; border: 1px solid #ccc; background: #fff;">
+    <div id="mapillaryViewerHeader">
+      <span>Street View</span>
+      <button onclick="mapillaryContainer.style.display='none'" style="float: right;">✕</button>
+    </div>
+    <!-- The viewer content will render inside here -->
   </div>
+  <div id="nostreetview-alert">No Mapillary images found near this location.</div>
   <script>
     var clientId = 'MLY|8819113018197708|743f493bf2919480b88204e2b4fa0e12';
     var {Viewer} = mapillary;
+    let mapillaryLinkFeature = null;
   
     var viewer = new Viewer({
       accessToken: clientId,
       container: 'mapillaryViewer', // the ID of our container defined in the HTML body
     });
+
+    function showNoStreetView(duration = 3000) {
+      const alertBox = document.getElementById("nostreetview-alert");
+      //alertBox.textContent = msg;
+      alertBox.classList.add("show");
+
+      setTimeout(() => {
+        alertBox.classList.remove("show");
+      }, duration);
+    }
+
   </script>
 
   <!-- Loading + KeyWarning Overlays -->
@@ -355,7 +405,39 @@
 
       initMap();
 
+      viewer.on('image',function () {
+        viewer.getImage()
+          .then((image) => {
+            if (!image || !image.id) {
+              console.warn("Could not get current image.");
+              return;
+            }
+
+            const imageId = image.id;
+            console.log("Got image:", imageId);
+
+            fetch(`https://graph.mapillary.com/${imageId}?fields=geometry&access_token=${clientId}`)
+              .then(response => response.json())
+              .then(data => {
+                if (data.geometry && data.geometry.coordinates) {
+                  const [lon, lat] = data.geometry.coordinates;
+                  drawMapillaryCrossMarker(lon, lat);
+                } else {
+                  console.warn("No geometry for image", imageId);
+                }
+              })
+              .catch(err => {
+                console.error("Error fetching geometry:", err);
+              });
+          })
+          .catch(err => {
+            console.error("viewer.getImage() failed:", err);
+          });
+      });
       viewer.moveTo('1151013448713326'); // initial view
+      const viewerDiv = document.getElementById("mapillaryViewer");
+      const header = document.getElementById("mapillaryViewerHeader");
+      makeElementDraggable(viewerDiv, header);
 
       let mvBtn = document.getElementById("mapViewBtn");
       if(mvBtn){
@@ -1192,7 +1274,7 @@
     // Function to initialize Mapillary Viewer
     function navigateStreetView(lat, lon) {
       pyLog("navigateStreetView lat: "+lat+" lon: "+lon);
-      radius=2
+      radius=6
       left = lon - (radius / 111320)  // 1 degree longitude ~= 111.32 km
       bottom = lat - (radius / 110574)  // 1 degree latitude ~= 110.574 km
       right = lon + (radius / 111320)
@@ -1206,20 +1288,111 @@
       )
         .then((response) => response.json())
         .then((data) => { 
-          pyLog("navigateStreetView data "+JSON.stringify(data));
+          //pyLog("navigateStreetView data "+JSON.stringify(data));
           if (data.data && data.data.length > 0) {
-            pyLog("navigateStreetView image id: "+data.data[0].id);
             const imageId = data.data[0].id;
             viewer.moveTo(imageId);
-            //mapillaryContainer.style.display = "block"; // Show the viewer
+
+            //drawMapillaryCrossMarker(imgLon, imgLat);
           } else {
-            alert("No Mapillary images found near this location.");
+            showNoStreetView();
+            //alert("No Mapillary images found near this location.");
           }
         })
         .catch((error) => {
           console.error("Error fetching Mapillary images:", error);
         });
     }
+
+    function drawMapillaryLinkLine(fromLon, fromLat, toLon, toLat) {
+      const coords = [
+        ol.proj.fromLonLat([fromLon, fromLat]),
+        ol.proj.fromLonLat([toLon, toLat])
+      ];
+
+      // Remove old one
+      if (mapillaryLinkFeature) {
+        vectorLayer.getSource().removeFeature(mapillaryLinkFeature);
+      }
+
+      mapillaryLinkFeature = new ol.Feature({
+        geometry: new ol.geom.LineString(coords),
+        color: "blue"
+      });
+
+      mapillaryLinkFeature.setStyle(new ol.style.Style({
+        stroke: new ol.style.Stroke({
+          color: "#3b9ddd",
+          width: 2,
+          lineDash: [4, 4]
+        })
+      }));
+
+    vectorLayer.getSource().addFeature(mapillaryLinkFeature);
+  }
+
+  let mapillaryMarkerFeature = null;
+  function drawMapillaryCrossMarker(lon, lat) {
+    const coord = ol.proj.fromLonLat([lon, lat]);
+
+    // Remove old one
+    if (mapillaryMarkerFeature) {
+      vectorLayer.getSource().removeFeature(mapillaryMarkerFeature);
+    }
+
+    mapillaryMarkerFeature = new ol.Feature({
+      geometry: new ol.geom.Point(coord)
+    });
+
+    // Define the cross style
+    const crossStyle = new ol.style.Style({
+      image: new ol.style.RegularShape({
+        points: 4,
+        radius: 10,
+        radius2: 0,
+        angle: Math.PI / 4, // 45 degrees to form an X
+        stroke: new ol.style.Stroke({
+          color: '#FF5722',
+          width: 2
+        })
+      })
+    });
+
+    mapillaryMarkerFeature.setStyle(crossStyle);
+    vectorLayer.getSource().addFeature(mapillaryMarkerFeature);
+  }
+
+  function makeElementDraggable(elmnt, handle) {
+    let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+    handle.onmousedown = dragMouseDown;
+
+    function dragMouseDown(e) {
+      e.preventDefault();
+      // get the mouse cursor position at startup
+      pos3 = e.clientX;
+      pos4 = e.clientY;
+      document.onmouseup = closeDragElement;
+      document.onmousemove = elementDrag;
+    }
+
+    function elementDrag(e) {
+      e.preventDefault();
+      // calculate the new cursor position
+      pos1 = pos3 - e.clientX;
+      pos2 = pos4 - e.clientY;
+      pos3 = e.clientX;
+      pos4 = e.clientY;
+      // set the element's new position
+      elmnt.style.top = (elmnt.offsetTop - pos2) + "px";
+      elmnt.style.left = (elmnt.offsetLeft - pos1) + "px";
+    }
+
+    function closeDragElement() {
+      document.onmouseup = null;
+      document.onmousemove = null;
+    }
+  }
+
 
   </script>
 </body>

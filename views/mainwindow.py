@@ -413,6 +413,14 @@ class MainWindow(QMainWindow):
         reset_config_action.triggered.connect(self._on_reset_config_triggered)
         setup_menu.addAction(reset_config_action)
         
+        view_menu = menubar.addMenu("View")
+
+        classic_view_action = view_menu.addAction("Classic view")
+        classic_view_action.triggered.connect(self._set_classic_view)
+
+        map_video_view_action = view_menu.addAction("Map+video view")
+        map_video_view_action.triggered.connect(self._set_map_video_view)
+
         info_menu = menubar.addMenu("Info")
         
         copyright_action = info_menu.addAction("Copyright + License")
@@ -516,32 +524,32 @@ class MainWindow(QMainWindow):
         # ============== Rechte Spalte (Chart + GPX) ==============
         #
         right_column_widget = QWidget()
-        right_v_layout = QVBoxLayout(right_column_widget)
-        right_v_layout.setContentsMargins(0, 0, 0, 0)
-        right_v_layout.setSpacing(0)
+        self.right_v_layout = QVBoxLayout(right_column_widget)
+        self.right_v_layout.setContentsMargins(0, 0, 0, 0)
+        self.right_v_layout.setSpacing(0)
         
         # Oben: Chart (40%) => Stretch 2
         self.chart = ChartWidget()
-        right_v_layout.addWidget(self.chart, stretch=2)
+        self.right_v_layout.addWidget(self.chart, stretch=2)
         
                 
         
         # Unten: 60% => gpx_control (10%), gpx_list (50%)
-        bottom_right_widget = QWidget()
-        bottom_right_layout = QVBoxLayout(bottom_right_widget)
-        bottom_right_layout.setContentsMargins(0, 0, 0, 0)
-        bottom_right_layout.setSpacing(0)
+        self.bottom_right_widget = QWidget()
+        self.bottom_right_layout = QVBoxLayout(self.bottom_right_widget)
+        self.bottom_right_layout.setContentsMargins(0, 0, 0, 0)
+        self.bottom_right_layout.setSpacing(0)
         
         self.gpx_control = GPXControlWidget()
-        bottom_right_layout.addWidget(self.gpx_control, stretch=1)
+        self.bottom_right_layout.addWidget(self.gpx_control, stretch=1)
         
         
         self.gpx_widget = GPXWidget()
         
         
         
-        bottom_right_layout.addWidget(self.gpx_widget, stretch=5)
-        right_v_layout.addWidget(bottom_right_widget, stretch=3)
+        self.bottom_right_layout.addWidget(self.gpx_widget, stretch=5)
+        self.right_v_layout.addWidget(self.bottom_right_widget, stretch=3)
         
         #
         # ============== QSplitter (horizontal) ==============
@@ -762,9 +770,13 @@ class MainWindow(QMainWindow):
 
         QDesktopServices.openUrl(QUrl.fromLocalFile(pdf_path))    
     
+    def _set_classic_view(self):
+        self.left_v_layout.addWidget(self.map_widget,stretch=1)
         
-        
-        
+    def _set_map_video_view(self):
+        self.left_v_layout.removeWidget(self.map_widget)
+        self.right_v_layout.replaceWidget(self.chart, self.map_widget)
+        self.right_v_layout.removeWidget(self.bottom_right_widget)
         
         
     def _on_show_mpv_path(self):
