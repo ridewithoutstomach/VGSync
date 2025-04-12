@@ -1706,7 +1706,7 @@ class MainWindow(QMainWindow):
                         "lat": lat,
                         "lon": lon,
                         "ele": 0.0,
-                        "time": video_ts or now,
+                        "time": now,
                         "delta_m": 0.0,
                         "speed_kmh": 0.0,
                         "gradient": 0.0,
@@ -1724,7 +1724,7 @@ class MainWindow(QMainWindow):
                         "lat": lat,
                         "lon": lon,
                         "ele": gpx_data[0].get("ele", 0.0),
-                        "time": video_ts or new_time,
+                        "time": new_time,
                         "delta_m": 0.0,
                         "speed_kmh": 0.0,
                         "gradient": 0.0,
@@ -1733,8 +1733,7 @@ class MainWindow(QMainWindow):
                     gpx_data.insert(0, new_pt)
         
                     # jetzt alle nachfolgenden +1s verschieben
-                    if not video_ts:
-                        for i in range(1, len(gpx_data)):
+                    for i in range(1, len(gpx_data)):
                             oldt = gpx_data[i]["time"]
                             if oldt:
                                 gpx_data[i]["time"] = oldt + timedelta(seconds=1)
@@ -1747,7 +1746,7 @@ class MainWindow(QMainWindow):
                         "lat": lat,
                         "lon": lon,
                         "ele": 0.0,
-                        "time": video_ts or now,
+                        "time": now,
                         "delta_m": 0.0,
                         "speed_kmh": 0.0,
                         "gradient": 0.0,
@@ -1764,7 +1763,7 @@ class MainWindow(QMainWindow):
                         "lat": lat,
                         "lon": lon,
                         "ele": last_pt.get("ele", 0.0),
-                        "time": video_ts or new_time, 
+                        "time": new_time, 
                         "delta_m": 0.0,
                         "speed_kmh": 0.0,
                         "gradient": 0.0,
@@ -1785,7 +1784,7 @@ class MainWindow(QMainWindow):
                         "lat": lat,
                         "lon": lon,
                         "ele": 0.0,
-                        "time": video_ts or now,
+                        "time": now,
                         "delta_m": 0.0,
                         "speed_kmh": 0.0,
                         "gradient": 0.0,
@@ -1803,7 +1802,7 @@ class MainWindow(QMainWindow):
                         "lat": lat,
                         "lon": lon,
                         "ele": base_pt.get("ele", 0.0),
-                        "time": video_ts or new_time,
+                        "time": new_time,
                         "delta_m": 0.0,
                         "speed_kmh": 0.0,
                         "gradient": 0.0,
@@ -1815,8 +1814,7 @@ class MainWindow(QMainWindow):
                     gpx_data.insert(insert_pos, new_pt)
 
                     # alle folgenden => +1s
-                    if not video_ts:
-                        for j in range(insert_pos+1, len(gpx_data)):
+                    for j in range(insert_pos+1, len(gpx_data)):
                             t_old = gpx_data[j].get("time")
                             if t_old:
                                 gpx_data[j]["time"] = t_old + timedelta(seconds=1)      
