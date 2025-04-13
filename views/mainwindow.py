@@ -3330,6 +3330,7 @@ class MainWindow(QMainWindow):
         # -------------------------------------------------
         # NEUE LOGIK: Wenn Edit-Mode == "encode" => JSON schreiben
         if self._edit_mode == "encode":
+            total_dur = self.real_total_duration
             # 1) Daten aus QSettings lesen (Encoder Setup)
             s = QSettings("VGSync","VGSync")
             xfade_val   = s.value("encoder/xfade", 2, type=int)
@@ -3344,8 +3345,28 @@ class MainWindow(QMainWindow):
             #   Format [start_s, end_s, xfade]
             cuts = self.cut_manager.get_cut_intervals()  # Liste (start_s, end_s)
             skip_array = []
-            for (cstart, cend) in cuts:
-                skip_array.append([cstart, cend, xfade_val])
+            #for (cstart, cend) in cuts:
+            #    skip_array.append([cstart, cend, xfade_val])
+            
+            for i, (cstart, cend) in enumerate(cuts):
+                # Prüfen, ob dies der letzte Schnitt ist ...
+                if i == len(cuts) - 1:
+                    # ... und ob er wirklich "bis zum Ende" reicht:
+                    #    (Toleranz z.B. 0.1 sec, damit kleine Rundungsfehler kein Problem sind)
+                    if abs(cend - total_dur) < 0.1:
+                        # => End-Cut => xfade = -1
+                        skip_array.append([cstart, cend, -1])
+                    else:
+                        skip_array.append([cstart, cend, xfade_val])
+                else:
+                    # Kein letzter Schnitt: normal
+                    skip_array.append([cstart, cend, xfade_val])
+        
+            # Debug-Ausgabe, damit du siehst, was wirklich passiert:
+            print("DEBUG skip_array:", skip_array)
+
+
+
 
             # 3) Overlays => overlay_instructions
             #   Jedes Overlay = dict mit "start","end","fade_in","fade_out","image","scale","x","y"
