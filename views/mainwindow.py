@@ -3409,9 +3409,17 @@ class MainWindow(QMainWindow):
             with open(json_path, "w", encoding="utf-8") as f:
                 json.dump(export_data, f, indent=2)
 
+            #dlg = EncoderDialog(parent=self)
+            #dlg.run_encoding(json_path)
+            #dlg.exec()
+            self.setWindowTitle("Encoding in progress – please wait…")
+            
             dlg = EncoderDialog(parent=self)
-            dlg.run_encoding(json_path)
-            dlg.exec()
+            dlg.show()  # ⬅️ Fenster sofort zeigen!
+            QApplication.processEvents()  # ⬅️ wichtig, damit GUI reagiert
+
+            dlg.run_encoding(json_path)  # ⬅️ d
+            
             
             return
         

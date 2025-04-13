@@ -22,7 +22,8 @@ from PySide6.QtCore import Qt, QSettings
 from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QPlainTextEdit,
-    QPushButton, QFileDialog, QApplication
+    QPushButton, QFileDialog, QApplication,
+    QMessageBox
 )
 
 # Hilfsklasse, um print(...) in ein Callback zu leiten:
@@ -370,6 +371,32 @@ def get_cpu_closedgop_params(enc_name="libx265"):
 
 def get_gpu_closedgop_params(hw_encode):
     return ["-bf","0","-g","15"]
+    
+def run_ffmpeg_live(cmd, log_callback=None):
+    """
+    Führt den gegebenen ffmpeg-Befehl aus und gibt stdout/stderr Zeile für Zeile
+    an log_callback weiter (z. B. print oder Textfeld).
+    """
+    process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        universal_newlines=True,
+        bufsize=1
+    )
+
+    for line in process.stdout:
+        if log_callback:
+            log_callback(line)
+        else:
+            print(line, end="")
+
+    process.stdout.close()
+    return_code = process.wait()
+    if return_code != 0:
+        raise subprocess.CalledProcessError(return_code, cmd)
+    
+    
 
 ###############################################################################
 # 5) CPU CRF vs GPU pseudo-CRF
@@ -448,9 +475,14 @@ def encode_closedgop(
     if filter_str:
         cmd+= ["-vf", filter_str]
 
-    cmd+= [outname]
+    #cmd+= [outname]
+    #print("ENCODE_CLOSEDGOP:", " ".join(cmd))
+    #subprocess.run(cmd, check=True)
+    cmd += [outname]
     print("ENCODE_CLOSEDGOP:", " ".join(cmd))
-    subprocess.run(cmd, check=True)
+
+    # Falls print() umgeleitet ist => nutzt EncoderDialog
+    run_ffmpeg_live(cmd, log_callback=print)
 
 ###############################################################################
 # 8) KEYFRAMES => live counter
@@ -481,7 +513,7 @@ def get_keyframes(src):
             count+=1
             m = re.search(r'"best_effort_timestamp_time"\s*:\s*"([^"]+)"', line)
             t_str = m.group(1) if m else "?"
-            print(f"\rKeyframes gefunden: {count} => Zeit: {t_str}", end='', flush=True)
+            #print(f"\rKeyframes gefunden: {count} => Zeit: {t_str}", end='', flush=True)
     p.wait()
     print()
     data= json.loads("".join(lines))
@@ -493,8 +525,8 @@ def get_keyframes(src):
     times.sort()
     print(f"Total Keyframes found: {len(times)}\n")
     
-    for i, t in enumerate(times, start=1):
-        print(f" - Keyframe {i} bei {t:.3f}s")
+    #for i, t in enumerate(times, start=1):
+    #    print(f" - Keyframe {i} bei {t:.3f}s")
     return times        
 def get_kf_le(kf_list,t):
     if not kf_list:
@@ -1067,7 +1099,7 @@ class EncoderDialog(QDialog):
     """
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("XFade Encoding")
+        self.setWindowTitle("XFade Encoding - This may take a while")
         layout = QVBoxLayout(self)
 
         self.text_edit = QPlainTextEdit(self)
@@ -1121,6 +1153,11 @@ class EncoderDialog(QDialog):
                 # 5) xfade_main(temp_cfg) => ruft dein "main()" auf, 
                 #    nur ohne sys.argv.
                 xfade_main(temp_cfg)
+                QMessageBox.information(
+                     self,
+                    "Done",
+                    "Video exported successfully!"
+                )
 
             except Exception as e:
                 print(f"[ERROR] {e}")
