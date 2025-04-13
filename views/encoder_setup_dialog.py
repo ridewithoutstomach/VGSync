@@ -194,6 +194,18 @@ class EncoderSetupDialog(QDialog):
         self.settings.setValue("encoder/fps", self.fps_spin.value())
 
         # xfade
-        self.settings.setValue("encoder/xfade", self.xfade_spin.value())
+        #self.settings.setValue("encoder/xfade", self.xfade_spin.value())
 
-        self.accept()
+        #self.accept()
+        xfade_val = self.xfade_spin.value()
+        if xfade_val < 1:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self,
+                "Invalid X-Fade",
+                "The X-Fade duration must be at least 1 second."
+            )
+            return  # ❌ Dialog nicht schließen!
+
+        self.settings.setValue("encoder/xfade", xfade_val)
+        self.accept()    
