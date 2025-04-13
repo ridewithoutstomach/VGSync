@@ -192,8 +192,8 @@ class OverlayManager(QObject):
             layout.addWidget(lbl_dur)
 
             self.spin_dur = QDoubleSpinBox()
-            self.spin_dur.setRange(0.1,99999.0)
-            self.spin_dur.setValue(5.0)
+            self.spin_dur.setRange(0.1,30.0)
+            self.spin_dur.setValue(15.0)
             self.spin_dur.setDecimals(2)
             layout.addWidget(self.spin_dur)
 
@@ -201,7 +201,7 @@ class OverlayManager(QObject):
             fade_h = QHBoxLayout()
             lbl_in = QLabel("Fade In(s):")
             self.spin_in = QDoubleSpinBox()
-            self.spin_in.setRange(0.0,9999.0)
+            self.spin_in.setRange(0.0,5.0)
             self.spin_in.setValue(1.0)
             self.spin_in.setDecimals(2)
             fade_h.addWidget(lbl_in)
@@ -209,7 +209,7 @@ class OverlayManager(QObject):
 
             lbl_out= QLabel("Fade Out(s):")
             self.spin_out = QDoubleSpinBox()
-            self.spin_out.setRange(0.0,9999.0)
+            self.spin_out.setRange(0.0,5.0)
             self.spin_out.setValue(1.0)
             self.spin_out.setDecimals(2)
             fade_h.addWidget(lbl_out)
@@ -222,6 +222,9 @@ class OverlayManager(QObject):
             layout.addWidget(btn_box)
             btn_box.accepted.connect(self._on_ok_clicked)
             btn_box.rejected.connect(self.reject)
+            
+        
+
 
         def _on_add_new_clicked(self):
             """
@@ -258,6 +261,9 @@ class OverlayManager(QObject):
             self.fade_out_s = self.spin_out.value()
 
             self.accept()
+            
+    
+        
 
     # =========================================================================
     # 2) FullOverlayDialog
