@@ -927,12 +927,32 @@ def xfade_main(cfg_path):
     if skip_list and isinstance(skip_list[-1], list) and len(skip_list[-1]) == 3:
         if skip_list[-1][2] == -1:
             endcut_s = skip_list[-1][0]
-            print(f"[INFO] Endcut erkannt bei {endcut_s:.3f}s — wird direkt beim Mergen angewendet.")
-            skip_list = skip_list[:-1]  # letzten skip-Eintrag entfernen (nur für xfade/overlay!)
+            print(f"[INFO] Endcut erkannt bei {endcut_s:.3f}s — wird beim Mergen angewendet.")
+            skip_list = skip_list[:-1]
+
+    # Prüfe: Startcut mit -2?
+    startcut_s = None
+    if skip_list and isinstance(skip_list[0], list) and len(skip_list[0]) == 3:
+        if skip_list[0][2] == -2:
+            startcut_s = skip_list[0][1]
+            print(f"[INFO] Startcut erkannt bis {startcut_s:.3f}s — wird beim Mergen angewendet.")
+            skip_list = skip_list[1:]
+    
+    
     final_out= c["final_output"]
 
     hw_encode= c.get("hardware_encode","none")
     encoder= c.get("encoder","libx265")
+    
+    if startcut_s is not None:
+        print(f"[INFO] Verschiebe alle skip/overlay Zeiten um -{startcut_s:.3f}s")
+        for i in range(len(skip_list)):
+            skip_list[i][0] = max(0.0, skip_list[i][0] - startcut_s)
+            skip_list[i][1] = max(0.0, skip_list[i][1] - startcut_s)
+        for ov in overlay_list:
+            ov["start"] = max(0.0, ov["start"] - startcut_s)
+            ov["end"]   = max(0.0, ov["end"] - startcut_s)
+    
     crf= c.get("crf",23)  # default 23, if not given
     fps= c.get("fps",30)
     width= c.get("width",None)
@@ -963,11 +983,31 @@ def xfade_main(cfg_path):
         width= width,
         preset= preset
     )
-    if endcut_s is not None:
+    
+    if startcut_s is not None or endcut_s is not None:
         trimmed = os.path.splitext(merged_path)[0] + "_trimmed.mp4"
-        copy_cut(merged_path, 0.0, endcut_s, trimmed)
+        cut_start = startcut_s if startcut_s is not None else 0.0
+        cut_end = endcut_s if endcut_s is not None else None
+
+        if cut_end is not None:
+            copy_cut(merged_path, cut_start, cut_end, trimmed)
+            print(f"[INFO] Video geschnitten auf {cut_start:.3f}s .. {cut_end:.3f}s (Start/Endcut).")
+        else:
+            # Nur Startcut
+            cmd = [
+                "ffmpeg", "-hide_banner", "-y",
+                "-ss", f"{cut_start:.3f}",
+                "-i", merged_path,
+                "-map", "0:v:0",
+                "-c", "copy",
+                trimmed
+            ]
+            print(f"[INFO] Nur Startcut: {cut_start:.3f}s =>", " ".join(cmd))
+            subprocess.run(cmd, check=True)
+
         merged_path = trimmed
-        print(f"[INFO] Video wurde auf {endcut_s:.3f}s gekürzt (wegen Endcut).")
+        
+        
         
     # => Keyframes
     cmd_dur=[
