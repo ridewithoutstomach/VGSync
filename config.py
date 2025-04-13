@@ -30,7 +30,7 @@ from PySide6.QtCore import QSettings
 # 1) Versions-Konfiguration & Modus
 ##############################################################################
 
-APP_VERSION = "3.27"
+APP_VERSION = "3.28"
 
 # Falls du nur über den Server prüfen willst, ob diese APP_VERSION freigegeben ist,
 # setze das hier auf True.
