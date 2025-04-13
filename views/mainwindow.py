@@ -3412,7 +3412,7 @@ class MainWindow(QMainWindow):
             #dlg = EncoderDialog(parent=self)
             #dlg.run_encoding(json_path)
             #dlg.exec()
-            self.setWindowTitle("Encoding in progress – please wait…")
+            #self.setWindowTitle("Encoding in progress – please wait…")
             
             dlg = EncoderDialog(parent=self)
             dlg.show()  # ⬅️ Fenster sofort zeigen!
