@@ -1,22 +1,34 @@
-# views/encoder_setup_dialog.py
+import subprocess
+import json
 
-"""
-"encoder/resolution"  -> String wie "1920x1080" (oder "1280x720" etc.)
-"encoder/container"   -> "x264" oder "x265" (String)
-"encoder/hwaccel"     -> z. B. "none", "nvidia_h264", "nvidia_hevc", "amd_h264", "intel_hevc" etc.
-"encoder/crf"         -> (float oder int, z. B. 20)
-"encoder/preset"      -> z. B. "fast", "medium", "slow" usw. (String)
-"encoder/fps"         -> z. B. 30 (int)
-"encoder/xfade"       -> xfade-Zeit in Sekunden (float oder int, z. B. 2
-
-"""
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QFormLayout, QHBoxLayout, QLabel, QComboBox, QSpinBox,
-    QDialogButtonBox, QPushButton, QCheckBox, QLineEdit
+    QDialog, QVBoxLayout, QFormLayout, QDialogButtonBox,
+    QLabel, QComboBox, QSpinBox, QPushButton, QMessageBox,
+    QProgressDialog
 )
 from PySide6.QtCore import QSettings, Qt
 
-from core.hardware_detect import detect_available_hw_encoders
+# Hilfsfunktion: kurzer Test, ob ein FFmpeg-Encoder läuft
+def can_encode_with(ffmpeg_enc_name, ffmpeg_path="ffmpeg", test_duration=0.5):
+    """
+    Versucht, ein kurzes Testvideo (test_duration Sek.) mit ffmpeg_enc_name zu encoden.
+    Gibt True zurück, wenn ffmpeg normal beendet wird, sonst False.
+    """
+    try:
+        cmd = [
+            ffmpeg_path, "-hide_banner", "-y",
+            "-f", "lavfi",
+            "-i", "color=black:r=24:size=320x240",
+            "-t", str(test_duration),
+            "-c:v", ffmpeg_enc_name,
+            "-an",
+            "test_enc.mp4"
+        ]
+        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        return True
+    except:
+        return False
+
 
 class EncoderSetupDialog(QDialog):
     def __init__(self, parent=None):
@@ -24,6 +36,10 @@ class EncoderSetupDialog(QDialog):
         self.setWindowTitle("Encoder Setup")
 
         self.settings = QSettings("VGSync", "VGSync")
+        
+        # Hier speichern wir das "fertig getestete" Set an HW-Encodern,
+        # das wir via QSettings eingelesen haben (bzw. neu ermitteln).
+        self._cached_detected_hw = None
 
         main_layout = QVBoxLayout(self)
         form_layout = QFormLayout()
@@ -31,7 +47,6 @@ class EncoderSetupDialog(QDialog):
 
         # (A) Resolution
         self.resolution_combo = QComboBox()
-        # Format: ( (w,h), "Label" )
         self.resolution_options = [
             ((640, 360),  "640x360 (SD)"),
             ((854, 480),  "854x480 (nHD)"),
@@ -42,7 +57,6 @@ class EncoderSetupDialog(QDialog):
         ]
         for wh, label in self.resolution_options:
             self.resolution_combo.addItem(label, userData=wh)
-
         form_layout.addRow("Resolution:", self.resolution_combo)
 
         # (B) Container: x264 / x265
@@ -78,30 +92,31 @@ class EncoderSetupDialog(QDialog):
         self.xfade_spin.setRange(0, 30)
         form_layout.addRow("X-Fade (s):", self.xfade_spin)
 
-        # Buttons (OK/Cancel)
+        # Buttons (OK/Cancel + "Detect HW")
         btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self)
         main_layout.addWidget(btns, alignment=Qt.AlignRight)
 
+        self.btn_detect_hw = QPushButton("Detect HW", self)
+        main_layout.addWidget(self.btn_detect_hw, alignment=Qt.AlignLeft)
+
+        # Connect-Signale
         btns.accepted.connect(self.on_ok_clicked)
         btns.rejected.connect(self.reject)
-
-        # Signale
+        self.btn_detect_hw.clicked.connect(self.on_detect_hw_clicked)
         self.container_combo.currentIndexChanged.connect(self.update_hw_options)
 
-        # Laden aus QSettings
+        # Erst aus QSettings laden
         self.load_from_settings()
-
-        # Hardware aktualisieren => Filter x264/x265
+        # Dann HW-Combo aktualisieren
         self.update_hw_options()
 
     def load_from_settings(self):
         """Liest QSettings und setzt die GUI-Felder."""
-        # Auflösung
+
+        # 1) Auflösung
         wdef = self.settings.value("encoder/res_w", 1920, type=int)
         hdef = self.settings.value("encoder/res_h", 1080, type=int)
         stored_res = (wdef, hdef)
-
-        # resolution_options durchsuchen
         found_idx = 0
         for i, (wh, label) in enumerate(self.resolution_options):
             if wh == stored_res:
@@ -109,64 +124,141 @@ class EncoderSetupDialog(QDialog):
                 break
         self.resolution_combo.setCurrentIndex(found_idx)
 
-        # Container
+        # 2) Container
         container_val = self.settings.value("encoder/container", "x265", type=str)
         idx_c = self.container_combo.findText(container_val)
-        if idx_c < 0: idx_c = 0
+        if idx_c < 0:
+            idx_c = 0
         self.container_combo.setCurrentIndex(idx_c)
 
-        # CRF
+        # 3) CRF
         crf_val = self.settings.value("encoder/crf", 20, type=int)
         self.crf_spin.setValue(crf_val)
 
-        # Preset
+        # 4) Preset
         preset_val = self.settings.value("encoder/preset", "fast", type=str)
         idx_p = self.preset_combo.findText(preset_val)
-        if idx_p < 0: idx_p = 0
+        if idx_p < 0:
+            idx_p = 0
         self.preset_combo.setCurrentIndex(idx_p)
 
-        # FPS
+        # 5) FPS
         fps_val = self.settings.value("encoder/fps", 30, type=int)
         self.fps_spin.setValue(fps_val)
 
-        # Xfade
+        # 6) Xfade
         xfade_val = self.settings.value("encoder/xfade", 2, type=int)
         self.xfade_spin.setValue(xfade_val)
 
-        # HW => erst in update_hw_options
-        # da wir davon Container abh. machen
+        # 7) Detected HW laden (wenn vorhanden)
+        hw_json = self.settings.value("encoder/detected_hw_list", "")
+        if hw_json:
+            try:
+                # JSON -> Python set
+                arr = json.loads(hw_json)
+                self._cached_detected_hw = set(arr)
+            except:
+                self._cached_detected_hw = None
 
     def update_hw_options(self):
-        """Befüllt das hw_combo je nach Container (x264/x265) und realer Erkennung."""
+        """
+        Befüllt das hw_combo je nach Container (x264/x265) und:
+        - Falls self._cached_detected_hw nicht None -> nur die Encoders daraus
+        - CPU immer, falls nicht schon enthalten
+        """
         container = self.container_combo.currentText()  # "x264" / "x265"
 
-        # ffmpeg-Check
-        hw_encoders = detect_available_hw_encoders()  # set(...) => z.B. {"none", "nvidia_h264"}
-
-        # je nach Container
-        x264_allowed = {"none", "nvidia_h264", "amd_h264", "intel_h264"}
-        x265_allowed = {"none", "nvidia_hevc", "amd_hevc", "intel_hevc"}
-
-        if container == "x264":
-            allowed = x264_allowed
+        if self._cached_detected_hw is not None:
+            # Schon gemessen -> nur diese
+            all_hw_encoders = self._cached_detected_hw
         else:
-            allowed = x265_allowed
+            # Noch nicht gemessen -> wir nehmen die "theoretisch" vorhandenen
+            # => z.B. ffmpeg -encoders
+            # Du hast in "core/hardware_detect" die Funktion detect_available_hw_encoders().
+            from core.hardware_detect import detect_available_hw_encoders
+            all_hw_encoders = detect_available_hw_encoders()  # => z.B. {"CPU","nvidia_h264","amd_h264",...}
 
-        final_hw = hw_encoders.intersection(allowed)
+        # CPU sollte immer drin sein, falls nicht => hinzufügen
+        if "CPU" not in all_hw_encoders:
+            # man weiß nie, ob detect_available_hw_encoders "CPU" zurückgibt
+            all_hw_encoders = set(all_hw_encoders)
+            all_hw_encoders.add("CPU")
+
+        # Filtern je Container
+        if container == "x264":
+            allowed = {"CPU", "nvidia_h264", "amd_h264", "intel_h264"}
+        else:
+            allowed = {"CPU", "nvidia_hevc", "amd_hevc", "intel_hevc"}
+
+        final_hw = all_hw_encoders.intersection(allowed)
         if not final_hw:
-            final_hw = {"none"}
+            final_hw = {"CPU"}
 
         self.hw_combo.clear()
         sorted_list = sorted(list(final_hw))
         for hw in sorted_list:
             self.hw_combo.addItem(hw)
 
-        # Gucken, was in QSettings gespeichert war
-        stored_hw = self.settings.value("encoder/hw", "none", type=str)
+        # Gucken, ob wir in QSettings einen vorhandenen Wert haben
+        stored_hw = self.settings.value("encoder/hw", "CPU", type=str)
+        # Falls "none" -> mappe auf "CPU"
+        if stored_hw == "none":
+            stored_hw = "CPU"
+
         idx_hw = self.hw_combo.findText(stored_hw)
         if idx_hw < 0:
             idx_hw = 0
         self.hw_combo.setCurrentIndex(idx_hw)
+
+    def on_detect_hw_clicked(self):
+        """
+        Zeigt ein "Bitte warten..."-Fenster,
+        testet die wichtigsten GPU-Encoder per can_encode_with(),
+        speichert das Ergebnis in self._cached_detected_hw + QSettings,
+        dann update_hw_options().
+        """
+        # 1) Warte-Dialog
+        progress = QProgressDialog("Detecting hardware, please wait...", None, 0, 0, self)
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setWindowTitle("Please wait...")
+        progress.setMinimumDuration(0)
+        progress.setValue(0)
+        progress.show()
+
+        # 2) Test-liste: wir ignorieren libx264 / libx265
+        possible_hw_encs = {
+            "nvidia_h264": "h264_nvenc",
+            "nvidia_hevc": "hevc_nvenc",
+            "amd_h264":    "h264_amf",
+            "amd_hevc":    "hevc_amf",
+            "intel_h264":  "h264_qsv",
+            "intel_hevc":  "hevc_qsv",
+        }
+
+        working = {"CPU"}  # CPU immer
+        for label, ffenc in possible_hw_encs.items():
+            # Falls der user das Dialog-Fenster schließt o.ä., brechen wir ab
+            if progress.wasCanceled():
+                break
+            if can_encode_with(ffenc, test_duration=0.5):
+                working.add(label)
+
+        # 3) Schließen wir den Warte-Dialog
+        progress.close()
+
+        # 4) Speichern in self._cached_detected_hw
+        self._cached_detected_hw = working
+
+        # 5) Auch in QSettings => "encoder/detected_hw_list"
+        arr_list = list(working)
+        hw_json = json.dumps(arr_list)
+        self.settings.setValue("encoder/detected_hw_list", hw_json)
+
+        # 6) Info für den User
+        QMessageBox.information(self, "Detect HW", f"Found working encoders:\n{', '.join(sorted(working))}")
+
+        # 7) Combo aktualisieren
+        self.update_hw_options()
 
     def on_ok_clicked(self):
         """Speichert die Werte in QSettings und schließt."""
@@ -179,9 +271,10 @@ class EncoderSetupDialog(QDialog):
         container = self.container_combo.currentText()
         self.settings.setValue("encoder/container", container)
 
-        # hardware
-        hw = self.hw_combo.currentText()
-        self.settings.setValue("encoder/hw", hw)
+        # hardware => CPU => none
+        hw_ui = self.hw_combo.currentText()
+        hw_stored = "none" if (hw_ui == "CPU") else hw_ui
+        self.settings.setValue("encoder/hw", hw_stored)
 
         # crf
         self.settings.setValue("encoder/crf", self.crf_spin.value())
@@ -193,19 +286,10 @@ class EncoderSetupDialog(QDialog):
         # fps
         self.settings.setValue("encoder/fps", self.fps_spin.value())
 
-        # xfade
-        #self.settings.setValue("encoder/xfade", self.xfade_spin.value())
-
-        #self.accept()
         xfade_val = self.xfade_spin.value()
         if xfade_val < 1:
-            from PySide6.QtWidgets import QMessageBox
-            QMessageBox.warning(
-                self,
-                "Invalid X-Fade",
-                "The X-Fade duration must be at least 1 second."
-            )
-            return  # ❌ Dialog nicht schließen!
-
+            QMessageBox.warning(self, "Invalid X-Fade", "The X-Fade must be >= 1 second.")
+            return
         self.settings.setValue("encoder/xfade", xfade_val)
-        self.accept()    
+
+        self.accept()
