@@ -17,6 +17,8 @@ VGSync is a Python-based desktop application designed to synchronize GPX data wi
 > Binaries are **not included in the Git repository** due to size limitations.  
 > You must download and extract them manually from the GitHub [Releases](https://github.com/ridewithoutstomach/VGSync/releases).
 
+- Fill Mapillary token in config.js (specific to the app)
+
 ---
 
 ## Installation
