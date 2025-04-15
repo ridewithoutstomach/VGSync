@@ -76,7 +76,7 @@ This project includes and relies on the following third-party components:
 
 ### FFmpeg
 
-- Version: 7.1 "Péter"
+- Version: 7.1-full_build
 - License: GPLv3
 - Website: https://ffmpeg.org
 - Binaries provided in: `ffmpeg/`
