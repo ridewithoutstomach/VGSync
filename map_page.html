@@ -37,6 +37,9 @@
     rel="stylesheet"
   />
 
+  <!-- load settings related to the app -->
+  <script src="config.js"></script>
+
   <style>
     html, body {
       margin: 0; 
@@ -45,13 +48,6 @@
       height: 100%;
       overflow: hidden;
       background-color: #f0f0f0;
-    }
-    #map {
-      position: absolute;
-      top: 0; 
-      left: 0;
-      width: 100%;
-      height: 100%;
     }
 
     /* Button unten links => 4 Modi (OSM, MapTiler, Mapbox, Bing) */
@@ -98,6 +94,16 @@
       border: 1px solid #777;
       padding: 4px 8px;
       cursor: pointer;
+      font-size: 0.9rem;
+    }
+
+    #btnNewStreetPoint {
+      position: absolute;
+      top: 40px;
+      left: 30px;
+      z-index: 9999;
+      cursor: pointer;
+      background-color: rgba(255,255,255,1);
       font-size: 0.9rem;
     }
 
@@ -195,61 +201,137 @@
     }
 
     #mapillaryViewer {
-      resize: both;
-      overflow: auto;
-      cursor: move;
+      height: 0; /* will be set dynamically */
+      overflow: hidden;
+      transition: height 0.3s ease;
+      resize: none;
+      border-top: 1px solid #ccc;
+      display: flex;
+      flex-direction: column;
     }
 
     #mapillaryViewerHeader {
       background: #eee;
       padding: 4px;
-      cursor: move;
+      cursor: default;
       font-size: 0.85rem;
       border-bottom: 1px solid #ccc;
       user-select: none;
     }
+
+    #mapillaryViewer > div:not(#mapillaryViewerHeader) {
+      flex: 1;
+      position: relative;
+    }
+
+    #splitContainer {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #mapContainer {
+      position: relative;
+      width: 100%;
+      height: 100%;
+    }
+
+    #map {
+      width: 100%;
+      height: 100%;
+    }
+
+    /* Buttons now correctly overlay the map */
+    #mapContainer button.custom-map-btn,
+    #speedInputContainer {
+      position: absolute;
+      z-index: 9999;
+    }
+
+    #mapillaryViewer.collapsed {
+      height: auto !important;
+      min-height: 30px;
+      max-height: 40px;
+      overflow: hidden;
+    }
+
+    #mapillaryViewer.collapsed .mly-container {
+      display: none;
+    }
+
+    #mapillaryViewerHeader button.restore {
+      transform: rotate(180deg);
+    }
+
+    #splitter {
+      height: 6px;
+      background: #ccc;
+      cursor: row-resize;
+      z-index: 1000;
+    }
+
   </style>
 </head>
 <body>
   
-  <div id="map"></div>
-
-  <!-- Umschaltung OSM / MapTiler / Mapbox / Bing -->
-  <button id="mapViewBtn">OSM</button>
-  <button id="btnSyncNoArg">V-Sync</button> 
-  <button id="moveBtn">Move</button>
-  <button id="btnNewPoint">New</button>
-
-  <!-- Directions-Button -->
-  <button id="btnDirections">Directions</button>
-
-  <!-- NEU: Profil-Button => Bike, Foot, Car -->
-  <button id="btnProfile">Bike</button>
-
-  <!-- Container für Speed-Input (etwas tiefer) -->
-  <div id="speedInputContainer">
-    <label for="speedInput">Speed (km/h):</label>
-    <input type="number" id="speedInput" min="1" value="20" />
-  </div>
-
-  <!-- Street view -->
-  <div id="mapillaryViewer" style="position: absolute; bottom: 50px; left: 10px; width: 40%; height: 40%; z-index: 10000; border: 1px solid #ccc; background: #fff;">
-    <div id="mapillaryViewerHeader">
-      <span>Street View</span>
-      <button onclick="mapillaryContainer.style.display='none'" style="float: right;">✕</button>
+  <!-- map & street view -->
+  <div id="splitContainer">
+    <div id="mapContainer">
+      <div id="map"></div>
+  
+      <!-- Buttons go here -->
+      <button id="mapViewBtn" class="custom-map-btn">OSM</button>
+      <button id="btnSyncNoArg" class="custom-map-btn" title="Sync video with selected point">V-Sync</button>
+      <button id="moveBtn" class="custom-map-btn" title="Edit point coordinates">Move</button>
+      <button id="btnNewPoint" class="custom-map-btn">
+        <img src="icon/create_pt_1s.png" style="width: 36px; height: 36px; vertical-align: middle;" title="Create a new point with +1s shift after selected point" />
+      </button>
+      <button id="btnDirections" class="custom-map-btn">Directions</button>
+      <button id="btnProfile" class="custom-map-btn">Bike</button>
+      <div id="speedInputContainer">
+        <label for="speedInput">Speed (km/h):</label>
+        <input type="number" id="speedInput" min="1" value="20" />
+      </div>
     </div>
-    <!-- The viewer content will render inside here -->
+
+    <div id="splitter"></div> <!-- Draggable Divider -->
+  
+    <!-- Street view -->
+    <div id="mapillaryViewer">
+      <div id="mapillaryViewerHeader">
+        <span style="display: inline-flex; align-items: center; gap: 6px;">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18">
+            <path fill="#d00" d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
+            <circle fill="#fff" cx="12" cy="9" r="2.5"/>
+          </svg>
+          Street View
+        </span>
+        <button id="collapseViewerBtn" style="float: right;" title="Hide/Open">✕</button>
+        <button id="btnNewStreetPoint" class="custom-map-btn" title="Insert a new point at the street view location with current video time">
+          <img src="icon/create_pt_video_time.png" style="width: 36px; height: 36px; vertical-align: middle;" />
+        </button>
+      </div>
+    </div>
+    <div id="nostreetview-alert">No Mapillary images found near this location.</div>
   </div>
-  <div id="nostreetview-alert">No Mapillary images found near this location.</div>
+
   <script>
-    var clientId = 'MLY|8819113018197708|743f493bf2919480b88204e2b4fa0e12';
+    var clientId = '';
     var {Viewer} = mapillary;
     let mapillaryLinkFeature = null;
-  
-    var viewer = new Viewer({
-      accessToken: clientId,
-      container: 'mapillaryViewer', // the ID of our container defined in the HTML body
+
+    if (!CONFIG.mapillaryToken || CONFIG.mapillaryToken.trim() == '')
+      alert("Mapillary token is missing! Please add it in config.js.");
+
+    const mapillaryViewer = new Viewer({
+      accessToken: CONFIG.mapillaryToken,
+      container: 'mapillaryViewer',
     });
+
 
     function showNoStreetView(duration = 3000) {
       const alertBox = document.getElementById("nostreetview-alert");
@@ -259,6 +341,31 @@
       setTimeout(() => {
         alertBox.classList.remove("show");
       }, duration);
+    }
+
+    function enableVideoMapMode(enable) {
+      const mapEl = document.getElementById("map");
+      const viewerEl = document.getElementById("mapillaryViewer");
+
+      if (enable) {
+        mapEl.style.flex = "0 0 40%";
+        viewerEl.style.height = "60%";
+        viewerEl.style.overflow = "hidden";
+        viewerEl.style.display = "flex";
+
+        if (mapillaryViewer) {
+          mapillaryViewer.resize();
+          pyLog("selectedCoord=" + selectedCoord);
+          if(selectedCoord) 
+           navigateStreetView(selectedCoord[1], selectedCoord[0]);
+        }
+      } else {
+        mapEl.style.flex = "1";
+        viewerEl.style.height = "0";
+        viewerEl.style.display = "none";
+      }
+
+      if (map) map.updateSize(); // ensures OpenLayers resizes properly
     }
 
   </script>
@@ -311,6 +418,7 @@
     let featuresMapSid   = {};
 
     let moveMode= false;
+    let vSyncMode= false; //Video sync with points selection and new points added on video time♥
     let modifyInteraction= null;
     let addNewPointMode= false;
 
@@ -341,6 +449,9 @@
     // NEU: Loading-Counter => Referenzzählung
     // -------------------------------------------------
     let loadingCounter = 0;
+
+    //street view coords
+    let streetCoords=null
 
 	function getMaxIndex() {
       // alle keys von featuresMapIndex holen, in Zahlen umwandeln
@@ -405,8 +516,8 @@
 
       initMap();
 
-      viewer.on('image',function () {
-        viewer.getImage()
+      mapillaryViewer.on('image',function () {
+        mapillaryViewer.getImage()
           .then((image) => {
             if (!image || !image.id) {
               console.warn("Could not get current image.");
@@ -416,11 +527,12 @@
             const imageId = image.id;
             console.log("Got image:", imageId);
 
-            fetch(`https://graph.mapillary.com/${imageId}?fields=geometry&access_token=${clientId}`)
+            fetch(`https://graph.mapillary.com/${imageId}?fields=geometry&access_token=${CONFIG.mapillaryToken}`)
               .then(response => response.json())
               .then(data => {
                 if (data.geometry && data.geometry.coordinates) {
                   const [lon, lat] = data.geometry.coordinates;
+                  streetCoords = [lon, lat];
                   drawMapillaryCrossMarker(lon, lat);
                 } else {
                   console.warn("No geometry for image", imageId);
@@ -431,13 +543,67 @@
               });
           })
           .catch(err => {
-            console.error("viewer.getImage() failed:", err);
+            console.error("mapillaryViewer.getImage() failed:", err);
           });
       });
-      viewer.moveTo('1151013448713326'); // initial view
+
+      //mapillaryViewer.moveTo('1151013448713326'); // initial view
       const viewerDiv = document.getElementById("mapillaryViewer");
       const header = document.getElementById("mapillaryViewerHeader");
       makeElementDraggable(viewerDiv, header);
+
+      const resizeObserver = new ResizeObserver(() => {
+        if (mapillaryViewer) {
+          mapillaryViewer.resize();  // This tells Mapillary to re-render properly
+        }
+      });
+
+      resizeObserver.observe(viewerDiv);
+
+      const collapseBtn = document.getElementById("collapseViewerBtn");
+      collapseBtn.addEventListener("click", () => {
+      const isCollapsed = viewerDiv.classList.toggle("collapsed");
+      collapseBtn.textContent = isCollapsed ? "⬍" : "✕";
+      collapseBtn.classList.toggle("restore", isCollapsed);
+
+        if (!isCollapsed && mapillaryViewer) {
+          setTimeout(() => mapillaryViewer.resize(), 100); // re-render viewer after uncollapse
+        }
+      });
+
+      const splitter = document.getElementById('splitter');
+      const topPane = document.getElementById('mapContainer');
+      let isDragging = false;
+
+      splitter.addEventListener('mousedown', function (e) {
+        isDragging = true;
+        document.body.style.cursor = 'row-resize';
+        e.preventDefault();
+      });
+
+    document.addEventListener('mousemove', function (e) {
+      if (!isDragging) return;
+      const containerHeight = document.getElementById('splitContainer').offsetHeight;
+      const offsetY = e.clientY;
+      const topHeight = Math.max(offsetY, 100); // prevent too small
+      const bottomHeight = containerHeight - topHeight - splitter.offsetHeight;
+
+      topPane.style.flexBasis = `${topHeight}px`;
+    });
+
+    document.addEventListener('mouseup', function () {
+      isDragging = false;
+      document.body.style.cursor = 'default';
+
+      if (map) {
+        setTimeout(() => map.updateSize(), 100);
+      }
+
+      if (mapillaryViewer) {
+        setTimeout(() => mapillaryViewer.resize(), 100);
+      }
+    });
+
 
       let mvBtn = document.getElementById("mapViewBtn");
       if(mvBtn){
@@ -466,6 +632,21 @@
           addNewPointMode= !addNewPointMode;
           document.body.style.cursor = addNewPointMode ? "crosshair" : "";
         });
+      }
+      let newStretB= document.getElementById("btnNewStreetPoint");
+      if(newStretB){
+        newStretB.addEventListener("click", ()=>{
+          if (mapillaryViewer && mapillaryViewer.getImage && streetCoords) {
+                const [lon, lat] = streetCoords;
+                if (channelObj) {
+                  channelObj.newPointInserted(lat, lon, -1);
+                }
+              } else {
+                console.warn("Image geometry not available.");
+              }
+            }).catch((err) => {
+              console.error("Failed to get viewer image:", err);
+            });
       }
 
       let dirB= document.getElementById("btnDirections");
@@ -587,6 +768,9 @@
             dbg("clicked index="+idx);
             if(channelObj.pointClicked){
               channelObj.pointClicked(idx);
+              if(vSyncMode){
+                channelObj.syncNoArgSlot();
+              }
             }
             return true;
           }
@@ -600,8 +784,11 @@
           return false;
         });
 
-        let ll = ol.proj.toLonLat(evt.coordinate);
-        navigateStreetView(ll[1], ll[0]);
+        //if street view visible
+        if (mapillaryContainer && mapillaryContainer.getBoundingClientRect().height > 10){
+          let ll = ol.proj.toLonLat(evt.coordinate);
+          navigateStreetView(ll[1], ll[0]);
+        }
       });
 
     }
@@ -672,6 +859,7 @@
         });
       });
     }
+
     function enableMoveMode(enable){
       moveMode= enable;
       let b= document.getElementById("moveBtn");
@@ -682,6 +870,23 @@
       } else {
         map.removeInteraction(modifyInteraction);
         b.style.backgroundColor="rgba(200,200,200,0.5)";
+      }
+    }
+
+    function enableVSyncMode(enable){
+      vSyncMode= enable;
+      const syncBtn= document.getElementById("btnSyncNoArg");
+      const newBtn = document.getElementById("btnNewPoint");
+      const img = newBtn.querySelector("img");
+      if (!img) return;
+      if(vSyncMode){
+        syncBtn.style.backgroundColor="rgba(255,100,100,0.5)";
+        img.src = "icon/create_pt_video_time.png";
+        img.title = "Insert a new point with current video time";
+      } else {
+        syncBtn.style.backgroundColor="rgba(200,200,200,0.5)";
+        img.src = "icon/create_pt_1s.png";
+        img.title = "Create a new point with +1s shift after selected point and shift next ones";
       }
     }
 
@@ -1280,23 +1485,20 @@
       right = lon + (radius / 111320)
       top_limit = lat + (radius / 110574)
 
-      if (!viewer) return;
+      if (!mapillaryViewer) return;
 
    // Fetch the closest image to the clicked location
       fetch(
-        `https://graph.mapillary.com/images?access_token=${clientId}&fields=id&bbox=${left},${bottom},${right},${top_limit}`
+        `https://graph.mapillary.com/images?access_token=${CONFIG.mapillaryToken}&fields=id&bbox=${left},${bottom},${right},${top_limit}`
       )
         .then((response) => response.json())
         .then((data) => { 
           //pyLog("navigateStreetView data "+JSON.stringify(data));
           if (data.data && data.data.length > 0) {
             const imageId = data.data[0].id;
-            viewer.moveTo(imageId);
-
-            //drawMapillaryCrossMarker(imgLon, imgLat);
+            mapillaryViewer.moveTo(imageId);
           } else {
             showNoStreetView();
-            //alert("No Mapillary images found near this location.");
           }
         })
         .catch((error) => {
@@ -1335,7 +1537,6 @@
   function drawMapillaryCrossMarker(lon, lat) {
     const coord = ol.proj.fromLonLat([lon, lat]);
 
-    // Remove old one
     if (mapillaryMarkerFeature) {
       vectorLayer.getSource().removeFeature(mapillaryMarkerFeature);
     }
@@ -1344,23 +1545,25 @@
       geometry: new ol.geom.Point(coord)
     });
 
-    // Define the cross style
-    const crossStyle = new ol.style.Style({
-      image: new ol.style.RegularShape({
-        points: 4,
-        radius: 10,
-        radius2: 0,
-        angle: Math.PI / 4, // 45 degrees to form an X
-        stroke: new ol.style.Stroke({
-          color: '#FF5722',
-          width: 2
-        })
+    const pinStyle = new ol.style.Style({
+      image: new ol.style.Icon({
+        src: 'data:image/svg+xml;utf8,' + encodeURIComponent(`
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="32" height="32">
+            <path fill="#d00" d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
+            <circle fill="#fff" cx="12" cy="9" r="2.5"/>
+          </svg>
+        `),
+        scale: 1,
+        anchor: [0.5, 1],
+        anchorXUnits: 'fraction',
+        anchorYUnits: 'fraction'
       })
     });
 
-    mapillaryMarkerFeature.setStyle(crossStyle);
+    mapillaryMarkerFeature.setStyle(pinStyle);
     vectorLayer.getSource().addFeature(mapillaryMarkerFeature);
   }
+  
 
   function makeElementDraggable(elmnt, handle) {
     let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;

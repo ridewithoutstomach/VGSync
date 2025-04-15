@@ -242,7 +242,6 @@ class MainWindow(QMainWindow):
         menubar = self.menuBar()
         file_menu = menubar.addMenu("File")
         self.playlist_menu = menubar.addMenu("Playlist")
-        view_menu = menubar.addMenu("Detach")
         
         load_gpx_action = QAction("Open GPX", self)
         load_gpx_action.triggered.connect(self.load_gpx_file)
@@ -278,7 +277,7 @@ class MainWindow(QMainWindow):
         self.action_auto_sync_video.triggered.connect(self._on_auto_sync_video_toggled)
         setup_menu.addAction(self.action_auto_sync_video)
         
-        self.action_new_pts_video_time = QAction("New points at video time", self)
+        self.action_new_pts_video_time = QAction("Sync all with video", self)
         self.action_new_pts_video_time.setCheckable(True)
         self.action_new_pts_video_time.setChecked(False)  # Standard = OFF
         self.action_new_pts_video_time.triggered.connect(self._on_sync_point_video_time_toggled)
@@ -418,8 +417,8 @@ class MainWindow(QMainWindow):
         classic_view_action = view_menu.addAction("Classic view")
         classic_view_action.triggered.connect(self._set_classic_view)
 
-        map_video_view_action = view_menu.addAction("Map+video view")
-        map_video_view_action.triggered.connect(self._set_map_video_view)
+        gpx_create_mode_action = view_menu.addAction("GPX creation mode")
+        gpx_create_mode_action.triggered.connect(self._set_map_video_view)
 
         info_menu = menubar.addMenu("Info")
         
@@ -517,8 +516,6 @@ class MainWindow(QMainWindow):
         
         # Unten: Map (50%)
         self.map_widget = MapWidget(mainwindow=self, parent=None)
-        #self.map_widget.view.loadFinished.connect(self._on_map_page_loaded)   
-        
         self.left_v_layout.addWidget(self.map_widget, stretch=1)
         
         # ============== Rechte Spalte (Chart + GPX) ==============
@@ -771,12 +768,34 @@ class MainWindow(QMainWindow):
         QDesktopServices.openUrl(QUrl.fromLocalFile(pdf_path))    
     
     def _set_classic_view(self):
-        self.left_v_layout.addWidget(self.map_widget,stretch=1)
-        
+        self.left_v_layout.addWidget(self.map_widget, stretch=1)
+        self.map_widget.setParent(self.left_v_layout.parentWidget())
+        self.map_widget.show()
+
+        self.chart.show()
+        self.bottom_right_widget.show()
+
+        self.map_widget.view.page().runJavaScript("enableVideoMapMode(false);")
+
+        # Update the check state and call handler
+        self.action_new_pts_video_time.setChecked(False)
+        self._on_sync_point_video_time_toggled(False)
+
+
     def _set_map_video_view(self):
-        self.left_v_layout.removeWidget(self.map_widget)
-        self.right_v_layout.replaceWidget(self.chart, self.map_widget)
+        self.right_v_layout.removeWidget(self.chart)
+        self.chart.hide()
+
         self.right_v_layout.removeWidget(self.bottom_right_widget)
+        self.bottom_right_widget.hide()
+
+        self.right_v_layout.addWidget(self.map_widget, stretch=1)
+        self.map_widget.view.page().runJavaScript("enableVideoMapMode(true);")
+        self.right_v_layout.update()
+
+        # Update the check state and call handler
+        self.action_new_pts_video_time.setChecked(True)
+        self._on_sync_point_video_time_toggled(True)
         
         
     def _on_show_mpv_path(self):
@@ -1638,6 +1657,7 @@ class MainWindow(QMainWindow):
         
         - lat, lon: Koordinaten des neu eingefügten Punktes
         - idx: Kann sein:
+            - -3 => kein Punkt selektiert (also "vor dem ersten" GPX-Punkt)
             - -2 => Punkt VOR dem ersten
             - -1 => Punkt HINTER dem letzten
             - >=0 => Punkt zwischen idx und idx+1 (also 'zwischen zwei vorhandenen GPX-Punkten').
@@ -1661,6 +1681,7 @@ class MainWindow(QMainWindow):
         row_selected = self.gpx_widget.gpx_list.table.currentRow()
 
         if self._autoSyncNewPointsWithVideoTime and self.video_editor.is_video_loaded(): #if video loaded, insert a new point at current video time without shift
+            self.append_gpx_history(gpx_data) #for undo
             video_time = self.video_editor.get_current_position_s()
             self.ordered_insert_new_point(lat,lon,video_time)
 
@@ -1693,8 +1714,7 @@ class MainWindow(QMainWindow):
         
             # --- Nun das "alte" Einfüge-Verhalten ---
             # Undo-Snapshot
-            old_data = copy.deepcopy(gpx_data)
-            self.gpx_widget.gpx_list._history_stack.append(old_data)
+            self.append_gpx_history(gpx_data)
 
             now = datetime.now()  # Fallback, falls Zeit gar nicht existiert
 
@@ -1835,7 +1855,9 @@ class MainWindow(QMainWindow):
 
         print(f"[INFO] Inserted new GPX point (DirectionsEnabled={self._directions_enabled}); total now {len(gpx_data)} pts.")
 
-                
+    def append_gpx_history(self, gpx_data: list):
+        old_data = copy.deepcopy(gpx_data)
+        self.gpx_widget.gpx_list._history_stack.append(old_data)            
             
     ####################################################################
     def _on_reset_config_triggered(self):
@@ -1966,6 +1988,7 @@ class MainWindow(QMainWindow):
             
     def _on_sync_point_video_time_toggled(self, checked: bool):
         self._autoSyncNewPointsWithVideoTime = checked
+        self.map_widget.view.page().runJavaScript(f"enableVSyncMode({str(checked).lower()});")
         
     def on_delete_range_clicked(self):
         """
