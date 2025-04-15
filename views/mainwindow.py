@@ -257,6 +257,21 @@ class MainWindow(QMainWindow):
         file_menu.addAction(dummy_action)
         dummy_action.triggered.connect(self._on_new_project_triggered)
         
+        view_menu = menubar.addMenu("View")
+
+        classic_view_action = view_menu.addAction("Edit mode")
+        classic_view_action.triggered.connect(self._set_classic_view)
+
+        gpx_create_mode_action = view_menu.addAction("Create mode")
+        gpx_create_mode_action.triggered.connect(self._set_map_video_view)
+
+        self.action_toggle_video = QAction("Video (detach)", self)
+        self.action_toggle_video.triggered.connect(self._toggle_video)
+        view_menu.addAction(self.action_toggle_video)
+
+        self.action_toggle_map = QAction("Map (detach)", self)
+        self.action_toggle_map.triggered.connect(self._toggle_map)
+        view_menu.addAction(self.action_toggle_map)
         
         
         setup_menu = menubar.addMenu("Config")
@@ -412,13 +427,6 @@ class MainWindow(QMainWindow):
         reset_config_action.triggered.connect(self._on_reset_config_triggered)
         setup_menu.addAction(reset_config_action)
         
-        view_menu = menubar.addMenu("View")
-
-        classic_view_action = view_menu.addAction("Classic view")
-        classic_view_action.triggered.connect(self._set_classic_view)
-
-        gpx_create_mode_action = view_menu.addAction("GPX creation mode")
-        gpx_create_mode_action.triggered.connect(self._set_map_video_view)
 
         info_menu = menubar.addMenu("Info")
         
@@ -446,17 +454,7 @@ class MainWindow(QMainWindow):
         self.action_final_time.triggered.connect(self._on_timer_mode_changed)
         self._time_mode = "global"
 
-        self.action_toggle_video = QAction("Video (detach)", self)
-        self.action_toggle_video.triggered.connect(self._toggle_video)
-        view_menu.addAction(self.action_toggle_video)
 
-        self.action_toggle_map = QAction("Map (detach)", self)
-        self.action_toggle_map.triggered.connect(self._toggle_map)
-        view_menu.addAction(self.action_toggle_map)
-
-
-
-        
         
         # ========================= Zentrales Layout =========================
         #
