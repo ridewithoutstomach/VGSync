@@ -41,6 +41,9 @@ import hashlib
 #import win32com.client  # pywin32
 
 
+            
+
+
 from PySide6.QtCore import QUrl
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtCore import QSettings
@@ -55,16 +58,18 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QGridLayout, QFrame,
     QFileDialog, QMessageBox, QVBoxLayout,
     QLabel, QProgressBar, QHBoxLayout, QPushButton, QDialog,
-    QApplication, QInputDialog, QSplitter, QSystemTrayIcon
+    QApplication, QInputDialog, QSplitter, QSystemTrayIcon,
+    QFormLayout, QComboBox, QSpinBox
 )
 from PySide6.QtWidgets import QDoubleSpinBox
 from PySide6.QtWidgets import QLineEdit, QDialogButtonBox
 
 
 
-
+from .encoder_setup_dialog import EncoderSetupDialog  # Import Dialog
 
 from config import TMP_KEYFRAME_DIR, MY_GLOBAL_TMP_DIR
+
 from widgets.video_editor_widget import VideoEditorWidget
 from widgets.video_timeline_widget import VideoTimelineWidget
 from widgets.video_control_widget import VideoControlWidget
@@ -78,6 +83,8 @@ from managers.end_manager import EndManager
 from managers.cut_manager import VideoCutManager
 from core.gpx_parser import parse_gpx  # Hier hinzufügen!
 
+from managers.overlay_manager import OverlayManager
+
 # ggf. import_export_manager, safe_manager etc.
 from .dialogs import _IndexingDialog, _SafeExportDialog, DetachDialog
 from widgets.mini_chart_widget import MiniChartWidget
@@ -90,7 +97,7 @@ from config import APP_VERSION
 from path_manager import is_valid_mpv_folder
 from core.gpx_parser import recalc_gpx_data
 from config import reset_config
-
+from managers.encoder_manager import EncoderDialog
 
 from datetime import datetime, timedelta
 
@@ -262,14 +269,49 @@ class MainWindow(QMainWindow):
         
         setup_menu = menubar.addMenu("Config")
         
-        self.action_edit_video = QAction("Edit Video", self)
-        self.action_edit_video.setCheckable(True)
-       
-        self.action_edit_video.setChecked(False)
-        set_edit_video_enabled(False)   # QSettings überschreibe
         
-        self.action_edit_video.triggered.connect(self._on_toggle_edit_video)
-        setup_menu.addAction(self.action_edit_video)
+        # Neues Untermenü "Edit Video" mit drei checkbaren Actions
+        edit_video_menu = setup_menu.addMenu("Edit Video")
+
+        self.off_action = QAction("Off", self, checkable=True)
+        self.copy_action = QAction("Copy-Mode", self, checkable=True)
+        self.encode_action = QAction("Encode-Mode", self, checkable=True)
+
+        self.edit_mode_group = QActionGroup(self)
+        self.edit_mode_group.setExclusive(True)
+
+        self.edit_mode_group.addAction(self.off_action)
+        self.edit_mode_group.addAction(self.copy_action)
+        self.edit_mode_group.addAction(self.encode_action)
+
+        edit_video_menu.addAction(self.off_action)
+        edit_video_menu.addAction(self.copy_action)
+        edit_video_menu.addAction(self.encode_action)
+
+        # Standard = Off
+        self.off_action.setChecked(True)
+        self._edit_mode = "off"
+        self._userDeclinedIndexing = False  # Falls du es schon hattest
+
+        # Verknüpfe klick => _set_edit_mode(...)
+        self.off_action.triggered.connect(lambda: self._set_edit_mode("off"))
+        self.copy_action.triggered.connect(lambda: self._set_edit_mode("copy"))
+        self.encode_action.triggered.connect(lambda: self._set_edit_mode("encode"))
+       
+        
+        
+        
+        self.encoder_setup_action = QAction("Encoder-Setup", self)
+        self.encoder_setup_action.setEnabled(False)  # am Anfang ausgegraut
+        setup_menu.addAction(self.encoder_setup_action)
+        self.encoder_setup_action.triggered.connect(self._on_encoder_setup_clicked)
+        
+        self.overlay_setup_action = QAction("Overlay-Setup", self)
+        self.overlay_setup_action.setEnabled(False)  # Standard: ausgegraut
+        setup_menu.addAction(self.overlay_setup_action)
+        self.overlay_setup_action.triggered.connect(self._on_overlay_setup_clicked)
+        
+        
         
         
         self.action_auto_sync_video = QAction("AutoCutVideo+GPX", self)
@@ -491,6 +533,8 @@ class MainWindow(QMainWindow):
         
         self.timeline = VideoTimelineWidget()
         self.video_control = VideoControlWidget()
+        self.timeline.overlayRemoveRequested.connect(self._on_timeline_overlay_remove)
+
         
         left_timeline_control_layout.addWidget(self.timeline)
         left_timeline_control_layout.addWidget(self.video_control)
@@ -639,9 +683,12 @@ class MainWindow(QMainWindow):
         self.video_control.multiplier_value_changed.connect(self.on_multiplier_changed)
         self.video_control.backward_clicked.connect(self.step_manager.step_backward)
         self.video_control.forward_clicked.connect(self.step_manager.step_forward)
-
+        
+        self.video_control.overlayClicked.connect(self._on_overlay_button_clicked)
        
         self.cut_manager = VideoCutManager(self.video_editor, self.timeline, self)
+        self._overlay_manager = OverlayManager(self.timeline, self)
+        
         
         self.end_manager = EndManager(
             video_editor=self.video_editor,
@@ -709,7 +756,12 @@ class MainWindow(QMainWindow):
         self.map_widget.view.loadFinished.connect(self._on_map_page_loaded)
         self.video_editor.set_final_time_callback(self._compute_final_time)
         
-       
+    
+
+    def _on_overlay_button_clicked(self):
+        marker_s = self.timeline.marker_position()
+        self._overlay_manager.ask_user_for_overlay(marker_s, parent=self)   
+        
     
     def _on_map_directions_toggled(self, checked: bool):
         """
@@ -1297,6 +1349,74 @@ class MainWindow(QMainWindow):
         )
 
         
+        
+    def _set_edit_mode(self, new_mode: str):
+        old_mode = self._edit_mode
+        if new_mode == old_mode:
+            return  # Nichts geändert
+
+        self._edit_mode = new_mode
+        if new_mode == "off":
+            self.video_control.set_editing_mode(False)
+            print("[DEBUG] => OFF")
+            self.encoder_setup_action.setEnabled(False)
+            self.video_control.show_ovl_button(False)
+            self.overlay_setup_action.setEnabled(False)
+        elif new_mode == "copy":
+            self.video_control.set_editing_mode(True)
+            print("[DEBUG] => COPY")
+            self.encoder_setup_action.setEnabled(False)
+            self.video_control.show_ovl_button(False)
+            self.overlay_setup_action.setEnabled(False)
+        elif new_mode == "encode":
+            self.video_control.set_editing_mode(True)
+            print("[DEBUG] => ENCODE")
+            self.encoder_setup_action.setEnabled(True)
+            self.video_control.show_ovl_button(True)
+            self.overlay_setup_action.setEnabled(True)
+
+        # Abfrage: nur wenn alter Modus 'off' war + neuer Modus copy/encode
+        if old_mode == "off" and new_mode in ("copy", "encode"):
+            answer = QMessageBox.question(
+                self,
+                "Index Videos?",
+                "Do you want to index all currently loaded videos now?\n"
+                "(Currently loaded videos: %d)\n\n"
+                "Any *new* video you load from now on will also be indexed automatically."
+                % len(self.playlist),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            if answer == QMessageBox.Yes:
+                # Selbst wenn playlist leer ist, tut das einfach nichts
+                for video_path in self.playlist:
+                    self.start_indexing_process(video_path)
+            else:
+                self._userDeclinedIndexing = True    
+    
+
+    def _on_encoder_setup_clicked(self):
+        # Hier öffnen wir den Dialog
+        dlg = EncoderSetupDialog(self)
+        if dlg.exec() == dlg.accepted:
+            print("[DEBUG] => Encoder-Setup saved.")
+        else:
+            print("[DEBUG] => Encoder-Setup canceled.")
+            
+    def _on_overlay_setup_clicked(self):
+        """
+        Wird aufgerufen, wenn im Menü "Overlay-Setup" geklickt wird.
+        Öffnet ein Dummy-Fenster (OverlaySetupDialog).
+        """
+        from .overlay_setup_dialog import OverlaySetupDialog  # wir importieren gleich die neue Klasse
+        dlg = OverlaySetupDialog(self)
+        result = dlg.exec()
+        
+        if result == QDialog.Accepted:
+            print("[DEBUG] => Overlay-Setup: changes saved.")
+        else:
+            print("[DEBUG] => Overlay-Setup: canceled or closed.")
+        
 
     def _on_clear_ffmpeg_path(self):
         """
@@ -1319,75 +1439,7 @@ class MainWindow(QMainWindow):
             
         
         
-    def _on_toggle_edit_video(self, checked: bool):
-        """
-        Wird aufgerufen, wenn man im Menü 'Edit Video' an-/ab-hakt.
-        Wir speichern den Wert in QSettings. Falls True => fragen wir den User
-        nach Indexierung der aktuell geladenen Videos.
-        """
-        print(f"[DEBUG] _on_toggle_edit_video => {checked}")
-        #set_edit_video_enabled(checked)
-
-        # => Buttons im VideoControl an-/abschalten
-        self.video_control.set_editing_mode(checked)
-        self.video_editor.edit_status_label.setText("Edit: On")
-        self.video_editor.edit_status_label.setStyleSheet(
-            "background-color: rgba(0,0,0,120); "
-            "color: red; "
-            "font-size: 14px; "
-            "font-weight: bold;"
-            "padding: 2px 1px;"
-            )
-        if checked:
-            
-            # 1) Nachfrage: "Do you want to index all currently loaded videos now?"
-            
-            answer = QMessageBox.question(
-                self,
-                "Index Videos?",
-                "Do you want to index all currently loaded videos now?\n\n"
-                "Any new video you load from now on will also be indexed automatically.",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
-            )
-            if answer == QMessageBox.Yes:
-                # 2) Indexieren aller vorhandenen
-                for video_path in self.playlist:
-                    self.start_indexing_process(video_path)
-            else:
-                self._userDeclinedIndexing = True  
-                
-
-            # Info: Neu geladene Videos werden im add_to_playlist(...) automatisch indexiert,
-            # falls 'Edit Video' = True.
-
-        else:
-            self.video_editor.edit_status_label.setText("")
-            #self.video_editor.edit_status_label.setText("Edit:  Off")
-            #self.video_editor.edit_status_label.setStyleSheet(
-            #    "background-color: rgba(0,0,0,120); "
-            #    "color: grey; "
-            #    "font-size: 14px; "
-            #    "padding: 2px 1px;"
-            #    "font-weight: normal; "
-            #)
-
-            # Wurde auf false gestellt => wir machen nichts weiter,
-            # ab jetzt werden neue Videos NICHT mehr indexiert.
-            pass
-            
-        if self.gpx_control:
-            # Aktion: Synchronisieren
-            self.gpx_control.update_set_gpx2video_state(
-                video_edit_on=checked,
-                auto_sync_on=self._autoSyncVideoEnabled
-            )    
     
-    
-    
-        
-        
-   
 
     def on_set_begin_clicked(self):
        
@@ -1859,6 +1911,7 @@ class MainWindow(QMainWindow):
         # 1) Video-Undo:
         self.map_widget.view.page().runJavaScript("showLoading('Undo GPX-Range...');")
         self.cut_manager.on_undo_clicked()
+        self._overlay_manager.undo_overlay()
 
         # 2) Falls autosync ON => GPX-Liste => undo_delete
         if self._autoSyncVideoEnabled:
@@ -1887,7 +1940,7 @@ class MainWindow(QMainWindow):
         
 
         # 2) autoSyncVideo?
-        if self._autoSyncVideoEnabled and self.action_edit_video.isChecked():
+        if self._autoSyncVideoEnabled and self._edit_mode in ("copy", "encode"):
             self.map_widget.view.page().runJavaScript("showLoading('Deleting GPX-Range...');")
             print("[DEBUG] autoSyncVideo=ON => rufe gpx_list.delete_selected_range()")
             self.gpx_widget.gpx_list.delete_selected_range()
@@ -1908,7 +1961,7 @@ class MainWindow(QMainWindow):
         Wird aufgerufen, wenn der Menüpunkt "AutoSyncVideo" an-/abgehakt wird.
         => Speichere den Zustand in self._autoSyncVideoEnabled
         """    
-        if checked and not self.action_edit_video.isChecked():
+        if checked and self._edit_mode == "off":
             # -> nicht erlaubt
             QMessageBox.warning(
                 self,
@@ -2929,7 +2982,7 @@ class MainWindow(QMainWindow):
             
             self.video_editor.set_playlist(self.playlist)
             
-            if self.action_edit_video.isChecked() and (not self._userDeclinedIndexing):
+            if self._edit_mode in ("copy", "encode") and (not self._userDeclinedIndexing):
                 self.start_indexing_process(filepath)
             else:
                 print("[DEBUG] Kein Indexing, weil der User es abgelehnt hat oder EditVideo=OFF.")                
@@ -3192,6 +3245,9 @@ class MainWindow(QMainWindow):
     def _on_timeline_marker_moved(self, new_time_s: float):
         #self._jump_player_to_time(new_time_s)
         self.video_editor._jump_to_global_time(new_time_s)
+        
+    def _on_timeline_overlay_remove(self, start_s, end_s):
+        self._overlay_manager.remove_overlay_interval(start_s, end_s)    
 
     def on_time_hms_set_clicked(self, hh: int, mm: int, ss: int, ms=0):
         """
@@ -3292,6 +3348,104 @@ class MainWindow(QMainWindow):
         if not self.playlist:
             QMessageBox.warning(self, "Error", "No videos in playlist!")
             return
+            
+        # -------------------------------------------------
+        # NEUE LOGIK: Wenn Edit-Mode == "encode" => JSON schreiben
+        if self._edit_mode == "encode":
+            
+            # 1) Daten aus QSettings lesen (Encoder Setup)
+            s = QSettings("VGSync","VGSync")
+            xfade_val   = s.value("encoder/xfade", 2, type=int)
+            hw_encode   = s.value("encoder/hw", "none", type=str)
+            container   = s.value("encoder/container", "x265", type=str)
+            crf_val     = s.value("encoder/crf", 25, type=int)
+            fps_val     = s.value("encoder/fps", 30, type=int)
+            preset_val  = s.value("encoder/preset", "fast", type=str)
+            width_val   = s.value("encoder/res_w", 1280, type=int)
+
+            # 2) Cuts => skip_instructions
+            #   Format [start_s, end_s, xfade]
+            cuts = self.cut_manager.get_cut_intervals()  # Liste (start_s, end_s)
+            skip_array = []
+            total_dur = self.real_total_duration
+            sorted_cuts = sorted(cuts, key=lambda x: x[0])
+            
+            for (cstart, cend) in sorted_cuts:
+                if abs(cstart - 0.0) < 0.1:
+                    skip_array.append([cstart, cend, -2])  # Startcut
+                elif abs(cend - total_dur) < 0.1:
+                    skip_array.append([cstart, cend, -1])  # Endcut
+                else:
+                    skip_array.append([cstart, cend, xfade_val])
+        
+            # Debug-Ausgabe, damit du siehst, was wirklich passiert:
+            print("DEBUG skip_array:", skip_array)
+            
+            print("DEBUG: Chronologisch sortierte skip_array:", skip_array)
+
+
+
+            # 3) Overlays => overlay_instructions
+            #   Jedes Overlay = dict mit "start","end","fade_in","fade_out","image","scale","x","y"
+            all_ovls = self._overlay_manager.get_all_overlays()
+            overlay_list = []
+            for ovl in all_ovls:
+                overlay_list.append({
+                    "start":    ovl["start"],
+                    "end":      ovl["end"],
+                    "fade_in":  ovl.get("fade_in", 0),
+                    "fade_out": ovl.get("fade_out", 0),
+                    "image":    ovl.get("image",""),
+                    "scale":    ovl.get("scale",1.0),
+                    "x":        ovl.get("x","0"),
+                    "y":        ovl.get("y","0"),
+                })
+
+            # 4) Ziel-Dateinamen (können Sie frei anpassen)
+            merged_out = "merged.mp4"
+            final_out  = "final_out.mp4"
+
+            # 5) JSON-Dict bauen
+            export_data = {
+                "videos": self.playlist,
+                "skip_instructions": skip_array,
+                "overlay_instructions": overlay_list,
+                "merged_output": merged_out,
+                "final_output": final_out,
+                "hardware_encode": hw_encode,
+                # "encoder" könnte z.B. "libx264"/"libx265" heißen:
+                "encoder": f"lib{container}",  
+                "crf": crf_val,
+                "fps": fps_val,
+                "width": width_val,
+                "preset": preset_val
+            }
+
+            
+            #temp_dir = tempfile.gettempdir()
+            # 6) In unser VGSync-Temp speichern
+            
+            temp_dir = MY_GLOBAL_TMP_DIR
+            json_path = os.path.join(temp_dir, "vg_encoder_job.json")
+            
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump(export_data, f, indent=2)
+
+            #dlg = EncoderDialog(parent=self)
+            #dlg.run_encoding(json_path)
+            #dlg.exec()
+            #self.setWindowTitle("Encoding in progress – please wait…")
+            
+            dlg = EncoderDialog(parent=self)
+            dlg.show()  # ⬅️ Fenster sofort zeigen!
+            QApplication.processEvents()  # ⬅️ wichtig, damit GUI reagiert
+
+            dlg.run_encoding(json_path)  # ⬅️ d
+            
+            
+            return
+        
+            
 
         total_dur = self.real_total_duration
         sum_cuts = self.cut_manager.get_total_cuts()
@@ -4275,6 +4429,7 @@ class MainWindow(QMainWindow):
         js_code = "mapZoomOut();"
         self.map_widget.view.page().runJavaScript(js_code)
 
+
     def ordered_insert_new_point(self,lat: float, lon: float, video_time: float):
         gpx_data = self._gpx_data or []
         t_first = gpx_data[0].get("time", 0) if gpx_data else 0
@@ -4308,3 +4463,4 @@ class MainWindow(QMainWindow):
         gpx_data.insert(insert_pos, new_pt)
     
     
+
