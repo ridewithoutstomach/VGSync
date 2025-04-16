@@ -43,7 +43,8 @@ def _nice_number(value: float) -> float:
 
 class VideoTimelineWidget(QWidget):
     markerMoved = Signal(float)
-
+    overlayRemoveRequested = Signal(float, float)
+    
     def __init__(self, parent=None):
         super().__init__(parent)
         self.total_duration = 0.0
@@ -63,6 +64,25 @@ class VideoTimelineWidget(QWidget):
         self._horizontal_offset = 0
         self._scroll_speed_px = 50
         self.setStyleSheet("background-color: #333333;")
+        self._overlay_intervals = []
+        self.setContextMenuPolicy(Qt.DefaultContextMenu)
+        
+    def add_overlay_interval(self, start_s: float, end_s: float):
+        """
+        Speichert ein Overlay-Zeitintervall, damit wir es in Blau markieren können.
+        """
+        self._overlay_intervals.append((start_s, end_s))
+        self.update()
+
+    def remove_last_overlay_interval(self):
+        if self._overlay_intervals:
+            self._overlay_intervals.pop()
+            self.update()
+
+    def clear_overlay_intervals(self):
+        self._overlay_intervals.clear()
+        self.update()
+    
 
     def set_marker_position(self, time_s: float):
         if self.total_duration <= 0:
@@ -360,3 +380,66 @@ class VideoTimelineWidget(QWidget):
             if rect_width < 1:
                 rect_width = 1
             painter.fillRect(x_start, 0, rect_width, h, brush_black)
+
+        # Zeichnen der Overlay-Intervalle (blau)
+        if self.total_duration > 0 and self._overlay_intervals:
+            brush_blue = QBrush(QColor(0, 0, 255, 80))  # halbtransparentes Blau
+            pen_blue = QPen(QColor("blue"), 2)
+            painter.setPen(pen_blue)
+            painter.setBrush(brush_blue)
+            for (start_s, end_s) in self._overlay_intervals:
+                if end_s <= start_s:
+                    continue
+                start_ratio = start_s / self.total_duration
+                end_ratio   = end_s   / self.total_duration
+                x_start = (start_ratio * timeline_real_width) - self._horizontal_offset
+                x_end   = (end_ratio   * timeline_real_width) - self._horizontal_offset
+                if x_end < -50 or x_start > w+50:
+                    continue
+                rect_w = x_end - x_start
+                if rect_w < 2:
+                    rect_w = 2
+                painter.drawRect(x_start, 0, rect_w, h)
+                
+                    
+
+    def contextMenuEvent(self, event):
+        from PySide6.QtWidgets import QMessageBox
+        # 1) Falls kein Video oder Overlays => Abbruch
+        if self.total_duration <= 0:
+            event.ignore()
+            return
+        w = self.width()
+        if w <= 0:
+            event.ignore()
+            return
+        timeline_real_width = w * self._zoom_factor
+        x_timeline = event.pos().x() + self._horizontal_offset
+        if x_timeline < 0 or x_timeline > timeline_real_width:
+            event.ignore()
+            return
+        ratio = x_timeline / timeline_real_width
+        time_clicked = ratio * self.total_duration
+        # 2) Prüfen, ob time_clicked in einem Overlay-Intervall liegt
+        found_any = False
+        for (start_s, end_s) in self._overlay_intervals:
+            if start_s <= time_clicked <= end_s:
+                found_any = True
+                
+                reply = QMessageBox.question(
+                    None,
+                    "Remove Overlay?",
+                    f"Remove Overlay from {start_s:.1f}s to {end_s:.1f}s?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No
+                )
+                if reply == QMessageBox.Yes:
+                    self.overlayRemoveRequested.emit(start_s, end_s)
+                break
+        if not found_any:
+            event.ignore()
+        else:
+            event.accept()
+
+    
+            
