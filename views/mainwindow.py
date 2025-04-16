@@ -1729,9 +1729,6 @@ class MainWindow(QMainWindow):
        
 
         gpx_data = self._gpx_data
-        if not gpx_data:
-            gpx_data = []
-
         row_selected = self.gpx_widget.gpx_list.table.currentRow()
 
         if self._autoSyncNewPointsWithVideoTime and self.video_editor.is_video_loaded(): #if video loaded, insert a new point at current video time without shift
@@ -1743,9 +1740,10 @@ class MainWindow(QMainWindow):
                 t1 = gpx_data[insert_idx-1]["time"]
                 t2 = gpx_data[insert_idx]["time"]
                 dt = (t2 - t1).total_seconds()
-                prof = self.gpx_control._ask_profile_mode()
-                if prof:
-                    self.gpx_control._close_gaps_mapbox(insert_idx-1, insert_idx, dt, prof)
+                if dt > 2 :
+                    prof = self.gpx_control._ask_profile_mode()
+                    if prof:
+                        self.gpx_control._close_gaps_mapbox(insert_idx-1, insert_idx, dt, prof)
 
         else: #insert with shift
             if idx == -3:
@@ -4458,8 +4456,8 @@ class MainWindow(QMainWindow):
         self.map_widget.view.page().runJavaScript(js_code)
 
     def ordered_insert_new_point(self,lat: float, lon: float, video_time: float) -> int:
-        gpx_data = self._gpx_data or []
-        t_first = gpx_data[0].get("time", 0) if gpx_data else 0
+        gpx_data = self._gpx_data
+        t_first = gpx_data[0].get("time", 0) if gpx_data else datetime.now()  # Fallback, falls Zeit gar nicht existiert
         video_ts = t_first + timedelta(seconds=video_time)
 
         idx = 0
