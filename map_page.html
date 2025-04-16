@@ -534,6 +534,7 @@
                   const [lon, lat] = data.geometry.coordinates;
                   streetCoords = [lon, lat];
                   drawMapillaryCrossMarker(lon, lat);
+                  map.getView().animate({center: ol.proj.fromLonLat(streetCoords), duration: 600});
                 } else {
                   console.warn("No geometry for image", imageId);
                 }
@@ -640,6 +641,9 @@
                 const [lon, lat] = streetCoords;
                 if (channelObj) {
                   channelObj.newPointInserted(lat, lon, -1);
+                  map.getView().animate({center: ol.proj.fromLonLat(streetCoords), duration: 600});
+                } else {
+                  console.warn("No channelObj available."); 
                 }
               } else {
                 console.warn("Image geometry not available.");

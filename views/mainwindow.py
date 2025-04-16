@@ -593,7 +593,8 @@ class MainWindow(QMainWindow):
         # Wenn markRangeCleared (z.B. durch Deselect, Delete, Undo usw.) auftritt:
         self.gpx_widget.gpx_list.markRangeCleared.connect(self.gpx_control.reset_mark_buttons)
         
-        self.gpx_control.deleteClicked.connect(self.gpx_control.on_delete_range_clicked)
+        self.gpx_control.cutClicked.connect(self.gpx_control.on_cut_range_clicked)
+        self.gpx_control.removeClicked.connect(self.gpx_control.on_remove_range_clicked)
         self.gpx_control.undoClicked.connect(self.gpx_control.on_undo_range_clicked)
         
         
@@ -775,9 +776,11 @@ class MainWindow(QMainWindow):
 
         self.map_widget.view.page().runJavaScript("enableVideoMapMode(false);")
 
-        # Update the check state and call handler
+        # Update the check state and call handler of "sync all with video" and "directions"
         self.action_new_pts_video_time.setChecked(False)
         self._on_sync_point_video_time_toggled(False)
+        self.action_map_directions.setChecked(False)
+        self._on_map_directions_toggled(False)
 
 
     def _set_map_video_view(self):
@@ -791,10 +794,11 @@ class MainWindow(QMainWindow):
         self.map_widget.view.page().runJavaScript("enableVideoMapMode(true);")
         self.right_v_layout.update()
 
-        # Update the check state and call handler
+        # Update the check state and call handler of "sync all with video" and "directions"
         self.action_new_pts_video_time.setChecked(True)
         self._on_sync_point_video_time_toggled(True)
-        
+        self.action_map_directions.setChecked(True)
+        self._on_map_directions_toggled(True)
         
     def _on_show_mpv_path(self):
         s = QSettings("VGSync", "VGSync")
@@ -1681,7 +1685,15 @@ class MainWindow(QMainWindow):
         if self._autoSyncNewPointsWithVideoTime and self.video_editor.is_video_loaded(): #if video loaded, insert a new point at current video time without shift
             self.append_gpx_history(gpx_data) #for undo
             video_time = self.video_editor.get_current_position_s()
-            self.ordered_insert_new_point(lat,lon,video_time)
+            insert_idx = self.ordered_insert_new_point(lat,lon,video_time)
+
+            if(insert_idx > 0 and self._directions_enabled):
+                t1 = gpx_data[insert_idx-1]["time"]
+                t2 = gpx_data[insert_idx]["time"]
+                dt = (t2 - t1).total_seconds()
+                prof = self.gpx_control._ask_profile_mode()
+                if prof:
+                    self.gpx_control._close_gaps_mapbox(insert_idx-1, insert_idx, dt, prof)
 
         else: #insert with shift
             if idx == -3:
@@ -1988,26 +2000,7 @@ class MainWindow(QMainWindow):
         self._autoSyncNewPointsWithVideoTime = checked
         self.map_widget.view.page().runJavaScript(f"enableVSyncMode({str(checked).lower()});")
         
-    def on_delete_range_clicked(self):
-        """
-        Wird ausgelöst, wenn der Delete-Button (Mülleimer) 
-        im gpx_control_widget geklickt wurde.
-        => Leitet an die gpx_list weiter.
-        """
-        self.map_widget.view.page().runJavaScript("showLoading('Deleting GPX-Range...');")
-        self.gpx_widget.gpx_list.delete_selected_range()
-        self._update_gpx_overview()
-        self._gpx_data = self.gpx_widget.gpx_list._gpx_data
-        route_geojson = self._build_route_geojson_from_gpx(self._gpx_data)
-        self.map_widget.loadRoute(route_geojson, do_fit=False)
-        self.chart.set_gpx_data(self._gpx_data)
-        
-        if self.mini_chart_widget and self._gpx_data:
-            self.mini_chart_widget.set_gpx_data(self._gpx_data)
-        
-        self.map_widget.view.page().runJavaScript("hideLoading();")
 
-    
     def _update_gpx_overview(self):
         data = self.gpx_widget.gpx_list._gpx_data
         if not data:
@@ -2431,6 +2424,8 @@ class MainWindow(QMainWindow):
             #self.map_widget.show_blue(row_idx)
             self.map_widget.show_blue(row_idx, do_center=True)
             self.chart.highlight_gpx_index(row_idx)
+            if self._autoSyncNewPointsWithVideoTime and self.video_editor.is_video_loaded():
+                self.on_map_sync_any()
 
     def _on_map_pause_clicked(self, index: int):
         """
@@ -4308,7 +4303,7 @@ class MainWindow(QMainWindow):
         js_code = "mapZoomOut();"
         self.map_widget.view.page().runJavaScript(js_code)
 
-    def ordered_insert_new_point(self,lat: float, lon: float, video_time: float):
+    def ordered_insert_new_point(self,lat: float, lon: float, video_time: float) -> int:
         gpx_data = self._gpx_data or []
         t_first = gpx_data[0].get("time", 0) if gpx_data else 0
         video_ts = t_first + timedelta(seconds=video_time)
@@ -4339,5 +4334,6 @@ class MainWindow(QMainWindow):
         if insert_pos > len(gpx_data):
             insert_pos = len(gpx_data)
         gpx_data.insert(insert_pos, new_pt)
+        return insert_pos  # Index des neuen Punktes in gpx_data
     
     

@@ -69,7 +69,8 @@ class GPXControlWidget(QWidget):
     markBClicked = Signal()
     markEClicked = Signal()
     deselectClicked = Signal()  # "x"
-    deleteClicked = Signal()
+    cutClicked = Signal()
+    removeClicked = Signal()
     chTimeClicked = Signal()
     chEleClicked = Signal()
     chPercentClicked = Signal()
@@ -139,15 +140,19 @@ class GPXControlWidget(QWidget):
         self._buttons_layout.addWidget(self.deselect_button)
 
         # 4) Delete
-        self.delete_button = QPushButton("", self)
-        self.delete_button.setToolTip("Delete a marked Point or a marked Area")
-        self.delete_button.setIcon(self.style().standardIcon(QStyle.SP_TrashIcon))
-        self.delete_button.setMinimumWidth(40)
+        self.cut_button = QPushButton("✂️", self)
+        self.cut_button.setToolTip("Cut a marked Area and shift next points time")
+        self.cut_button.setMinimumWidth(20)
         
-        self.delete_button.clicked.connect(self.deleteClicked.emit)
-        self._buttons_layout.addWidget(self.delete_button)
+        self.cut_button.clicked.connect(self.cutClicked.emit)
+        self._buttons_layout.addWidget(self.cut_button)
         
+        self.minus_button = QPushButton("➖", self)
+        self.minus_button.setToolTip("Remove a marked Area without time shift")
+        self.minus_button.setMinimumWidth(20)
         
+        self.minus_button.clicked.connect(self.removeClicked.emit)
+        self._buttons_layout.addWidget(self.minus_button)
         
 
         # 5) chTime
@@ -604,6 +609,9 @@ class GPXControlWidget(QWidget):
         if mw.mini_chart_widget:
             mw.mini_chart_widget.set_gpx_data(gpx_data)
 
+        mw.gpx_widget.gpx_list.clear_marked_range()
+        mw.map_widget.clear_marked_range()
+
         # 7) Map => reload
         #route_geojson = mw._build_route_geojson_from_gpx(gpx_data)
         #mw.map_widget.loadRoute(route_geojson, do_fit=False)
@@ -926,7 +934,7 @@ class GPXControlWidget(QWidget):
         """
         self.markE_button.setVisible(visible)    
     
-    def on_delete_range_clicked(self):
+    def _process_delete_points(self,shift_next: bool = True):
         """
         Wird ausgelöst, wenn der Delete-Button (Mülleimer) 
         im gpx_control_widget geklickt wurde.
@@ -934,7 +942,7 @@ class GPXControlWidget(QWidget):
         """
         mw = self._mainwindow
         mw.map_widget.view.page().runJavaScript("showLoading('Deleting GPX-Range...');")
-        mw.gpx_widget.gpx_list.delete_selected_range()
+        mw.gpx_widget.gpx_list.delete_selected_range(shift_next)
         mw._update_gpx_overview()
         mw._gpx_data = mw.gpx_widget.gpx_list._gpx_data
         route_geojson = mw._build_route_geojson_from_gpx(mw._gpx_data)
@@ -945,6 +953,12 @@ class GPXControlWidget(QWidget):
             mw.mini_chart_widget.set_gpx_data(mw._gpx_data)
         
         mw.map_widget.view.page().runJavaScript("hideLoading();")
+
+    def on_cut_range_clicked(self):
+       self._process_delete_points(True)
+
+    def on_remove_range_clicked(self):
+       self._process_delete_points(False)
         
         
     def on_undo_range_clicked(self):
