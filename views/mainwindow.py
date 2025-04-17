@@ -68,7 +68,7 @@ from PySide6.QtWidgets import QLineEdit, QDialogButtonBox
 
 from .encoder_setup_dialog import EncoderSetupDialog  # Import Dialog
 
-from config import TMP_KEYFRAME_DIR, MY_GLOBAL_TMP_DIR
+from config import TMP_KEYFRAME_DIR, MY_GLOBAL_TMP_DIR, is_soft_opengl_enabled, set_soft_opengl_enabled
 
 from widgets.video_editor_widget import VideoEditorWidget
 from widgets.video_timeline_widget import VideoTimelineWidget
@@ -464,7 +464,7 @@ class MainWindow(QMainWindow):
                 
         self.action_enable_soft_opengl = QAction("Use sofware OpenGL", self)
         self.action_enable_soft_opengl.setCheckable(True)
-        self.action_enable_soft_opengl.setChecked(False)  # Standard = OFF
+        self.action_enable_soft_opengl.setChecked(config.is_soft_opengl_enabled())  
         self.action_enable_soft_opengl.triggered.connect(self._on_enable_soft_opengl_toggled)
         setup_menu.addAction(self.action_enable_soft_opengl)
         
@@ -2056,7 +2056,7 @@ class MainWindow(QMainWindow):
         
     def _on_enable_soft_opengl_toggled(self, checked: bool):
         config.set_soft_opengl_enabled(checked)
-        QMessageBox.information(self,"Please restart the application to apply the changes.")   
+        QMessageBox.information(self,"Restart needed","Please restart the application to apply the changes.")   
 
     def _update_gpx_overview(self):
         data = self.gpx_widget.gpx_list._gpx_data

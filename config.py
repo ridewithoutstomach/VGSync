@@ -172,17 +172,10 @@ def clear_temp_directories():
         os.makedirs(tmp_dir, exist_ok=True)  # Neu anlegen, falls nötig        
 
 def set_soft_opengl_enabled(enabled: bool):
-    """
-    Schreibt in QSettings, ob 'video/editEnabled' True/False ist.
-    """
     s = QSettings("VGSync", "VGSync")
     s.setValue("softOpenGLEnabled", enabled)
 
 def is_soft_opengl_enabled() -> bool:
-    """
-    Liest aus QSettings (Firma=VGSync, App=VGSync) den Bool-Wert 'disclaimerAccepted'.
-    Default = False, falls nicht vorhanden.
-    """
     s = QSettings("VGSync", "VGSync")
     val = s.value("softOpenGLEnabled", False, type=bool)
     return val
