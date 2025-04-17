@@ -334,12 +334,6 @@ class MainWindow(QMainWindow):
         self.action_auto_sync_video.triggered.connect(self._on_auto_sync_video_toggled)
         setup_menu.addAction(self.action_auto_sync_video)
         
-        self.action_new_pts_video_time = QAction("Sync all with video", self)
-        self.action_new_pts_video_time.setCheckable(True)
-        self.action_new_pts_video_time.setChecked(False)  # Standard = OFF
-        self.action_new_pts_video_time.triggered.connect(self._on_sync_point_video_time_toggled)
-        setup_menu.addAction(self.action_new_pts_video_time)
-        
         timer_menu = setup_menu.addMenu("Time: Final/Glogal")
 
         self.timer_action_group = QActionGroup(self)
@@ -462,7 +456,11 @@ class MainWindow(QMainWindow):
         action_set_mapbox_key.triggered.connect(self._on_set_mapbox_key)
         mapviews_menu.addAction(action_set_mapbox_key)
         
-
+        self.action_new_pts_video_time = QAction("Sync all with video", self)
+        self.action_new_pts_video_time.setCheckable(True)
+        self.action_new_pts_video_time.setChecked(False)  # Standard = OFF
+        self.action_new_pts_video_time.triggered.connect(self._on_sync_point_video_time_toggled)
+        setup_menu.addAction(self.action_new_pts_video_time)
                 
         
         reset_config_action = QAction("Reset Config", self)
