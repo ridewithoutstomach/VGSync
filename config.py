@@ -30,12 +30,10 @@ from PySide6.QtCore import QSettings
 # 1) Versions-Konfiguration & Modus
 ##############################################################################
 
-APP_VERSION = "3.28"
+APP_VERSION = "3.29"
 
-# Falls du nur über den Server prüfen willst, ob diese APP_VERSION freigegeben ist,
-# setze das hier auf True.
-# => Dann wird KEINE license.lic geladen (egal ob vorhanden).
-SERVER_VERSION_CHECK_ONLY = False
+
+#SERVER_VERSION_CHECK_ONLY = False
 
 ##############################################################################
 # 2) Hilfsfunktionen/Pfade
