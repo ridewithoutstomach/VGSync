@@ -68,7 +68,7 @@ from PySide6.QtWidgets import QLineEdit, QDialogButtonBox
 
 from .encoder_setup_dialog import EncoderSetupDialog  # Import Dialog
 
-from config import TMP_KEYFRAME_DIR, MY_GLOBAL_TMP_DIR
+from config import TMP_KEYFRAME_DIR, MY_GLOBAL_TMP_DIR, is_soft_opengl_enabled, set_soft_opengl_enabled
 
 from widgets.video_editor_widget import VideoEditorWidget
 from widgets.video_timeline_widget import VideoTimelineWidget
@@ -124,6 +124,7 @@ class MainWindow(QMainWindow):
         
         self._video_at_end = False   # Merker, ob wir wirklich am Ende sind
         self._autoSyncVideoEnabled = False
+        self._autoSyncNewPointsWithVideoTime = False
         self.user_wants_editing = user_wants_editing
         
         
@@ -159,7 +160,6 @@ class MainWindow(QMainWindow):
         menubar = self.menuBar()
         file_menu = menubar.addMenu("File")
         self.playlist_menu = menubar.addMenu("Playlist")
-        view_menu = menubar.addMenu("Detach")
         
         load_gpx_action = QAction("Open GPX", self)
         load_gpx_action.triggered.connect(self.load_gpx_file)
@@ -175,6 +175,21 @@ class MainWindow(QMainWindow):
         file_menu.addAction(dummy_action)
         dummy_action.triggered.connect(self._on_new_project_triggered)
         
+        view_menu = menubar.addMenu("View")
+
+        classic_view_action = view_menu.addAction("Edit mode")
+        classic_view_action.triggered.connect(self._set_classic_view)
+
+        gpx_create_mode_action = view_menu.addAction("Create mode")
+        gpx_create_mode_action.triggered.connect(self._set_map_video_view)
+
+        self.action_toggle_video = QAction("Video (detach)", self)
+        self.action_toggle_video.triggered.connect(self._toggle_video)
+        view_menu.addAction(self.action_toggle_video)
+
+        self.action_toggle_map = QAction("Map (detach)", self)
+        self.action_toggle_map.triggered.connect(self._toggle_map)
+        view_menu.addAction(self.action_toggle_map)
         
         
         setup_menu = menubar.addMenu("Config")
@@ -229,7 +244,6 @@ class MainWindow(QMainWindow):
         self.action_auto_sync_video.setChecked(False)  # Standard = OFF
         self.action_auto_sync_video.triggered.connect(self._on_auto_sync_video_toggled)
         setup_menu.addAction(self.action_auto_sync_video)
-        
         
         timer_menu = setup_menu.addMenu("Time: Final/Glogal")
 
@@ -353,13 +367,23 @@ class MainWindow(QMainWindow):
         action_set_mapbox_key.triggered.connect(self._on_set_mapbox_key)
         mapviews_menu.addAction(action_set_mapbox_key)
         
-
+        self.action_new_pts_video_time = QAction("Sync all with video", self)
+        self.action_new_pts_video_time.setCheckable(True)
+        self.action_new_pts_video_time.setChecked(False)  # Standard = OFF
+        self.action_new_pts_video_time.triggered.connect(self._on_sync_point_video_time_toggled)
+        setup_menu.addAction(self.action_new_pts_video_time)
                 
+        self.action_enable_soft_opengl = QAction("Use sofware OpenGL", self)
+        self.action_enable_soft_opengl.setCheckable(True)
+        self.action_enable_soft_opengl.setChecked(config.is_soft_opengl_enabled())  
+        self.action_enable_soft_opengl.triggered.connect(self._on_enable_soft_opengl_toggled)
+        setup_menu.addAction(self.action_enable_soft_opengl)
         
         reset_config_action = QAction("Reset Config", self)
         reset_config_action.triggered.connect(self._on_reset_config_triggered)
         setup_menu.addAction(reset_config_action)
         
+
         info_menu = menubar.addMenu("Info")
         
         copyright_action = info_menu.addAction("Copyright + License")
@@ -385,17 +409,7 @@ class MainWindow(QMainWindow):
         self.action_final_time.triggered.connect(self._on_timer_mode_changed)
         self._time_mode = "global"
 
-        self.action_toggle_video = QAction("Video (detach)", self)
-        self.action_toggle_video.triggered.connect(self._toggle_video)
-        view_menu.addAction(self.action_toggle_video)
 
-        self.action_toggle_map = QAction("Map (detach)", self)
-        self.action_toggle_map.triggered.connect(self._toggle_map)
-        view_menu.addAction(self.action_toggle_map)
-
-
-
-        
         
         # ========================= Zentrales Layout =========================
         #
@@ -457,39 +471,37 @@ class MainWindow(QMainWindow):
         
         # Unten: Map (50%)
         self.map_widget = MapWidget(mainwindow=self, parent=None)
-        #self.map_widget.view.loadFinished.connect(self._on_map_page_loaded)   
-        
         self.left_v_layout.addWidget(self.map_widget, stretch=1)
         
         # ============== Rechte Spalte (Chart + GPX) ==============
         #
         right_column_widget = QWidget()
-        right_v_layout = QVBoxLayout(right_column_widget)
-        right_v_layout.setContentsMargins(0, 0, 0, 0)
-        right_v_layout.setSpacing(0)
+        self.right_v_layout = QVBoxLayout(right_column_widget)
+        self.right_v_layout.setContentsMargins(0, 0, 0, 0)
+        self.right_v_layout.setSpacing(0)
         
         # Oben: Chart (40%) => Stretch 2
         self.chart = ChartWidget()
-        right_v_layout.addWidget(self.chart, stretch=2)
+        self.right_v_layout.addWidget(self.chart, stretch=2)
         
                 
         
         # Unten: 60% => gpx_control (10%), gpx_list (50%)
-        bottom_right_widget = QWidget()
-        bottom_right_layout = QVBoxLayout(bottom_right_widget)
-        bottom_right_layout.setContentsMargins(0, 0, 0, 0)
-        bottom_right_layout.setSpacing(0)
+        self.bottom_right_widget = QWidget()
+        self.bottom_right_layout = QVBoxLayout(self.bottom_right_widget)
+        self.bottom_right_layout.setContentsMargins(0, 0, 0, 0)
+        self.bottom_right_layout.setSpacing(0)
         
         self.gpx_control = GPXControlWidget()
-        bottom_right_layout.addWidget(self.gpx_control, stretch=1)
+        self.bottom_right_layout.addWidget(self.gpx_control, stretch=1)
         
         
         self.gpx_widget = GPXWidget()
         
         
         
-        bottom_right_layout.addWidget(self.gpx_widget, stretch=5)
-        right_v_layout.addWidget(bottom_right_widget, stretch=3)
+        self.bottom_right_layout.addWidget(self.gpx_widget, stretch=5)
+        self.right_v_layout.addWidget(self.bottom_right_widget, stretch=3)
         
         #
         # ============== QSplitter (horizontal) ==============
@@ -538,7 +550,8 @@ class MainWindow(QMainWindow):
         # Wenn markRangeCleared (z.B. durch Deselect, Delete, Undo usw.) auftritt:
         self.gpx_widget.gpx_list.markRangeCleared.connect(self.gpx_control.reset_mark_buttons)
         
-        self.gpx_control.deleteClicked.connect(self.gpx_control.on_delete_range_clicked)
+        self.gpx_control.cutClicked.connect(self.gpx_control.on_cut_range_clicked)
+        self.gpx_control.removeClicked.connect(self.gpx_control.on_remove_range_clicked)
         self.gpx_control.undoClicked.connect(self.gpx_control.on_undo_range_clicked)
         
         
@@ -718,10 +731,39 @@ class MainWindow(QMainWindow):
 
         QDesktopServices.openUrl(QUrl.fromLocalFile(pdf_path))    
     
-        
-        
-        
-        
+    def _set_classic_view(self):
+        self.left_v_layout.addWidget(self.map_widget, stretch=1)
+        self.map_widget.setParent(self.left_v_layout.parentWidget())
+        self.map_widget.show()
+
+        self.chart.show()
+        self.bottom_right_widget.show()
+
+        self.map_widget.view.page().runJavaScript("enableVideoMapMode(false);")
+
+        # Update the check state and call handler of "sync all with video" and "directions"
+        self.action_new_pts_video_time.setChecked(False)
+        self._on_sync_point_video_time_toggled(False)
+        self.action_map_directions.setChecked(False)
+        self._on_map_directions_toggled(False)
+
+
+    def _set_map_video_view(self):
+        self.right_v_layout.removeWidget(self.chart)
+        self.chart.hide()
+
+        self.right_v_layout.removeWidget(self.bottom_right_widget)
+        self.bottom_right_widget.hide()
+
+        self.right_v_layout.addWidget(self.map_widget, stretch=1)
+        self.map_widget.view.page().runJavaScript("enableVideoMapMode(true);")
+        self.right_v_layout.update()
+
+        # Update the check state and call handler of "sync all with video" and "directions"
+        self.action_new_pts_video_time.setChecked(True)
+        self._on_sync_point_video_time_toggled(True)
+        self.action_map_directions.setChecked(True)
+        self._on_map_directions_toggled(True)
         
     def _on_show_mpv_path(self):
         s = QSettings("VGSync", "VGSync")
@@ -1529,6 +1571,7 @@ class MainWindow(QMainWindow):
         
         - lat, lon: Koordinaten des neu eingefügten Punktes
         - idx: Kann sein:
+            - -3 => kein Punkt selektiert (also "vor dem ersten" GPX-Punkt)
             - -2 => Punkt VOR dem ersten
             - -1 => Punkt HINTER dem letzten
             - >=0 => Punkt zwischen idx und idx+1 (also 'zwischen zwei vorhandenen GPX-Punkten').
@@ -1546,156 +1589,175 @@ class MainWindow(QMainWindow):
        
 
         gpx_data = self._gpx_data
-        if not gpx_data:
-            gpx_data = []
-    
-        # --- NEU: Falls Directions aktiv und es ist eindeutig "erster" oder "letzter" Punkt selektiert ---
-        if self._directions_enabled:
-            # Prüfen, welcher GPX-Punkt in der Liste selektiert ist
-            row_selected = self.gpx_widget.gpx_list.table.currentRow()
-            n = len(gpx_data)
+        row_selected = self.gpx_widget.gpx_list.table.currentRow()
 
-            if row_selected >= 0 and n > 0:
-                is_first = (row_selected == 0)
-                is_last  = (row_selected == n-1)
+        if self._autoSyncNewPointsWithVideoTime and self.video_editor.is_video_loaded(): #if video loaded, insert a new point at current video time without shift
+            self.append_gpx_history(gpx_data) #for undo
+            video_time = self.video_editor.get_current_position_s()
+            insert_idx = self.ordered_insert_new_point(lat,lon,video_time)
 
-                if is_last:
-                    # => Wir wollen unbedingt ans Ende anfügen
-                    idx = -1
-                    # (markB=letzter, markE=neuer => B->E => "append")
-                elif is_first:
-                    # => Vor dem ersten einfügen
-                    idx = -2
-                    # (markE=erster, markB=neuer => B->E => "prepend")
-                # Falls weder erster noch letzter => idx bleibt wie vom JS gesendet (z.B. -1 oder "zwischen")
-    
-        # --- Nun das "alte" Einfüge-Verhalten ---
-        # Undo-Snapshot
-        old_data = copy.deepcopy(gpx_data)
-        self.gpx_widget.gpx_list._history_stack.append(old_data)
+            if(insert_idx > 0 and self._directions_enabled):
+                t1 = gpx_data[insert_idx-1]["time"]
+                t2 = gpx_data[insert_idx]["time"]
+                dt = (t2 - t1).total_seconds()
+                if dt > 2 :
+                    prof = self.gpx_control._ask_profile_mode()
+                    if prof:
+                        self.gpx_control._close_gaps_mapbox(insert_idx-1, insert_idx, dt, prof)
 
-        now = datetime.now()  # Fallback, falls Zeit gar nicht existiert
+        else: #insert with shift
+            if idx == -3:
+                QMessageBox.information(
+                self,
+                "No point selected",
+                "No point selected ⇒ cannot insert new point."
+            )
+                
+            # --- NEU: Falls Directions aktiv und es ist eindeutig "erster" oder "letzter" Punkt selektiert ---
+            if self._directions_enabled:
+                # Prüfen, welcher GPX-Punkt in der Liste selektiert ist
+                n = len(gpx_data)
 
-        if idx == -2:
-            # =============== Punkt VOR dem ersten einfügen ===============
-            if not gpx_data:
-                # Noch gar nichts drin => erster Punkt
-                new_pt = {
-                    "lat": lat,
-                    "lon": lon,
-                    "ele": 0.0,
-                    "time": now,
-                    "delta_m": 0.0,
-                    "speed_kmh": 0.0,
-                    "gradient": 0.0,
-                    "rel_s": 0.0
-                }
-                gpx_data.append(new_pt)
+                if row_selected >= 0 and n > 0:
+                    is_first = (row_selected == 0)
+                    is_last  = (row_selected == n-1)
+
+                    if is_last:
+                        # => Wir wollen unbedingt ans Ende anfügen
+                        idx = -1
+                        # (markB=letzter, markE=neuer => B->E => "append")
+                    elif is_first:
+                        # => Vor dem ersten einfügen
+                        idx = -2
+                        # (markE=erster, markB=neuer => B->E => "prepend")
+                    # Falls weder erster noch letzter => idx bleibt wie vom JS gesendet (z.B. -1 oder "zwischen")
+        
+            # --- Nun das "alte" Einfüge-Verhalten ---
+            # Undo-Snapshot
+            self.append_gpx_history(gpx_data)
+
+            now = datetime.now()  # Fallback, falls Zeit gar nicht existiert
+
+            if idx == -2:
+                # =============== Punkt VOR dem ersten einfügen ===============
+                if not gpx_data:
+                    # Noch gar nichts drin => erster Punkt
+                    new_pt = {
+                        "lat": lat,
+                        "lon": lon,
+                        "ele": 0.0,
+                        "time": now,
+                        "delta_m": 0.0,
+                        "speed_kmh": 0.0,
+                        "gradient": 0.0,
+                        "rel_s": 0.0
+                    }
+                    gpx_data.append(new_pt)
+                else:
+                    t_first = gpx_data[0]["time"]
+                    if not t_first:
+                        t_first = now
+                    # NEUEN Punkt "vorne" einfügen => 
+                    # wir geben ihm dieselbe Zeit wie den alten ersten oder 1s davor
+                    new_time = t_first  # oder t_first - timedelta(seconds=1)
+                    new_pt = {
+                        "lat": lat,
+                        "lon": lon,
+                        "ele": gpx_data[0].get("ele", 0.0),
+                        "time": new_time,
+                        "delta_m": 0.0,
+                        "speed_kmh": 0.0,
+                        "gradient": 0.0,
+                        "rel_s": 0.0
+                    }
+                    gpx_data.insert(0, new_pt)
+        
+                    # jetzt alle nachfolgenden +1s verschieben
+                    for i in range(1, len(gpx_data)):
+                            oldt = gpx_data[i]["time"]
+                            if oldt:
+                                gpx_data[i]["time"] = oldt + timedelta(seconds=1)
+                    
+            elif idx == -1:
+                # =============== Punkt NACH dem letzten einfügen ===============
+                if not gpx_data:
+                    # ganz leer => erster Punkt
+                    new_pt = {
+                        "lat": lat,
+                        "lon": lon,
+                        "ele": 0.0,
+                        "time": now,
+                        "delta_m": 0.0,
+                        "speed_kmh": 0.0,
+                        "gradient": 0.0,
+                        "rel_s": 0.0
+                    }
+                    gpx_data.append(new_pt)
+                else:
+                    last_pt = gpx_data[-1]
+                    t_last = last_pt.get("time")
+                    if not t_last:
+                        t_last = now
+                    new_time = t_last + timedelta(seconds=1)
+                    new_pt = {
+                        "lat": lat,
+                        "lon": lon,
+                        "ele": last_pt.get("ele", 0.0),
+                        "time": new_time, 
+                        "delta_m": 0.0,
+                        "speed_kmh": 0.0,
+                        "gradient": 0.0,
+                        "rel_s": 0.0
+                    }
+                    gpx_data.append(new_pt)
+        
             else:
-                t_first = gpx_data[0]["time"]
-                if not t_first:
-                    t_first = now
-                # NEUEN Punkt "vorne" einfügen => 
-                # wir geben ihm dieselbe Zeit wie den alten ersten oder 1s davor
-                new_time = t_first  # oder t_first - timedelta(seconds=1)
-                new_pt = {
-                    "lat": lat,
-                    "lon": lon,
-                    "ele": gpx_data[0].get("ele", 0.0),
-                    "time": new_time,
-                    "delta_m": 0.0,
-                    "speed_kmh": 0.0,
-                    "gradient": 0.0,
-                    "rel_s": 0.0
-                }
-                gpx_data.insert(0, new_pt)
-    
-                # jetzt alle nachfolgenden +1s verschieben
-                for i in range(1, len(gpx_data)):
-                    oldt = gpx_data[i]["time"]
-                    if oldt:
-                        gpx_data[i]["time"] = oldt + timedelta(seconds=1)
+                # =============== Punkt "zwischen" idx..idx+1 einfügen ===============
+                if idx < 0:
+                    idx = 0
+                if idx >= len(gpx_data):
+                    idx = len(gpx_data) -1  # safety
 
-        elif idx == -1:
-            # =============== Punkt NACH dem letzten einfügen ===============
-            if not gpx_data:
-                # ganz leer => erster Punkt
-                new_pt = {
-                    "lat": lat,
-                    "lon": lon,
-                    "ele": 0.0,
-                    "time": now,
-                    "delta_m": 0.0,
-                    "speed_kmh": 0.0,
-                    "gradient": 0.0,
-                    "rel_s": 0.0
-                }
-                gpx_data.append(new_pt)
-            else:
-                last_pt = gpx_data[-1]
-                t_last = last_pt.get("time")
-                if not t_last:
-                    t_last = now
-                new_time = t_last + timedelta(seconds=1)
-                new_pt = {
-                    "lat": lat,
-                    "lon": lon,
-                    "ele": last_pt.get("ele", 0.0),
-                    "time": new_time,
-                    "delta_m": 0.0,
-                    "speed_kmh": 0.0,
-                    "gradient": 0.0,
-                    "rel_s": 0.0
-                }
-                gpx_data.append(new_pt)
-    
-        else:
-            # =============== Punkt "zwischen" idx..idx+1 einfügen ===============
-            if idx < 0:
-                idx = 0
-            if idx >= len(gpx_data):
-                idx = len(gpx_data) -1  # safety
+                if not gpx_data:
+                    # Falls wirklich nix da => wie "ende"
+                    new_pt = {
+                        "lat": lat,
+                        "lon": lon,
+                        "ele": 0.0,
+                        "time": now,
+                        "delta_m": 0.0,
+                        "speed_kmh": 0.0,
+                        "gradient": 0.0,
+                        "rel_s": 0.0
+                    }
+                    gpx_data.append(new_pt)
+                else:
+                    base_pt = gpx_data[idx]
+                    t_base = base_pt.get("time")
+                    if not t_base:
+                        t_base = now
+                    new_time = t_base + timedelta(seconds=1)
 
-            if not gpx_data:
-                # Falls wirklich nix da => wie "ende"
-                new_pt = {
-                    "lat": lat,
-                    "lon": lon,
-                    "ele": 0.0,
-                    "time": now,
-                    "delta_m": 0.0,
-                    "speed_kmh": 0.0,
-                    "gradient": 0.0,
-                    "rel_s": 0.0
-                }
-                gpx_data.append(new_pt)
-            else:
-                base_pt = gpx_data[idx]
-                t_base = base_pt.get("time")
-                if not t_base:
-                    t_base = now
-                new_time = t_base + timedelta(seconds=1)
+                    new_pt = {
+                        "lat": lat,
+                        "lon": lon,
+                        "ele": base_pt.get("ele", 0.0),
+                        "time": new_time,
+                        "delta_m": 0.0,
+                        "speed_kmh": 0.0,
+                        "gradient": 0.0,
+                        "rel_s": 0.0
+                    }
+                    insert_pos = idx + 1
+                    if insert_pos > len(gpx_data):
+                        insert_pos = len(gpx_data)
+                    gpx_data.insert(insert_pos, new_pt)
 
-                new_pt = {
-                    "lat": lat,
-                    "lon": lon,
-                    "ele": base_pt.get("ele", 0.0),
-                    "time": new_time,
-                    "delta_m": 0.0,
-                    "speed_kmh": 0.0,
-                    "gradient": 0.0,
-                    "rel_s": 0.0
-                }
-                insert_pos = idx + 1
-                if insert_pos > len(gpx_data):
-                    insert_pos = len(gpx_data)
-                gpx_data.insert(insert_pos, new_pt)
-
-                # alle folgenden => +1s
-                for j in range(insert_pos+1, len(gpx_data)):
-                    t_old = gpx_data[j].get("time")
-                    if t_old:
-                        gpx_data[j]["time"] = t_old + timedelta(seconds=1)
+                    # alle folgenden => +1s
+                    for j in range(insert_pos+1, len(gpx_data)):
+                            t_old = gpx_data[j].get("time")
+                            if t_old:
+                                gpx_data[j]["time"] = t_old + timedelta(seconds=1)      
 
         #  => recalc
         recalc_gpx_data(gpx_data)
@@ -1713,7 +1775,9 @@ class MainWindow(QMainWindow):
 
         print(f"[INFO] Inserted new GPX point (DirectionsEnabled={self._directions_enabled}); total now {len(gpx_data)} pts.")
 
-                
+    def append_gpx_history(self, gpx_data: list):
+        old_data = copy.deepcopy(gpx_data)
+        self.gpx_widget.gpx_list._history_stack.append(old_data)            
             
     ####################################################################
     def _on_reset_config_triggered(self):
@@ -1842,27 +1906,15 @@ class MainWindow(QMainWindow):
                 video_edit_on=self.action_edit_video.isChecked(),
                 auto_sync_on=checked
             )
+            
+    def _on_sync_point_video_time_toggled(self, checked: bool):
+        self._autoSyncNewPointsWithVideoTime = checked
+        self.map_widget.view.page().runJavaScript(f"enableVSyncMode({str(checked).lower()});")
         
-    def on_delete_range_clicked(self):
-        """
-        Wird ausgelöst, wenn der Delete-Button (Mülleimer) 
-        im gpx_control_widget geklickt wurde.
-        => Leitet an die gpx_list weiter.
-        """
-        self.map_widget.view.page().runJavaScript("showLoading('Deleting GPX-Range...');")
-        self.gpx_widget.gpx_list.delete_selected_range()
-        self._update_gpx_overview()
-        self._gpx_data = self.gpx_widget.gpx_list._gpx_data
-        route_geojson = self._build_route_geojson_from_gpx(self._gpx_data)
-        self.map_widget.loadRoute(route_geojson, do_fit=False)
-        self.chart.set_gpx_data(self._gpx_data)
-        
-        if self.mini_chart_widget and self._gpx_data:
-            self.mini_chart_widget.set_gpx_data(self._gpx_data)
-        
-        self.map_widget.view.page().runJavaScript("hideLoading();")
+    def _on_enable_soft_opengl_toggled(self, checked: bool):
+        config.set_soft_opengl_enabled(checked)
+        QMessageBox.information(self,"Restart needed","Please restart the application to apply the changes.")   
 
-    
     def _update_gpx_overview(self):
         data = self.gpx_widget.gpx_list._gpx_data
         if not data:
@@ -2286,6 +2338,8 @@ class MainWindow(QMainWindow):
             #self.map_widget.show_blue(row_idx)
             self.map_widget.show_blue(row_idx, do_center=True)
             self.chart.highlight_gpx_index(row_idx)
+            if self._autoSyncNewPointsWithVideoTime and self.video_editor.is_video_loaded():
+                self.on_map_sync_any()
 
     def _on_map_pause_clicked(self, index: int):
         """
@@ -4263,4 +4317,39 @@ class MainWindow(QMainWindow):
     def _on_map_minus(self):
         js_code = "mapZoomOut();"
         self.map_widget.view.page().runJavaScript(js_code)
-        
+
+    def ordered_insert_new_point(self,lat: float, lon: float, video_time: float) -> int:
+        gpx_data = self._gpx_data
+        t_first = gpx_data[0].get("time", 0) if gpx_data else datetime.now()  # Fallback, falls Zeit gar nicht existiert
+        video_ts = t_first + timedelta(seconds=video_time)
+
+        idx = 0
+        for i in range(0, len(gpx_data)):
+            if (gpx_data[i].get("time") > video_ts):
+                break
+            else:
+                idx = i
+
+        ele = 0
+        if idx > 0:
+            base_pt = gpx_data[idx]
+            ele = base_pt.get("ele", 0.0)
+
+        new_pt = {
+            "lat": lat,
+            "lon": lon,
+            "ele": ele,
+            "time": video_ts,
+            "delta_m": 0.0,
+            "speed_kmh": 0.0,
+            "gradient": 0.0,
+            "rel_s": 0.0
+        }
+        insert_pos = idx + 1
+        if insert_pos > len(gpx_data):
+            insert_pos = len(gpx_data)
+        gpx_data.insert(insert_pos, new_pt)
+        return insert_pos  # Index des neuen Punktes in gpx_data
+    
+    
+

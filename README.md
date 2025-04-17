@@ -2,7 +2,7 @@
 
 VGSync is a Python-based desktop application designed to synchronize GPX data with video footage. It uses `mpv` for high-precision video playback and `ffmpeg` for media processing.
 
-- Version: 3.27
+- Version: see Releases
 - Platform: Windows 64-bit only
 - License: GNU General Public License v3.0 or later (GPL-3.0-or-later)
 
@@ -16,6 +16,8 @@ VGSync is a Python-based desktop application designed to synchronize GPX data wi
 
 > Binaries are **not included in the Git repository** due to size limitations.  
 > You must download and extract them manually from the GitHub [Releases](https://github.com/ridewithoutstomach/VGSync/releases).
+
+- Fill Mapillary token in config.js (specific to the app), to create a new one: https://www.mapillary.com/dashboard/developers
 
 ---
 
