@@ -462,6 +462,11 @@ class MainWindow(QMainWindow):
         self.action_new_pts_video_time.triggered.connect(self._on_sync_point_video_time_toggled)
         setup_menu.addAction(self.action_new_pts_video_time)
                 
+        self.action_enable_soft_opengl = QAction("Use sofware OpenGL", self)
+        self.action_enable_soft_opengl.setCheckable(True)
+        self.action_enable_soft_opengl.setChecked(False)  # Standard = OFF
+        self.action_enable_soft_opengl.triggered.connect(self._on_enable_soft_opengl_toggled)
+        setup_menu.addAction(self.action_enable_soft_opengl)
         
         reset_config_action = QAction("Reset Config", self)
         reset_config_action.triggered.connect(self._on_reset_config_triggered)
@@ -2049,6 +2054,9 @@ class MainWindow(QMainWindow):
         self._autoSyncNewPointsWithVideoTime = checked
         self.map_widget.view.page().runJavaScript(f"enableVSyncMode({str(checked).lower()});")
         
+    def _on_enable_soft_opengl_toggled(self, checked: bool):
+        config.set_soft_opengl_enabled(checked)
+        QMessageBox.information(self,"Please restart the application to apply the changes.")   
 
     def _update_gpx_overview(self):
         data = self.gpx_widget.gpx_list._gpx_data
