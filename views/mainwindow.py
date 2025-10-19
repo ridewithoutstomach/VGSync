@@ -700,6 +700,26 @@ class MainWindow(QMainWindow):
         self.action_auto_sync_video.triggered.connect(self._on_auto_sync_video_toggled)
         setup_menu.addAction(self.action_auto_sync_video)
         
+        player_setup_menu = setup_menu.addMenu("Player-Setup")
+
+        # "Show Endcut" Option (standardmäßig an)
+        self.action_show_endcut = QAction("Show Endcut", self)
+        self.action_show_endcut.setStatusTip("Automatically jump to real end when endcut is detected")
+        self.action_show_endcut.setCheckable(True)
+        self.action_show_endcut.setChecked(True)  # Standard: an
+        self.action_show_endcut.triggered.connect(self._on_show_endcut_toggled)
+        player_setup_menu.addAction(self.action_show_endcut)
+
+        # "Show Endcut Warning" Option (standardmäßig an)
+        self.action_show_endcut_warning = QAction("Show Endcut Warning", self)
+        self.action_show_endcut_warning.setStatusTip("Show popup warning when endcut is detected")
+        self.action_show_endcut_warning.setCheckable(True)
+        self.action_show_endcut_warning.setChecked(True)  # Standard: an
+        self.action_show_endcut_warning.triggered.connect(self._on_show_endcut_warning_toggled)
+        player_setup_menu.addAction(self.action_show_endcut_warning)
+        
+        
+        
         timer_menu = setup_menu.addMenu("Time: Final/Glogal")
         
         self.timer_action_group = QActionGroup(self)
@@ -896,6 +916,10 @@ class MainWindow(QMainWindow):
         docs_action.triggered.connect(self._on_show_documentation)
         help_menu.addAction(docs_action)
         
+        tutorials_action = QAction("Youtube-Tutorials", self)
+        tutorials_action.setStatusTip("Open KVRouite YouTube channel with tutorials")
+        tutorials_action.triggered.connect(self._on_open_tutorials)
+        help_menu.addAction(tutorials_action)
         
         self.action_global_time.setChecked(True)
         timer_menu.addAction(self.action_global_time)
@@ -905,6 +929,8 @@ class MainWindow(QMainWindow):
         self.action_final_time.triggered.connect(self._on_timer_mode_changed)
         self._time_mode = "global"
 
+
+        self._load_player_settings()
 
         
         # ========================= Zentrales Layout =========================
@@ -4883,70 +4909,125 @@ class MainWindow(QMainWindow):
     def check_and_handle_video_end(self):
         """
         Überprüft, ob das Video das Ende erreicht hat und setzt den Zustand korrekt zurück.
-        Wird regelmäßig aufgerufen, um das Ende zu erkennen.
         """
+        # Debug-Ausgabe zur Überprüfung
+        # print(f"[DEBUG] check_and_handle_video_end: is_playing={self.video_editor.is_playing}")
+        
         if self.video_editor.is_playing:
-            current_pos = self.video_editor.get_current_position_s()
-            total_duration = self.real_total_duration
-            
-            # Prüfe, ob wir am Ende sind (mit einer kleinen Toleranz)
-            if current_pos >= total_duration - 0.1:  # 0.1 Sekunden Toleranz
-                # Video-Ende erkannt - setze Zustand zurück
-                self.video_editor.is_playing = False
-                self.video_control.update_play_pause_icon(False)
-                self.gpx_widget.set_video_playing(False)
-                self.map_widget.set_video_playing(False)
+            try:
+                current_pos = self.video_editor.get_current_position_s()
+                total_duration = self.real_total_duration
                 
-                # NEU: Prüfe auf Endcut und springe zum wirklichen Ende
-                self._handle_endcut_if_present()
-
-    
-    
-    
+                # Debug-Ausgabe
+                # print(f"[DEBUG] current_pos={current_pos:.2f}, total_duration={total_duration:.2f}")
+                
+                # Prüfe, ob wir am Ende sind (mit einer Toleranz von 0.5 Sekunden für bessere Erkennung)
+                if current_pos >= total_duration - 0.5:
+                    print(f"[DEBUG] Video-Ende erkannt! current_pos={current_pos:.2f}, total_duration={total_duration:.2f}")
+                    
+                    # Video-Ende erkannt - setze Zustand zurück
+                    self.video_editor.is_playing = False
+                    self.video_control.update_play_pause_icon(False)
+                    self.gpx_widget.set_video_playing(False)
+                    self.map_widget.set_video_playing(False)
+                    
+                    # Endcut-Behandlung
+                    self._handle_endcut_if_present()
+            except Exception as e:
+                print(f"[ERROR] Fehler in check_and_handle_video_end: {e}")
+                
     def _handle_endcut_if_present(self):
         """
         Prüft, ob ein Endcut vorhanden ist und springt dann zum wirklichen Ende des Videos.
         """
-        total_duration = self.real_total_duration
-        cut_intervals = self.cut_manager._cut_intervals
-        
-        if not cut_intervals:
+        # Prüfe, ob Endcut-Behandlung überhaupt aktiv ist
+        if not self.action_show_endcut.isChecked():
+            print("[DEBUG] Endcut handling is disabled - skipping")
             return
         
-        # Verwende die gleiche Logik wie in on_goto_video_end_clicked
-        if not cut_intervals:
+        try:
+            total_duration = self.real_total_duration
+            cut_intervals = self.cut_manager._cut_intervals
+            
+            if not cut_intervals:
+                print("[DEBUG] Keine Schnitte vorhanden")
+                return
+            
+            # Berechne Endposition
             final_position = total_duration
-        else:
-            # Sortiere Schnitte nach Endzeit absteigend
-            sorted_cuts = sorted(cut_intervals, key=lambda x: x[1], reverse=True)
-            current_end = total_duration
+            if cut_intervals:
+                sorted_cuts = sorted(cut_intervals, key=lambda x: x[1], reverse=True)
+                current_end = total_duration
+                TOLERANCE = 0.001
+                
+                for cut_start, cut_end in sorted_cuts:
+                    # Prüfe ob dieser Schnitt das aktuelle Ende beeinflusst
+                    if abs(cut_end - current_end) < TOLERANCE or cut_end >= current_end:
+                        # Dieser Schnitt beeinflusst das Ende - setze Ende auf Schnittstart
+                        current_end = cut_start
+                
+                final_position = current_end
             
-            # Toleranz für Fließkomma-Vergleiche
-            TOLERANCE = 0.001
+            current_pos = self.video_editor.get_current_position_s()
             
-            for cut_start, cut_end in sorted_cuts:
-                # Prüfe ob dieser Schnitt das aktuelle Ende beeinflusst
-                if abs(cut_end - current_end) < TOLERANCE or cut_end >= current_end:
-                    # Dieser Schnitt beeinflusst das Ende - setze Ende auf Schnittstart
-                    current_end = cut_start
+            # Debug-Ausgabe
+            print(f"[DEBUG] Endcut-Prüfung: current_pos={current_pos:.2f}, final_position={final_position:.2f}, total_duration={total_duration:.2f}")
             
-            final_position = current_end
-        
-        # Prüfe, ob wir uns nicht bereits am richtigen Ende befinden
-        current_pos = self.video_editor.get_current_position_s()
-        if abs(final_position - current_pos) > 0.1 and abs(final_position - total_duration) > 0.001:
-            print(f"[DEBUG] Endcut erkannt: springe von {current_pos:.2f}s zu {final_position:.2f}s")
+            # Prüfe, ob wir uns nicht bereits am richtigen Ende befinden
+            if abs(final_position - current_pos) > 0.1 and abs(final_position - total_duration) > 0.001:
+                print(f"[DEBUG] Endcut erkannt: springe von {current_pos:.2f}s zu {final_position:.2f}s")
+                
+                # Zeige Popup-Warnung, wenn aktiviert
+                if self.action_show_endcut_warning.isChecked():
+                    self._show_endcut_popup(final_position)
+                
+                # Zustand setzen und Sprung durchführen
+                self._handle_video_end_state()
+                
+                # Sprung zum Endcut mit Verzögerung
+                QTimer.singleShot(100, lambda: self.video_editor._jump_to_global_time(final_position))
+                QTimer.singleShot(350, lambda: self.video_editor._jump_to_global_time(final_position))
+                
+                print(f"[DEBUG] Endcut-Sprung initiiert zu {final_position:.2f}s")
+            else:
+                print("[DEBUG] Kein Endcut erkannt oder bereits am richtigen Ende")
+                
+        except Exception as e:
+            print(f"[ERROR] Fehler in _handle_endcut_if_present: {e}")
             
-            # 1. Popup SOFORT anzeigen
-            self._show_endcut_popup(final_position)
             
-            # 2. Player-Zustand korrekt setzen (wichtig!)
+    def _handle_video_end_state(self):
+        """
+        Setzt alle Player-Zustände korrekt für Video-Ende.
+        """
+        try:
+            # Stelle sicher, dass alle Zustände korrekt zurückgesetzt werden
             self.video_editor.is_playing = False
-            self.video_control.update_play_pause_icon(False)
             
-            # 3. Sprung mit Timer (wie in der funktionierenden Version)
-            QTimer.singleShot(100, lambda: self.video_editor._jump_to_global_time(final_position))
-            QTimer.singleShot(350, lambda: self.video_editor._jump_to_global_time(final_position))
+            # Versuche den Player zu pausieren
+            try:
+                if hasattr(self.video_editor, '_player') and self.video_editor._player:
+                    self.video_editor._player.pause = True
+            except Exception as e:
+                print(f"[WARN] Konnte Player nicht pausieren: {e}")
+            
+            # UI aktualisieren
+            self.video_control.update_play_pause_icon(False)
+            self.gpx_widget.set_video_playing(False)
+            self.map_widget.set_video_playing(False)
+            
+            # Gelben Marker entfernen
+            lw = self.gpx_widget.gpx_list
+            if lw._last_video_row is not None:
+                lw._mark_row_bg_except_markcol(lw._last_video_row, Qt.white)
+                lw._last_video_row = None
+            
+            self._video_at_end = True
+            
+            print("[DEBUG] Video-Endzustand erfolgreich gesetzt")
+            
+        except Exception as e:
+            print(f"[ERROR] Fehler in _handle_video_end_state: {e}")
     
     def _show_endcut_popup(self, end_position: float):
         """
@@ -4980,7 +5061,7 @@ class MainWindow(QMainWindow):
         label3.setAlignment(Qt.AlignCenter)
         label3.setStyleSheet("color: lightgray; font-size: 12px; padding: 5px;")
         
-        label4 = QLabel("(Don´t work with VideoSpeed greater than 2x) ")
+        label4 = QLabel("Don´t work with VideoSpeed greater than 2x")
         label4.setAlignment(Qt.AlignCenter)
         label4.setStyleSheet("color: white; font-size: 14px; padding: 8px;")
         
@@ -7283,4 +7364,75 @@ class MainWindow(QMainWindow):
                     self.map_widget.show_blue(0, do_center=True)
                     self.chart.highlight_gpx_index(0)    
                     
-                    
+    def _load_player_settings(self):
+        """
+        Lädt die Player-Einstellungen aus QSettings.
+        """
+        s = QSettings("KVRouite", "KVRouite")
+        
+        # Standardwerte: True (beide Optionen aktiv)
+        show_endcut = s.value("player/show_endcut", True, type=bool)
+        show_endcut_warning = s.value("player/show_endcut_warning", True, type=bool)
+        
+        # Setze die Menü-Zustände
+        self.action_show_endcut.setChecked(show_endcut)
+        self.action_show_endcut_warning.setChecked(show_endcut_warning)
+        
+        print(f"[DEBUG] Player settings loaded: endcut={show_endcut}, warning={show_endcut_warning}")
+
+    def _save_player_settings(self):
+        """
+        Speichert die Player-Einstellungen in QSettings.
+        """
+        s = QSettings("KVRouite", "KVRouite")
+        
+        s.setValue("player/show_endcut", self.action_show_endcut.isChecked())
+        s.setValue("player/show_endcut_warning", self.action_show_endcut_warning.isChecked())
+        
+        s.sync()
+        print(f"[DEBUG] Player settings saved: endcut={self.action_show_endcut.isChecked()}, warning={self.action_show_endcut_warning.isChecked()}")
+
+    def _on_show_endcut_toggled(self, checked: bool):
+        """
+        Wird aufgerufen, wenn "Show Endcut" an/aus geschaltet wird.
+        """
+        print(f"[DEBUG] Show Endcut: {checked}")
+        self._save_player_settings()
+
+    def _on_show_endcut_warning_toggled(self, checked: bool):
+        """
+        Wird aufgerufen, wenn "Show Endcut Warning" an/aus geschaltet wird.
+        """
+        print(f"[DEBUG] Show Endcut Warning: {checked}")
+        self._save_player_settings()                
+
+
+    def _on_open_tutorials(self):
+        """
+        Öffnet den KVRouite YouTube-Kanal im Standard-Browser nach Bestätigung durch den Benutzer.
+        """
+        youtube_url = "https://www.youtube.com/@KVRouite"
+        
+        # Überprüfe, ob die URL gültig ist
+        url = QUrl(youtube_url)
+        if not url.isValid():
+            QMessageBox.critical(
+                self,
+                "Invalid URL",
+                f"The YouTube URL is invalid:\n{youtube_url}"
+            )
+            return
+
+        # Bestätigungs-Popup anzeigen
+        reply = QMessageBox.question(
+            self,
+            "Open YouTube Tutorials",
+            "Do you want to open the KVRouite YouTube channel ?\n\n"
+            "This will open in your default web browser.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No  # Standard-Button: No
+        )
+        
+        if reply == QMessageBox.Yes:
+            # YouTube-Kanal im Browser öffnen
+            QDesktopServices.openUrl(url)
