@@ -3737,14 +3737,20 @@ class MainWindow(QMainWindow):
         self._update_gpx_overview()
 
         # 7) Nur Auswahl/visuelle Highlights neutralisieren (NICHT clear_marked_range!)
+        # 7) Nur Auswahl/visuelle Highlights neutralisieren (NICHT clear_marked_range!)
         try:
-            lw.clearSelection()
+            sm = getattr(lw, "selectionModel", None)
+            if sm:
+                sm.clearSelection() 
+            # KEIN direkter Aufruf von lw.clearSelection()
+
             if hasattr(self.map_widget, "clear_selected_point"):
                 self.map_widget.clear_selected_point()
             if hasattr(self.chart, "clear_highlight"):
                 self.chart.clear_highlight()
         except Exception as e:
             print(f"[DEBUG] clear visuals in _apply_slot_to_ui failed: {e}")
+
 
         # 8) Slot-spezifischen „Set Sync“-Marker (Index) wiederherstellen, falls vorhanden
         marker_idx = store.get("sync_marker")
