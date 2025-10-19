@@ -24,6 +24,39 @@ import shutil
 import platform
 
 
+
+# --- NEU: Verbose-Erkennung + Konsole zur Laufzeit öffnen (nur Windows) ---
+def _is_verbose() -> bool:
+    argv = " ".join(sys.argv).lower()
+    return (" -v" in argv) or (" --verbose" in argv)
+
+def _ensure_console_for_verbose():
+    """Öffnet/attach’t eine Windows-Konsole, wenn -v/--verbose genutzt wird."""
+    if platform.system() != "Windows" or not _is_verbose():
+        return
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        ATTACH_PARENT_PROCESS = -1
+        # Falls aus einer bereits offenen CMD gestartet: anhängen
+        attached = kernel32.AttachConsole(ATTACH_PARENT_PROCESS)
+        if not attached:
+            # sonst eigene Konsole erstellen
+            kernel32.AllocConsole()
+        # stdout/stderr auf die Konsole umleiten
+        sys.stdout = open("CONOUT$", "w", encoding="utf-8", buffering=1)
+        sys.stderr = open("CONOUT$", "w", encoding="utf-8", buffering=1)
+        try:
+            sys.stdin = open("CONIN$", "r", encoding="utf-8")
+        except Exception:
+            pass
+    except Exception:
+        # Fällt weich – dann eben kein Konsolenfenster
+        pass
+
+# direkt beim Start ausführen, bevor irgendwelche print()/logging-Ausgaben passieren
+_ensure_console_for_verbose()
+
 # ++ADD++  (Mac-spezifischer Monkeypatch + locale Setting)
 current_os = platform.system()
 if current_os == "Darwin":

@@ -107,6 +107,7 @@ def build_windows():
         sys.executable, "-m", "PyInstaller",
         "--noconfirm",
         "--onedir",
+        "--windowed",
         f"--name={exe_name}",
         f"--icon={icon_file}",  # EXE-Icon
         main_script
