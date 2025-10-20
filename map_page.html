@@ -409,14 +409,25 @@
 
 	// Kleine Helferfunktion, um die Größe aus colorSizeMap zu holen:
 	
+	function normalizeColor(c){
+	  if (!c) return "black";
+	  c = (""+c).toLowerCase();
+	  const map = {
+		"black":"black", "#000":"black", "#000000":"black",
+		"red":"red", "#f00":"red", "#ff0000":"red",
+		"blue":"blue", "#00f":"blue", "#0000ff":"blue",
+		"yellow":"yellow", "#ff0":"yellow", "#ffff00":"yellow"
+	  };
+	  return map[c] || c; // unbekannte Farben bleiben wie sie sind
+	}
+	
 	function getSizeForFeature(feature) {
-		// Hier lassen wir uns vom Feature die Farbe geben (z.B. "blue")
-		let c = feature.get("color");
-		if (!c) c = "black";
-		let s = colorSizeMap[c];
-		if (!s) s = 4; // Fallback
-		return s;
-	} 
+	  let c = normalizeColor(feature.get("color") || "black");
+	  let s = colorSizeMap[c];
+	  if (!s) s = 4; // Fallback
+	  return s;
+	}
+
 	 
 	 
     let debugMode = true;
@@ -1098,7 +1109,8 @@
             let coords = g.coordinates.map(c => ol.proj.fromLonLat(c));
             let lineF = new ol.Feature({
               geometry: new ol.geom.LineString(coords),
-              color: p.color || "#000"
+			  color: normalizeColor(p.color || "black")
+              
             });
             vectorLayer.getSource().addFeature(lineF);
             updateFeatureStyle(lineF);
@@ -1108,7 +1120,8 @@
             let idx = p.index;
             let sid = p.stable_id;
 
-            let rawColor = p.color || "black";
+            
+			let rawColor = p.color || "black";
             let color = rawColor;
 
             let size = p.size || 4;
@@ -1186,25 +1199,23 @@
     }
 
     function updateFeatureStyle(feature){
-	// 'color' ist z.B. "blue", "yellow", ...
-	let c = feature.get("color") || "black";
+	  let c = normalizeColor(feature.get("color") || "black");
+	  let s = getSizeForFeature(feature);
+	  let geom = feature.getGeometry();
 
-	let s = getSizeForFeature(feature); // holt aus colorSizeMap[...] die Größe
-
-	let geom = feature.getGeometry();
-	if (geom.getType() === "LineString") {
+	  if (geom.getType() === "LineString") {
 		feature.setStyle(new ol.style.Style({
-		stroke: new ol.style.Stroke({color: c, width: 2})
+		  stroke: new ol.style.Stroke({ color: c, width: 2 })
 		}));
-	} else {
+	  } else {
 		feature.setStyle(new ol.style.Style({
-		image: new ol.style.Circle({
+		  image: new ol.style.Circle({
 			radius: s,
 			fill: new ol.style.Fill({ color: c }),
 			stroke: new ol.style.Stroke({ color: "#fff", width: 1 })
-		})
+		  })
 		}));
-	}
+	  }
 	}
 
 
@@ -1212,18 +1223,17 @@
      * 9) FUNKTION: updateAllPointsByColor(col, newSize)
      ***********************************************************/
     function updateAllPointsByColor(col, newSize) {
-	// z.B. col = "blue"
-	// in colorSizeMap['blue'] = newSize
-	colorSizeMap[col] = newSize;
+	  const key = normalizeColor(col);
+	  colorSizeMap[key] = newSize;
 
-	const feats = vectorLayer.getSource().getFeatures();
-	feats.forEach(f => {
-		// Falls Feature dieselbe Farbe hat => neu stylen
-		if (f.get("color") === col) {
-		updateFeatureStyle(f);
+	  const feats = vectorLayer.getSource().getFeatures();
+	  feats.forEach(f => {
+		if (normalizeColor(f.get("color")) === key) {
+		  updateFeatureStyle(f);
 		}
-	});
+	  });
 	}
+
 
 
     /***********************************************************
