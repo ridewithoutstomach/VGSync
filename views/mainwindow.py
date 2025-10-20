@@ -6187,13 +6187,7 @@ class MainWindow(QMainWindow):
             with open(filename, "r", encoding="utf-8") as f:
                 project_data = json.load(f)
 
-            mode = project_data.get("edit_mode", "off")
-            try:
-                self._set_edit_mode(mode)
-            except Exception as _e:
-                print(f"[WARN] Could not restore edit_mode '{mode}': {_e}")
-            finally:
-                self._isLoadingProject = False
+            
                 
                 
             # 1. Playlist und Videolängen
@@ -6267,6 +6261,20 @@ class MainWindow(QMainWindow):
                 self.video_editor.set_cut_time(cut_duration)
             else:
                 self.video_editor.set_cut_time(0.0)
+                
+                
+            mode = project_data.get("edit_mode", "off")
+            try:
+                current = getattr(self, "_edit_mode", "off")
+                # WICHTIG: Für jedes geladene Projekt die Frage erzwingen,
+                # indem wir bei Zielmode copy/encode vorher auf OFF togglen,
+                # falls wir aktuell nicht OFF sind.
+                if mode in ("copy", "encode") and current != "off":
+                    self._set_edit_mode("off")   # kurzer Toggle, keine Indexierung hier
+
+                self._set_edit_mode(mode)        # jetzt OFF -> copy/encode => Frage erscheint
+            except Exception as _e:
+                print(f"[WARN] Could not restore edit_mode '{mode}': {_e}")    
 
             # 7. GPX Widgets neu aufbauen
             self.gpx_widget.set_gpx_data(gpx_data)
