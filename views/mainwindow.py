@@ -6335,6 +6335,8 @@ class MainWindow(QMainWindow):
             return
         if(path.endswith(".gpx")):
             self.process_open_gpx(path)
+        elif(path.endswith(".fit")): 
+            self.process_open_fit(path)  # default mode="new" passt hier
         elif(path.endswith(".mp4") or path.endswith(".MP4")):
             self.process_open_mp4([path])
         elif(path.endswith(".KVRouiteproj")):
