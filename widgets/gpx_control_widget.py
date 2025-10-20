@@ -1119,6 +1119,13 @@ class GPXControlWidget(QWidget):
 
         mw = self._mainwindow
         gpx_data = mw.gpx_widget.gpx_list._gpx_data
+        if not gpx_data:
+            QMessageBox.information(
+                self,
+                "No GPX loaded",
+                "No GPX data is loaded.\nOperation cancelled."
+            )
+            return
 
         # --- Graubereich-Check wie gehabt ---
         try:
