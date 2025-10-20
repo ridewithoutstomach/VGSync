@@ -102,17 +102,18 @@ def build_windows():
     else:
         print("[INFO] Icon-Datei gefunden:", icon_file)
 
+        
     print("[INFO] Starte PyInstaller-Build im OneDir-Modus.")
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "--noconfirm",
         "--onedir",
-        "--windowed",
         f"--name={exe_name}",
         f"--icon={icon_file}",  # EXE-Icon
         main_script
     ]
     run_cmd(cmd)
+    
 
     exe_path = os.path.join("dist", exe_name, f"{exe_name}.exe")
     if not os.path.isfile(exe_path):
