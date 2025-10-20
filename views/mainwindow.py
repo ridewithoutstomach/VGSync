@@ -3066,6 +3066,9 @@ class MainWindow(QMainWindow):
     
 
     def _build_route_geojson_from_gpx(self, data):
+        
+        if not data:
+            return {"type": "FeatureCollection", "features": []}
         """
         data: Liste von Dicts => [{'lat':..., 'lon':...}, ...]
         Gibt FeatureCollection mit 1x Linestring + Nx Points zurück,
@@ -6120,8 +6123,10 @@ class MainWindow(QMainWindow):
                 "markB_idx": self.gpx_widget.gpx_list._markB_idx,
                 "markE_idx": self.gpx_widget.gpx_list._markE_idx
             },
-            "overlays": self._overlay_manager.get_all_overlays()
+            "overlays": self._overlay_manager.get_all_overlays(),
+            "edit_mode": self._edit_mode
         }
+        
         if is_gpx_video_shift_set():
             project_data["gpx_video_shift"]= get_gpx_video_shift() 
     
@@ -6177,10 +6182,20 @@ class MainWindow(QMainWindow):
             )
     
     def process_open_project(self, filename: str):
+                    
         try:
             with open(filename, "r", encoding="utf-8") as f:
                 project_data = json.load(f)
 
+            mode = project_data.get("edit_mode", "off")
+            try:
+                self._set_edit_mode(mode)
+            except Exception as _e:
+                print(f"[WARN] Could not restore edit_mode '{mode}': {_e}")
+            finally:
+                self._isLoadingProject = False
+                
+                
             # 1. Playlist und Videolängen
             self.playlist = project_data.get("playlist", [])
             self.video_durations = project_data.get("video_durations", [])
