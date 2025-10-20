@@ -3792,6 +3792,14 @@ class MainWindow(QMainWindow):
         if new_slot == self._active_gpx_slot:
             return
 
+        if new_slot == 2 and not (self._gpx_slots.get(2, {}).get("gpx_data") or []):
+            QMessageBox.information(
+                self,
+                "No GoPro data in Slot 2",
+                "No GoPro data in Slot 2.\nPlease extract GoPro GPS first (File → GoPro-Extractor) before switching to Slot 2."
+            )
+            return False
+            
         # 1) Vorherigen Slot-Status sichern
         prev_slot = self._active_gpx_slot
         prev_sync = self.action_new_pts_video_time.isChecked()

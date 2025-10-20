@@ -903,28 +903,34 @@ class GPXControlWidget(QWidget):
             
     def _on_slot_button_clicked(self):
         """
-        Wechselt den Slot im MainWindow und passt Optik an:
-        - Slot 1: Button-Text 'Slot 1', grün
-        - Slot 2: Button-Text 'Slot 2', gelb
+        Slot umschalten – aber Anzeige strikt aus dem *tatsächlichen* MainWindow-State
+        ableiten (kein Vorweg-Kippen des Buttons).
         """
         mw = getattr(self, "_mainwindow", None)
         if not mw:
             return
 
-        # checked => Slot 2, unchecked => Slot 1
-        new_slot = 2 if self.slot_button.isChecked() else 1
+        # Wunschziel aus dem Toggle ableiten (checked => Slot 2)
+        target_slot = 2 if self.slot_button.isChecked() else 1
 
-        mw.switch_gpx_slot(new_slot)
+        # Wechsel anfragen (dein MainWindow entscheidet und kann ablehnen)
+        ok = mw.switch_gpx_slot(target_slot)
 
-        if new_slot == 1:
-            self.slot_button.setText("Slot 1")
-            self.slot_button.setStyleSheet(self._slot1_style)
-        else:
-            self.slot_button.setText("Slot 2")
-            self.slot_button.setStyleSheet(self._slot2_style)
+        # Danach IMMER den realen Zustand spiegeln:
+        actual = getattr(mw, "_active_gpx_slot", 1)
 
+        # Button & Style konsistent setzen (Signals blocken, damit kein Re-Trigger)
+        self.slot_button.blockSignals(True)
+        self.slot_button.setChecked(actual == 2)
+        self.slot_button.setText(f"Slot {actual}")
+        self.slot_button.setStyleSheet(self._slot2_style if actual == 2 else self._slot1_style)
+        self.slot_button.blockSignals(False)
+
+        # Optional: Video-UI refresh
         if hasattr(mw.video_control, "update_set_sync_highlight"):
             mw.video_control.update_set_sync_highlight()
+
+
 
         # --- NEU: Optik/Status des Slot-Buttons zentral setzen ---
     def apply_slot_button_style(self, active_slot: int):
