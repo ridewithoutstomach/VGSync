@@ -7515,3 +7515,9 @@ class MainWindow(QMainWindow):
         if reply == QMessageBox.Yes:
             # YouTube-Kanal im Browser öffnen
             QDesktopServices.openUrl(url)
+            
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_V:
+            self.video_editor.toggle_360_mode()
+        else:
+            super().keyPressEvent(event)

@@ -17,7 +17,19 @@
 # You should have received a copy of the GNU General Public License
 # along with KVRouite. If not, see <https://www.gnu.org/licenses/>.
 #
-#test
+
+"""
+Speed: + beschleunigt, - verlangsamt (mehrere Key-Varianten für Layouts/Numpad). 1 setzt exakt 1.00x. Die aktuelle Rate siehst du oben rechts (dein bestehendes Label).
+
+Viewport:
+
+Zoom mit Ctrl++ / Ctrl+-, Reset Ctrl+0.
+
+Pan mit Ctrl + Pfeiltasten (links/rechts/hoch/runter).
+
+Das funktioniert für normale Videos sofort. Zoomen > 0 macht das Panning sichtbar sinnvoll.
+"""
+
 import platform
 import mpv
 import math
@@ -26,6 +38,7 @@ from PySide6.QtWidgets import (
     QWidget, QGridLayout, QFrame, QLabel, QVBoxLayout
 )
 from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QShortcut, QKeySequence
 
 class VideoEditorWidget(QWidget):
     """
@@ -33,7 +46,7 @@ class VideoEditorWidget(QWidget):
     set_playback_rate, etc.) bereitstellt, damit dein restlicher Code weiter funktioniert.
     Er kann mehrere Videos in die mpv-Playlist laden und nacheinander abspielen.
     
-    Ob du 'end-file' auswertest, liegt bei dir. Siehe _on_mpv_event(...).
+    Zusätzlich mit 360°-Video-Unterstützung, die mit Taste 'V' umgeschaltet werden kann.
     """
 
     play_ended = Signal()  # z.B. wenn das letzte Video fertig ist
@@ -42,8 +55,14 @@ class VideoEditorWidget(QWidget):
         super().__init__(parent)
         self._cut_intervals = []
     
+    
+        
         self._time_mode = "global"  # default
         self._final_time_callback = None   # optional
+        
+        # 360°-Video Status
+        self._is_360_mode = False
+        self._360_label = None
         
         # Haupt-Layout
         layout = QGridLayout(self)
@@ -111,6 +130,15 @@ class VideoEditorWidget(QWidget):
 
         layout.addWidget(self.right_time_widget, 0, 0, alignment=Qt.AlignBottom | Qt.AlignLeft)
 
+        # 360°-Modus Anzeige
+        self._360_label = QLabel("360°", self)
+        self._360_label.setStyleSheet(
+            "color:white; background-color:rgba(0,100,200,180); "
+            "padding:4px; font-weight:bold; font-size:14px;"
+        )
+        self._360_label.hide()
+        layout.addWidget(self._360_label, 0, 0, alignment=Qt.AlignTop | Qt.AlignLeft)
+
         # MPV Setup
         self._player = mpv.MPV(
             wid=str(int(self.video_frame.winId())),
@@ -119,6 +147,7 @@ class VideoEditorWidget(QWidget):
             hr_seek_framedrop="yes",
             loglevel='info',
         )
+        self._player["input-vo-keyboard"] = "no"
         # Fenstereinstellungen, damit wir (fast) nie Schwarz flackern
         self._player["force-window"] = "immediate"
         self._player["keep-open"] = "yes"
@@ -134,14 +163,113 @@ class VideoEditorWidget(QWidget):
         self.boundaries = []
 
         # Falls du end-file auswerten willst:
-        # (Wenn du python-mpv >= 0.5.2 hast, geht so:)
         self._player.observe_property('playlist-pos', self._on_playlist_pos_changed)
-        # oder mit self._player.register_event_callback(...) + Auswertung event.event_id ?
 
-        # Du kannst z. B. die Zeitanzeige in einer Timer-Schleife updaten
+        # Du kannst z. B. die Zeitanzeige in einer Timer-Schleife updaten
         self._time_timer = QTimer(self)
         self._time_timer.timeout.connect(self._update_time_label)
         self._time_timer.start(200)  # alle 200ms
+        
+        # -------- Keyboard Shortcuts --------
+        """
+        # Speed: + / -  (auch Numpad; mehrere Sequenzen, damit alle Layouts greifen)
+        #s = QShortcut(QKeySequence("+"),          self, activated=lambda: self._nudge_speed(+0.10)); s.setContext(Qt.ApplicationShortcut)
+        #s = QShortcut(QKeySequence("-"),          self, activated=lambda: self._nudge_speed(-0.10)); s.setContext(Qt.ApplicationShortcut)
+        s = QShortcut(QKeySequence(Qt.Key_Plus),  self, activated=lambda: self._nudge_speed(+0.10)); s.setContext(Qt.ApplicationShortcut)
+        s = QShortcut(QKeySequence(Qt.Key_Minus), self, activated=lambda: self._nudge_speed(-0.10)); s.setContext(Qt.ApplicationShortcut)
+        s = QShortcut(QKeySequence(Qt.Key_Equal), self, activated=lambda: self._nudge_speed(+0.10)); s.setContext(Qt.ApplicationShortcut)  # Shift+='+' Layouts
+        # Speed reset: 1
+        s = QShortcut(QKeySequence("1"),          self, activated=lambda: self.set_playback_rate(1.0)); s.setContext(Qt.ApplicationShortcut)
+        """
+        # -------- Keyboard Shortcuts (keine Ambiguität) --------
+        self._speed_shortcuts = []
+
+        def _sc(seq, cb):
+            s = QShortcut(QKeySequence(seq), self)
+            s.setContext(Qt.ApplicationShortcut)
+            s.activated.connect(cb)
+            s.activatedAmbiguously.connect(cb)  # falls Qt doch mal doppelt matched
+            self._speed_shortcuts.append(s)
+            
+        # Plus (normale Taste und Numpad) + Layout-Variante Shift+='+' → Qt.Key_Equal
+        _sc(Qt.Key_Plus,   lambda: self._nudge_speed(+0.10))
+        _sc(Qt.Key_Equal,  lambda: self._nudge_speed(+0.10))  # für DE/US Layouts mit Shift+='+' 
+
+        # Minus (normale Taste und Numpad)
+        _sc(Qt.Key_Minus,  lambda: self._nudge_speed(-0.10))
+
+        # Reset
+        _sc(Qt.Key_1,      lambda: self.set_playback_rate(1.0))
+        _sc(Qt.Key_2,      lambda: self.set_playback_rate(2.0))
+        _sc(Qt.Key_3,      lambda: self.set_playback_rate(3.0))
+        _sc(Qt.Key_4,      lambda: self.set_playback_rate(4.0))
+        _sc(Qt.Key_5,      lambda: self.set_playback_rate(5.0))
+        _sc(Qt.Key_6,      lambda: self.set_playback_rate(6.0))
+        _sc(Qt.Key_7,      lambda: self.set_playback_rate(7.0))
+        _sc(Qt.Key_8,      lambda: self.set_playback_rate(8.0))
+        _sc(Qt.Key_9,      lambda: self.set_playback_rate(9.0))  
+
+        # -------- Keyboard Shortcuts --------
+        # Speed: + / - (mehrere Varianten für unterschiedliche Tastaturen/Numpad)
+        
+        # Viewport Zoom/Pan dürfen beim bisherigen Kontext bleiben:
+        QShortcut(QKeySequence("Ctrl++"), self, activated=lambda: self._nudge_zoom(+0.10))
+        QShortcut(QKeySequence("Ctrl+-"), self, activated=lambda: self._nudge_zoom(-0.10))
+        QShortcut(QKeySequence("Ctrl+0"),  self, activated=self._reset_view)
+
+        #QShortcut(QKeySequence(Qt.CTRL | Qt.Key_Left),  self, activated=lambda: self._nudge_pan(dx=-0.05))
+        #QShortcut(QKeySequence(Qt.CTRL | Qt.Key_Right), self, activated=lambda: self._nudge_pan(dx=+0.05))
+        #QShortcut(QKeySequence(Qt.CTRL | Qt.Key_Up),    self, activated=lambda: self._nudge_pan(dy=-0.05))
+        #QShortcut(QKeySequence(Qt.CTRL | Qt.Key_Down),  self, activated=lambda: self._nudge_pan(dy=+0.05))
+        QShortcut(QKeySequence(Qt.CTRL | Qt.Key_Left),  self, activated=lambda: self._nudge_pan(dx=+0.05))
+        QShortcut(QKeySequence(Qt.CTRL | Qt.Key_Right), self, activated=lambda: self._nudge_pan(dx=-0.05))
+        QShortcut(QKeySequence(Qt.CTRL | Qt.Key_Up),    self, activated=lambda: self._nudge_pan(dy=+0.05))
+        QShortcut(QKeySequence(Qt.CTRL | Qt.Key_Down),  self, activated=lambda: self._nudge_pan(dy=-0.05))
+
+        
+        
+
+    def toggle_360_mode(self):
+        """Schaltet den 360°-Video-Modus um"""
+        self._is_360_mode = not self._is_360_mode
+        
+        try:
+            if self._is_360_mode:
+                # 360°-Video Einstellungen aktivieren
+                self._player.video_rotate = 0
+                self._player.video_aspect = "16:9"
+                self._player.video_unscaled = "yes"
+                self._player.panscan = 1.0
+                
+                # 360°-spezifische Einstellungen
+                self._player.hr_seek_framedrop = "no"  # Bessere Qualität bei 360°
+                self._player.interpolation = "yes"     # Glattere Bewegung
+                
+                self._360_label.show()
+                print("360°-Modus aktiviert")
+            else:
+                # Zurück zu normalen Einstellungen
+                self._player.video_rotate = 0
+                self._player.video_aspect = "-1"  # Automatisch
+                self._player.video_unscaled = "no"
+                self._player.panscan = 0.0
+                
+                # Zurück zu normalen Performance-Einstellungen
+                self._player.hr_seek_framedrop = "yes"
+                self._player.interpolation = "no"
+                
+                self._360_label.hide()
+                self._reset_view()
+                self._show_speed_label("360°-Modus: AUS")
+                print("360°-Modus deaktiviert")
+                
+                
+        except Exception as e:
+            print(f"Fehler beim Umschalten des 360°-Modus: {e}")
+
+    def is_360_mode(self) -> bool:
+        """Gibt zurück, ob 360°-Modus aktiv ist"""
+        return self._is_360_mode
 
     # -----------------------------------------
     # ALTE METHODEN (Schnittstellen), die dein restlicher Code aufruft
@@ -206,13 +334,15 @@ class VideoEditorWidget(QWidget):
                 self._player.pause = True
                 self.is_playing = False
             except SystemError as e:
-                # -12 bedeutet oft, dass mpv in Idle ist oder “keine Datei mehr hat”
+                # -12 bedeutet oft, dass mpv in Idle ist oder "keine Datei mehr hat"
                 print(f"[WARN] show_first_frame: mpv refused to seek => {e}")
 
         QTimer.singleShot(80, do_seek)
 
     def set_playback_rate(self, rate: float):
+        print(f"DEBUG: set_playback_rate called with rate={rate}")  # Debug
         self._player.speed = rate
+        print(f"DEBUG: mpv speed is now: {self._player.speed}")  # Debug
         self._show_speed_label(f"Speed: {rate:.2f}x")
 
     def _show_speed_label(self, txt: str):
@@ -228,7 +358,7 @@ class VideoEditorWidget(QWidget):
     def set_old_time(self, old_s: float):
         """
         Falls dein Code hierhin ruft (historische Funktion).
-        Man kann z. B. `old_s` = summe aller Video-Längen *vor* dem Cut?
+        Man kann z. B. `old_s` = summe aller Video-Längen *vor* dem Cut?
         """
         txt = self.format_seconds_simple(old_s)
         self.total_length_label.setText(txt)
@@ -242,7 +372,7 @@ class VideoEditorWidget(QWidget):
             self.cut_time_label.hide()
 
     def format_seconds_simple(self, secs: float) -> str:
-        """z. B. 74.2 => '00:01:14' (ohne ms)"""
+        """z. B. 74.2 => '00:01:14' (ohne ms)"""
         s_rounded = round(secs)
         hh = s_rounded // 3600
         mm = (s_rounded % 3600) // 60
@@ -286,8 +416,6 @@ class VideoEditorWidget(QWidget):
         else:
             self._player.pause = False
             self.is_playing = True
-
-
 
     def get_current_position_s(self) -> float:
         """
@@ -345,69 +473,7 @@ class VideoEditorWidget(QWidget):
         self.is_playing = False
 
         self.playlist = video_list
-    """
-    def _jump_to_global_time(self, wanted_s: float):
-        print(f"DEBUG: Jumping to global time: {wanted_s}")
-        print(f"DEBUG: Boundaries: {self.boundaries}")
-        print(f"DEBUG: Playlist count: {self._player.playlist_count}")
-        
-        if not self.boundaries:
-            return
 
-        total = self.boundaries[-1]
-        print(f"DEBUG: Total duration: {total}")
-        
-        if wanted_s < 0:
-            wanted_s = 0.0
-        elif wanted_s > total:
-            wanted_s = total
-            print(f"DEBUG: Adjusted wanted_s to total: {wanted_s}")
-            
-        # ClipIndex suchen
-        clip_idx = 0
-        offset_prev = 0.0
-        for i, bound_val in enumerate(self.boundaries):
-            if wanted_s < bound_val:
-                clip_idx = i
-                break
-            offset_prev = bound_val
-    
-        local_s = wanted_s - offset_prev
-        if local_s < 0:
-            local_s = 0
-
-        # Aktueller mpv-Playlist-Index:
-        current_idx = self._player.playlist_pos
-
-        if current_idx == clip_idx:
-            # 1) GLEICHER CLIP => kein Delay, kein playlist-play-index
-            try:
-                seekpos = local_s if wanted_s != total else total - 0.001 #to prevent player jump to 0
-                self._player.command("seek", f"{seekpos}", "absolute", "exact")
-                self._player.pause = True
-                self.is_playing = False
-            except SystemError as e:
-                print(f"[WARN] _jump_to_global_time: mpv refused to seek => {e}")
-        else:
-            # 2) CLIP WECHSEL => playlist-play-index + kleiner Delay
-            self._player.command("playlist-play-index", str(clip_idx))
-
-            def do_seek():
-                if self._player.playlist_count == 0:
-                    return
-                if self._player.playlist_pos is None or self._player.playlist_pos < 0:
-                    return
-                try:
-                    self._player.command("seek", f"{local_s}", "absolute", "exact")
-                    self._player.pause = True
-                    self.is_playing = False
-                except SystemError as e:
-                    print(f"[WARN] _jump_to_global_time: mpv refused to seek => {e}")
-
-            QTimer.singleShot(80, do_seek)
-
-
-    """
     def _jump_to_global_time(self, wanted_s: float):
         """
         'wanted_s' ist die globale Zeit über alle Clips.
@@ -489,8 +555,6 @@ class VideoEditorWidget(QWidget):
         else:
             self.current_time_label.show()
             
-        
-
         # 1) globale Sekunde
         global_s = self.get_current_global_time()
 
@@ -542,8 +606,6 @@ class VideoEditorWidget(QWidget):
         
             QTimer.singleShot(50, do_seek_zero)
 
-        
-        
     def get_current_global_time(self) -> float:
         """
         Gibt die 'globale' Zeit (in Sekunden) über alle Clips zurück.
@@ -561,4 +623,58 @@ class VideoEditorWidget(QWidget):
         else:
             offset_prev = self.boundaries[clipIndex - 1]
     
-        return offset_prev + local_s   
+        return offset_prev + local_s
+        
+        
+        # -------- Helpers: Speed / Zoom / Pan --------
+    def _nudge_speed(self, delta: float):
+        """Erhöht/verringert die Abspielgeschwindigkeit und zeigt das Label."""
+        print(f"DEBUG: _nudge_speed called with delta={delta}")  # Debug
+        try:
+            cur = float(self._player.speed or 1.0)
+            print(f"DEBUG: Current speed = {cur}")  # Debug
+        except Exception as e:
+            print(f"DEBUG: Error getting current speed: {e}")  # Debug
+            cur = 1.0
+        new = max(0.10, min(32.00, cur + delta))  # Klammern 0.10x .. 4.00x
+        self.set_playback_rate(new)
+
+    def _nudge_zoom(self, dz: float):
+        # Nur im 360°-Modus erlauben
+        if not getattr(self, "_is_360_mode", False):
+            self._show_speed_label("Zoom nur im 360°-Modus (Taste V)")
+            return
+        """Zoom der Videodarstellung (mpv video-zoom)."""
+        try:
+            cur = float(self._player.video_zoom or 0.0)
+        except Exception:
+            cur = 0.0
+        new = max(-0.90, min(5.00, cur + dz))     # -0.9 .. 5.0 sind praxistauglich
+        self._player.video_zoom = new
+        # Beim Zoomen Pan beibehalten (mpv macht das), optional Overlay:
+        self._show_speed_label(f"Zoom: {new:+.2f}")
+
+    def _nudge_pan(self, dx: float = 0.0, dy: float = 0.0):
+        if not getattr(self, "_is_360_mode", False):
+            self._show_speed_label("Pan/Tilt nur im 360°-Modus (Taste V)")
+            return
+        """Viewport verschieben (mpv video-pan-x/y). Sinnvoll bei Zoom > 0."""
+        try:
+            px = float(self._player.video_pan_x or 0.0)
+            py = float(self._player.video_pan_y or 0.0)
+        except Exception:
+            px, py = 0.0, 0.0
+        px = max(-1.0, min(1.0, px + dx))
+        py = max(-1.0, min(1.0, py + dy))
+        self._player.video_pan_x = px
+        self._player.video_pan_y = py
+        # kleines Overlay, damit man Feedback hat:
+        self._show_speed_label(f"Pan: x={px:+.2f}, y={py:+.2f}")
+
+    def _reset_view(self):
+        """Zoom/Pan auf Standard zurücksetzen."""
+        self._player.video_zoom = 0.0
+        self._player.video_pan_x = 0.0
+        self._player.video_pan_y = 0.0
+        self._show_speed_label("View reset")
+    
