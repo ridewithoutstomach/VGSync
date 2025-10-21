@@ -7579,14 +7579,15 @@ class MainWindow(QMainWindow):
 
           <tr><td>Undo</td><td><code>Ctrl+Z</code></td>
               <td>Revert the last action.</td></tr>
-
-          <tr><td>Toggle 360° mode</td><td><code>V</code> or menu “360° Video”</td>
-              <td>Pan/Tilt/Zoom are only active in 360° mode.</td></tr>
-
+              
           <tr><td>Increase / Decrease speed</td>
-              <td><code>+</code> / <code>-</code> (numpad supported)</td>
-              <td>Adjusts playback rate in 0.10× steps.</td></tr>
+              <td><code>+</code> / <code>-</code></td>
+              <td>Adjusts Video-playback rate in 0.10× steps.</td></tr>    
 
+          <tr><td>Toggle 360° mode</td><td><code>V</code></td>
+              <td>Activate the 360° view (Pan/Tilt/Zoom are only active in 360° mode.)</td></tr>
+
+          
           <tr><td>Set exact speed</td>
               <td><code>1</code>…<code>9</code></td>
               <td><code>1</code>=1.0×, <code>2</code>=2.0×, …, <code>9</code>=9.0×.</td></tr>
@@ -7598,6 +7599,9 @@ class MainWindow(QMainWindow):
           <tr><td>Pan / Tilt</td>
               <td><code>Ctrl + Arrow Keys</code></td>
               <td>Left/Right/Up/Down; only available in 360° mode.</td></tr>
+          <tr><td>Reset View</td>
+              <td><code>Ctrl + 0</code></td>
+              <td>Reset the View; only available in 360° mode.</td></tr>    
         </table>
         """
         txt.setHtml(help_html)
