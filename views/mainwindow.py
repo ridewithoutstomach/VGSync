@@ -6624,8 +6624,41 @@ class MainWindow(QMainWindow):
                     "After shortening to the video length, no meaningful GPX remains!")
                 return
     
-            truncated = final_truncated
-    
+            
+            if first_positive_index > 0:
+                try:
+                    t_prev  = gpx_data[first_positive_index - 1].get("time")
+                    t_first = gpx_data[first_positive_index].get("time")
+                    if t_prev is not None and t_first is not None:
+                        step_s = (t_first - t_prev).total_seconds()
+                        if step_s > 1.5:  # >1 s (mit kleiner Toleranz)
+                            
+                            msg = (
+                                "The time gap between the last greyed-out point\n"
+                                f"and the first point to be exported is {step_s:.1f}s.\n\n"
+                                "This strongly suggests the start is not yet in motion.\n\n"
+                                "How to fix:\n"
+                                "  1) Trim more from the beginning until the video/track is clearly in motion.\n"
+                                "  2) Resample the GPX to 1-second intervals.\n\n"
+                                "Do you want to proceed with the export anyway?"
+                            )
+                            r = QMessageBox.question(
+                                self,
+                                "Warning: GPX start time gap",
+                                msg,
+                                QMessageBox.Yes | QMessageBox.No,
+                                QMessageBox.No
+                            )
+                            if r != QMessageBox.Yes:
+                                return
+                except Exception:
+                    pass
+
+            # Nimm nur Punkte ab dem ersten positiven Zeitpunkt
+            truncated = gpx_data[first_positive_index:]
+        
+            
+        
         # 5) Speichern
         self._save_gpx_to_file(truncated, out_path)
         
