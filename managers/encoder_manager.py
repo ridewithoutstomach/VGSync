@@ -39,6 +39,7 @@ import tempfile
 import shutil
 import contextlib
 import urllib.request
+import builtins, contextlib, sys
 
 from PySide6.QtCore import Qt, QSettings
 from PySide6.QtGui import QTextCursor
@@ -47,16 +48,39 @@ from PySide6.QtWidgets import (
     QPushButton, QFileDialog, QApplication,
     QMessageBox
 )
-
-# Hilfsklasse, um print(...) in ein Callback zu leiten:
 class _StringStream:
-    """Alle print()-Ausgaben in write(text)->callback(text)."""
     def __init__(self, callback):
-        self._callback = callback
-    def write(self, text):
-        self._callback(text)
+        # callback ist z. B. self._on_new_text
+        self._cb = callback
+
+    def write(self, s):
+        if not s:
+            return
+        # direkt in dein Output-Fenster streamen
+        self._cb(s)
+
     def flush(self):
         pass
+
+
+# --- NEU: print() nur innerhalb eines Blocks wieder aktivieren ---
+class _EnablePrintTemporarily(contextlib.AbstractContextManager):
+    def __enter__(self):
+        self._old_print = builtins.print
+        def _std_print(*args, **kwargs):
+            sep   = kwargs.get("sep", " ")
+            end   = kwargs.get("end", "\n")
+            file  = kwargs.get("file", sys.stdout)
+            flush = kwargs.get("flush", False)
+            file.write(sep.join(map(str, args)) + end)
+            if flush:
+                try: file.flush()
+                except Exception: pass
+        builtins.print = _std_print
+        return self
+    def __exit__(self, exc_type, exc, tb):
+        builtins.print = self._old_print
+        return False
 
 from config import MY_GLOBAL_TMP_DIR
 
@@ -924,7 +948,8 @@ def overlay_segment_encode(
     cmd+=["-pix_fmt","yuv420p","-an", out_segment]
 
     print("OVERLAY_SEGMENT_ENCODE:", " ".join(cmd))
-    subprocess.run(cmd,check=True)
+    #subprocess.run(cmd,check=True)
+    run_command_gui(cmd, log_func=print)
 
 ###############################################################################
 # 12) Build skip/overlay events
@@ -1330,7 +1355,8 @@ class EncoderDialog(QDialog):
 
         # 4) print-Umleitung => self._on_new_text
         stream = _StringStream(self._on_new_text)
-        with contextlib.redirect_stdout(stream):
+        
+        with _EnablePrintTemporarily(), contextlib.redirect_stdout(stream), contextlib.redirect_stderr(stream):
             try:
                 # 5) xfade_main(temp_cfg) => ruft dein "main()" auf, 
                 #    nur ohne sys.argv.

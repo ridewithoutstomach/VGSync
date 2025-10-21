@@ -23,6 +23,117 @@ import sys
 import shutil
 import platform
 
+"""
+# rasend schnell, aber mit konsole
+def _is_debug():
+    a = " ".join(sys.argv).lower()
+    if " -v" in a or " --verbose" in a:
+        return True
+    try:
+        from PySide6.QtCore import QSettings
+        if QSettings("KVRouite","KVRouite").value("app/debug", False, type=bool):
+            return True
+    except Exception:
+        pass
+    return False
+
+DEBUG = _is_debug()
+
+# --- Alle print()s global stummschalten, wenn nicht Debug ---
+import builtins, sys as _sys
+_real_print = builtins.print
+
+if not DEBUG:
+    def _noop_print(*args, **kwargs):
+        # komplett stumm; minimaler Overhead
+        return None
+    builtins.print = _noop_print
+
+# Optional: force_print() für seltene, immer-sichtbare Ausgaben
+def force_print(*args, **kwargs):
+    end = kwargs.get("end", "\n")
+    _sys.__stdout__.write(" ".join(map(str, args)) + end)
+    _sys.__stdout__.flush()
+    
+    
+"""
+
+
+# auch schnell, Konsole ist "unten"
+# --- Debug/Verbose-Schalter + Konsole behandeln (nur Windows) ---
+import sys, platform, builtins
+
+def _is_verbose():
+    a = " ".join(sys.argv).lower()
+    if " -v" in a or " --verbose" in a:
+        return True
+    try:
+        from PySide6.QtCore import QSettings
+        if QSettings("KVRouite","KVRouite").value("app/debug", False, type=bool):
+            return True
+    except Exception:
+        pass
+    return False
+
+DEBUG = _is_verbose()
+
+# Python-Prints im Non-Verbose vollständig stummschalten (ohne Performance-Kosten)
+if not DEBUG:
+    def _noop_print(*args, **kwargs): 
+        return None
+    builtins.print = _noop_print
+
+    class _NullWriter:
+        def write(self, *_args, **_kw): return 0
+        def flush(self): pass
+    # Nur Python-Ausgaben stumm – ffmpeg/QProcess unaffected
+    sys.stdout = _NullWriter()
+    sys.stderr = _NullWriter()
+
+if platform.system() == "Windows":
+    try:
+        import ctypes, ctypes.wintypes as wt
+        k32 = ctypes.windll.kernel32
+        u32 = ctypes.windll.user32
+
+        hwnd = k32.GetConsoleWindow()
+        if hwnd:
+            # Titel setzen (auch wenn Fenster versteckt ist)
+            k32.SetConsoleTitleW("KVRouite DEBUG Konsole" if DEBUG else "KVRouite Konsole - Don’t Close")
+
+            if not DEBUG:
+                # Konsole 'optisch leer' machen: Puffer löschen
+                # 1) Screen-Buffer-Info holen
+                class CONSOLE_SCREEN_BUFFER_INFO(ctypes.Structure):
+                    _fields_ = [
+                        ("dwSize", wt._COORD),
+                        ("dwCursorPosition", wt._COORD),
+                        ("wAttributes", ctypes.c_ushort),
+                        ("srWindow", wt.SMALL_RECT),
+                        ("dwMaximumWindowSize", wt._COORD),
+                    ]
+                hStdOut = k32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE
+                csbi = CONSOLE_SCREEN_BUFFER_INFO()
+                if k32.GetConsoleScreenBufferInfo(hStdOut, ctypes.byref(csbi)):
+                    buf_cells = csbi.dwSize.X * csbi.dwSize.Y
+                    # 2) Zeichen + Attribute mit Leerraum füllen
+                    chars_written = wt.DWORD(0)
+                    k32.FillConsoleOutputCharacterW(hStdOut, ctypes.c_wchar(' '), buf_cells, wt._COORD(0, 0), ctypes.byref(chars_written))
+                    k32.FillConsoleOutputAttribute(hStdOut, csbi.wAttributes, buf_cells, wt._COORD(0, 0), ctypes.byref(chars_written))
+                    # 3) Cursor auf 0,0
+                    k32.SetConsoleCursorPosition(hStdOut, wt._COORD(0, 0))
+                # 4) Fenster unsichtbar (Konsole bleibt vorhanden → Performance ok)
+                SW_HIDE = 0
+                u32.ShowWindow(hwnd, SW_HIDE)
+            else:
+                # Debug sichtbar lassen – optional Banner
+                try:
+                    print("==== KVRouite DEBUG Konsole ====")
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
 
 
 
