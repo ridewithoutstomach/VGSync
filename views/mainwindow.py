@@ -609,12 +609,40 @@ class MainWindow(QMainWindow):
         render_action.triggered.connect(self.on_render_clicked)
         file_menu.addAction(render_action)
 
+        # --- Shortcuts-Menü (ehemals "Edit") ---
+        shortcuts_menu = menubar.addMenu("Shortcuts")
+        shortcuts_menu.setStatusTip("Keyboard shortcuts and player controls")
 
-        edit_menu = menubar.addMenu("Edit")
-        undo_action = QAction("Undo - ", self)
+        # 1) Undo
+        undo_action = QAction("Undo", self)
         undo_action.setStatusTip("Revert the last action.")
-        undo_action.setShortcut(QKeySequence("Ctrl+Z"))  # ⌨ STRG+Z
-        edit_menu.addAction(undo_action)
+        undo_action.setShortcut(QKeySequence("Ctrl+Z"))
+        shortcuts_menu.addAction(undo_action)
+        # (Deine bestehende Zeile unten im Code behalten:)
+        # undo_action.triggered.connect(self.on_global_undo)
+
+        # 2) 360° Video Toggle (Taste V)
+        self.action_toggle_360 = QAction("360° Video", self, checkable=True)
+        self.action_toggle_360.setStatusTip("Toggle 360° mode for pan/tilt/zoom (key: V)")
+        self.action_toggle_360.setShortcut(QKeySequence("V"))
+        shortcuts_menu.addAction(self.action_toggle_360)
+
+        def _on_toggle_360_from_menu(checked):
+            # Editor schaltet selbst um; Menü-Check danach mit tatsächlichem Zustand synchronisieren
+            self.video_editor.toggle_360_mode()
+            self.action_toggle_360.setChecked(bool(getattr(self.video_editor, "_is_360_mode", False)))
+
+        self.action_toggle_360.triggered.connect(_on_toggle_360_from_menu)
+
+        shortcuts_menu.addSeparator()
+
+        # 3) Shortcuts… Hilfe
+        self.action_show_shortcuts = QAction("Shortcuts…", self)
+        self.action_show_shortcuts.setStatusTip("Open a quick reference of all available shortcuts")
+        self.action_show_shortcuts.triggered.connect(self._show_shortcuts_help)
+        shortcuts_menu.addAction(self.action_show_shortcuts)
+
+        
 
         self.playlist_menu = menubar.addMenu("Playlist")
         
@@ -959,6 +987,9 @@ class MainWindow(QMainWindow):
     
         # 1)     Video Editor oben (85% der Höhe dieses Blocks)
         self.video_editor = VideoEditorWidget()
+        if hasattr(self, "action_toggle_360"):
+            self.action_toggle_360.setChecked(bool(getattr(self.video_editor, "_is_360_mode", False)))
+        
         video_area_layout.addWidget(self.video_editor, stretch=85)
         
         # 2) Timeline + Control + Blaues Widget (15% der Höhe)
@@ -7521,3 +7552,61 @@ class MainWindow(QMainWindow):
             self.video_editor.toggle_360_mode()
         else:
             super().keyPressEvent(event)
+            
+    def _show_shortcuts_help(self):
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Shortcuts")
+        dlg.setMinimumSize(560, 500)
+
+        v = QVBoxLayout(dlg)
+
+        head = QLabel("<b>Keyboard Shortcuts</b>")
+        v.addWidget(head)
+
+        txt = QTextEdit()
+        txt.setReadOnly(True)
+
+        help_html = """
+        <style>
+          body { font-family: Segoe UI, sans-serif; font-size: 12.5px; }
+          code { font-family: Consolas, monospace; }
+          table { border-collapse: collapse; width: 100%; }
+          th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #ddd; vertical-align: top; }
+          th { background: #f3f3f3; }
+        </style>
+        <table>
+          <tr><th>Action</th><th>Shortcut</th><th>Notes</th></tr>
+
+          <tr><td>Undo</td><td><code>Ctrl+Z</code></td>
+              <td>Revert the last action.</td></tr>
+
+          <tr><td>Toggle 360° mode</td><td><code>V</code> or menu “360° Video”</td>
+              <td>Pan/Tilt/Zoom are only active in 360° mode.</td></tr>
+
+          <tr><td>Increase / Decrease speed</td>
+              <td><code>+</code> / <code>-</code> (numpad supported)</td>
+              <td>Adjusts playback rate in 0.10× steps.</td></tr>
+
+          <tr><td>Set exact speed</td>
+              <td><code>1</code>…<code>9</code></td>
+              <td><code>1</code>=1.0×, <code>2</code>=2.0×, …, <code>9</code>=9.0×.</td></tr>
+
+          <tr><td>Zoom</td>
+              <td><code>Ctrl + +</code> / <code>Ctrl + -</code></td>
+              <td>Only available in 360° mode.</td></tr>
+
+          <tr><td>Pan / Tilt</td>
+              <td><code>Ctrl + Arrow Keys</code></td>
+              <td>Left/Right/Up/Down; only available in 360° mode.</td></tr>
+        </table>
+        """
+        txt.setHtml(help_html)
+        v.addWidget(txt)
+
+        btns = QDialogButtonBox(QDialogButtonBox.Ok, parent=dlg)
+        btns.accepted.connect(dlg.accept)
+        v.addWidget(btns)
+
+        dlg.exec()
+        
+    
