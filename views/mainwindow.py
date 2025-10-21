@@ -774,14 +774,15 @@ class MainWindow(QMainWindow):
         action_clear_mpv_path.triggered.connect(self._on_clear_mpv_path)
         mpv_menu.addAction(action_clear_mpv_path)
 
+        
+        
         temp_dir_menu = setup_menu.addMenu("Temp Directory")
 
-        action_show_temp_dir = QAction("Show current Temp Dir", self)
-        
+        action_show_temp_dir = QAction("Show current Temp Directory", self)
+        action_show_temp_dir.setStatusTip("Shows the current Temp Directory.")
         action_show_temp_dir.triggered.connect(self._on_show_temp_dir)
-        action_show_temp_dir = QAction("Show current Temp-Directory", self)
-        action_show_temp_dir.setStatusTip("Shows the current Temp-Directory ")
         temp_dir_menu.addAction(action_show_temp_dir)
+        
         
         
         action_set_temp_dir = QAction("Set Temp Dir...", self)
@@ -6499,6 +6500,12 @@ class MainWindow(QMainWindow):
     """
     
     def on_save_gpx_clicked(self):
+        # Sofort abbrechen, wenn keine GPX-Daten geladen sind
+        gpx_data = getattr(self.gpx_widget.gpx_list, "_gpx_data", [])
+        if not gpx_data:
+            QMessageBox.warning(self, "No GPX", "No GPX data available!")
+            return
+    
         reply = QMessageBox.question(
             self,
             "Save GPX",
@@ -6523,10 +6530,10 @@ class MainWindow(QMainWindow):
             return
 
         # 2) GPX-Daten
-        gpx_data = self.gpx_widget.gpx_list._gpx_data
-        if not gpx_data:
-            QMessageBox.warning(self, "No GPX", "No GPX data available!")
-            return
+        #gpx_data = self.gpx_widget.gpx_list._gpx_data
+        #if not gpx_data:
+        #    QMessageBox.warning(self, "No GPX", "No GPX data available!")
+        #    return
 
         # 3) Nur Punkte mit positiver Zeit behalten (keine grauen Punkte am Anfang)
         try:
