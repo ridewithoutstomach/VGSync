@@ -757,7 +757,8 @@ class MainWindow(QMainWindow):
         self.timer_action_group.addAction(self.action_global_time)
         self.timer_action_group.addAction(self.action_final_time)
         
-       
+        
+
         
         
         
@@ -975,6 +976,8 @@ class MainWindow(QMainWindow):
         self.video_editor = VideoEditorWidget()
         if hasattr(self, "action_toggle_360"):
             self.action_toggle_360.setChecked(bool(getattr(self.video_editor, "_is_360_mode", False)))
+            
+            
         
         video_area_layout.addWidget(self.video_editor, stretch=85)
         
@@ -1040,6 +1043,9 @@ class MainWindow(QMainWindow):
         
         self.gpx_widget = GPXWidget()
         self.gpx_widget.gpx_list.rowSelected.connect(self._on_gpx_row_selected)
+        
+          
+        
         
         #self.statusBar().showMessage("Ready")
         
@@ -1248,6 +1254,10 @@ class MainWindow(QMainWindow):
         self.video_control.set_editing_mode(edit_on,cut_on)
         self.map_widget.view.loadFinished.connect(self._on_map_page_loaded)
         self.video_editor.set_final_time_callback(self._compute_final_time)
+        
+        self.video_editor.videosDropped.connect(self._on_videos_dropped)       # Player
+        self.gpx_widget.gpx_list.tracksDropped.connect(self._on_tracks_dropped)  # GPX-Liste
+        self.map_widget.tracksDropped.connect(self._on_tracks_dropped)    
         
     
     def _on_gpx_row_selected(self, row_idx: int):
@@ -4739,6 +4749,11 @@ class MainWindow(QMainWindow):
                 self.speed_index -= 1
                 self.current_rate = self.vlc_speeds[self.speed_index]
                 self.video_editor.set_playback_rate(self.current_rate)
+                
+        elif event.key() == Qt.Key_V:
+            self.action_toggle_360.trigger()  # löst deinen Menü-Flow aus und hält den Haken in sync
+            return
+  
         else:
             super(MainWindow, self).keyPressEvent(event)
 
@@ -7608,5 +7623,132 @@ class MainWindow(QMainWindow):
         v.addWidget(btns)
 
         dlg.exec()
+        
+        
+    def _ask_new_append(self, title: str, text: str, default: str = "append") -> str:
+        box = QMessageBox(self)
+        box.setWindowTitle(title)
+        box.setText(text)
+        new_btn    = box.addButton("New", QMessageBox.AcceptRole)
+        append_btn = box.addButton("Append", QMessageBox.AcceptRole)
+        cancel_btn = box.addButton("Cancel", QMessageBox.RejectRole)
+        # Default-Fokus
+        if default.lower() == "append":
+            box.setDefaultButton(append_btn)
+        else:
+            box.setDefaultButton(new_btn)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is new_btn:    return "new"
+        if clicked is append_btn: return "append"
+        return "cancel"
+
+    # --- Handler: Videos gedroppt ---
+    def _on_videos_dropped(self, paths: list[str]):
+        if not paths:
+            return
+
+        # already videos loaded?
+        has_videos = getattr(self, "playlist_counter", 0) > 0
+
+        if not has_videos:
+            # kein Dialog, einfach "New"
+            self._clear_video_playlist()   # nur Videos leeren (s.u.)
+            try:
+                self.process_open_mp4(paths)   # <— kein append-Argument
+            except Exception as e:
+                print(f"[Drop Videos] Error (first import): {e}")
+            return
+
+        # Es gibt schon Videos => fragen
+        choice = self._ask_new_append("Import Videos", "Import dropped videos?", "append")
+        if choice == "cancel":
+            return
+
+        try:
+            if choice == "new":
+                self._clear_video_playlist()
+                self.process_open_mp4(paths)
+            else:  # "append"
+                self.process_open_mp4(paths)
+        except Exception as e:
+            print(f"[Drop Videos] Error: {e}")
+
+
+    def _clear_video_playlist(self):
+        # interne Zustände zurücksetzen
+        self.playlist = []
+        self.playlist_counter = 0
+        self.video_durations = []
+        try:
+            self.video_editor.set_playlist([])   # mpv-Playlist leeren
+        except Exception:
+            pass
+
+        # UI aktualisieren
+        try:
+            self.video_control.activate_controls(False)
+        except Exception:
+            pass
+
+        try:
+            self.rebuild_timeline()              # setzt Total-Dauer/Boundaries auf 0
+        except Exception:
+            pass
+
+        # Menü neu aufbauen/aufräumen
+        if hasattr(self, "_rebuild_playlist_menu"):
+            self._rebuild_playlist_menu()
+        elif hasattr(self, "playlist_menu"):
+            self.playlist_menu.clear()
+
+
+    # --- Handler: GPX/FIT gedroppt (Map oder Liste) ---
+    def _on_tracks_dropped(self, paths: list[str]):
+        if not paths:
+            return
+
+        # Max. 1 Datei zulassen
+        p0 = paths[0]
+        if len(paths) > 1:
+            try:
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.information(
+                    self, "Multiple files",
+                    "Please load only one GPX/FIT-Datei via Drag & Drop.\n"
+                    "I import the first one!."
+                )
+            except Exception:
+                pass  # not critical for headless/test runs
+
+        pl = p0.lower()
+        is_gpx = pl.endswith(".gpx")
+        is_fit = pl.endswith(".fit")
+        if not (is_gpx or is_fit):
+            try:
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "Unsupported", f"Not a GPX/FIT file:\n{p0}")
+            except Exception:
+                pass
+            return
+
+        # Wenn noch keine GPX/FIT geladen ist: immer New (ohne Dialog)
+        has_tracks = bool(getattr(self, "_gpx_data", None))
+        if not has_tracks:
+            choice = "new"
+        else:
+            # Es sind bereits Tracks vorhanden → nachfragen
+            choice = self._ask_new_append("Import Tracks", "Import dropped GPX/FIT?", "append")
+            if choice == "cancel":
+                return
+
+        try:
+            if is_gpx:
+                self.process_open_gpx(p0, mode=choice)   # deine Loader unterstützen 'mode'
+            else:
+                self.process_open_fit(p0, mode=choice)
+        except Exception as e:
+            print(f"[Drop Track] Error on {p0}: {e}")
+
         
     

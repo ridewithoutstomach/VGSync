@@ -25,10 +25,10 @@ import re
 
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem,
+    QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QLabel,
     QHeaderView, QAbstractItemView, QStyledItemDelegate, QStyle,
     QAbstractScrollArea
-)
+)    
 from PySide6.QtGui import QColor
 
 from core.gpx_parser import get_gpx_video_shift, is_gpx_video_shift_set, set_gpx_video_shift
@@ -49,6 +49,10 @@ class MarkColumnDelegate(QStyledItemDelegate):
 
 
 class GPXListWidget(QWidget):
+    
+    # Signal als Klassenattribut
+    tracksDropped = Signal(list)  # list[str]
+    
     # Signal, wenn der Nutzer im Pause-Modus in der Tabelle auf eine Zeile klickt
     rowClickedInPause = Signal(int)
     rowSelected = Signal(int) 
@@ -137,7 +141,18 @@ class GPXListWidget(QWidget):
         self._original_value = None
         self.table.itemDoubleClicked.connect(self._on_item_double_clicked)
         
-    # ---------------------------------------------------
+        # --- Drag&Drop: GPX/FIT ---
+        self.setAcceptDrops(True)  # auf dem ganzen Widget (Tabelle füllt es ohnehin)
+        self._dnd_overlay = QLabel("Drop 1x GPX / FIT to import…", self)
+        self._dnd_overlay.setStyleSheet(
+            "background: rgba(0,0,0,0.55); color: white; border: 2px dashed #ddd;"
+            "border-radius: 12px; font-size: 18px; padding: 16px;"
+        )
+        self._dnd_overlay.setAlignment(Qt.AlignCenter)
+        self._dnd_overlay.hide()
+        self._dnd_overlay.setGeometry(self.rect())
+        self._dnd_overlay.show()  # leer -> Hinweis sichtbar
+    #    -------------------------------------------------
     # markB markE und Deselect
     # ---------------------------------------------------
    
@@ -681,10 +696,15 @@ class GPXListWidget(QWidget):
             n = len(data)
             self.table.clearContents()
             self.table.setRowCount(n)
+            
+            
             self._gpx_times = [0.0] * n
             self._last_video_row = None
-
+    
             if n == 0:
+                if hasattr(self, "_dnd_overlay"):
+                    self._dnd_overlay.setText("Drag & Drop 1 GPX/FIT here")
+                    self._dnd_overlay.show()
                 return
 
             base_dt = data[0].get("time", None)
@@ -738,6 +758,59 @@ class GPXListWidget(QWidget):
         finally:
             # End of bulk update: restore widget state
             self._end_table_update()
+            
+            if hasattr(self, "_dnd_overlay"):
+                self._dnd_overlay.hide()
+    # ----------------------------
+    # Drag&Drop (GPX/FIT)
+    # ----------------------------
+    def _extract_paths(self, mime):
+        paths = []
+        if mime and mime.hasUrls():
+            for u in mime.urls():
+                if u.isLocalFile():
+                    paths.append(u.toLocalFile())
+        elif mime and mime.hasText():
+            for line in mime.text().splitlines():
+                line = line.strip()
+                if line:
+                    paths.append(line)
+        return paths
+
+    def _is_track(self, path: str) -> bool:
+        return path.lower().endswith((".gpx", ".fit"))
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._dnd_overlay.setGeometry(self.rect())
+
+    def dragEnterEvent(self, e):
+        ok = any(self._is_track(p) for p in self._extract_paths(e.mimeData()))
+        if ok:
+            self._dnd_overlay.show()
+            e.acceptProposedAction()
+        else:
+            e.ignore()
+
+    def dragMoveEvent(self, e):
+        e.acceptProposedAction()
+
+    def dragLeaveEvent(self, e):
+        self._dnd_overlay.hide()
+        e.accept()
+
+    def dropEvent(self, e):
+        self._dnd_overlay.hide()
+        paths = [p for p in self._extract_paths(e.mimeData()) if self._is_track(p)]
+        if paths:
+            try:
+                self.tracksDropped.emit(paths)
+            except Exception:
+                pass
+            e.acceptProposedAction()
+        else:
+            e.ignore()        
+            
 
     # ---------------------------------------------------
     # 5) get_closest_index_for_time
@@ -865,3 +938,10 @@ class GPXListWidget(QWidget):
         if not self._gpx_data or row_idx < 0 or row_idx >= len(self._gpx_data):
             return None
         return self._gpx_data[row_idx].get("time", None)    
+        
+    # NEU ergänzen:
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        if hasattr(self, "_dnd_overlay") and self._dnd_overlay:
+            self._dnd_overlay.setGeometry(self.rect())
+    

@@ -22,7 +22,7 @@ import os
 import sys
 import json
 from PySide6.QtWidgets import QWidget, QVBoxLayout
-from PySide6.QtCore import QUrl, Signal, Slot
+from PySide6.QtCore import QUrl, Signal, Slot, Qt
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEngineSettings
 from PySide6.QtWebChannel import QWebChannel
@@ -34,6 +34,8 @@ from core.gpx_parser import get_gpx_video_shift, is_gpx_video_shift_set
 from .map_bridge import MapBridge
 
 class MapWidget(QWidget):
+    # Signal als Klassenattribut
+    tracksDropped = Signal(list)  # list[str]
     """
     Neue Version: 2 Zustände => gelb (Video Play), blau (Pause-Klick).
     """
@@ -61,10 +63,12 @@ class MapWidget(QWidget):
 
         self.view = QWebEngineView(self)
         layout.addWidget(self.view)
+        # View selbst soll Drops nicht übernehmen:
+        self.view.setAcceptDrops(False)
 
         # Erlaubt: Remote URLs / z.B. OSM, MapTiler, Mapbox, Bing
         self.view.settings().setAttribute(
-            QWebEngineSettings.LocalContentCanAccessRemoteUrls, True
+                QWebEngineSettings.LocalContentCanAccessRemoteUrls, True
         )
 
         # WebChannel + Bridge
@@ -89,6 +93,17 @@ class MapWidget(QWidget):
         self._bridge.newPointInsertedSignal.connect(self._on_new_point_inserted)
         self._bridge.mapboxProfileChangedSignal.connect(self._on_mapbox_profile_changed)
 
+        # --- Drag&Drop: GPX/FIT auf die Karte ---
+        self.setAcceptDrops(True)
+        from PySide6.QtWidgets import QLabel
+        self._dnd_shield = QLabel("Drop GPX / FIT to import…", self)
+        self._dnd_shield.setStyleSheet(
+            "background: rgba(0,0,0,0.55); color: white; border: 2px dashed #ddd;"
+            "border-radius: 12px; font-size: 18px; padding: 16px;"
+        )
+        self._dnd_shield.setAlignment(Qt.AlignCenter)
+        self._dnd_shield.hide()
+        
     @Slot(bool)
     def _on_map_page_load_finished(self, ok):
         """
@@ -105,6 +120,59 @@ class MapWidget(QWidget):
         # Falls du eine Funktion in MainWindow hast, z. B. _apply_map_sizes_from_settings():
         if self._mainwindow and hasattr(self._mainwindow, "_apply_map_sizes_from_settings"):
             self._mainwindow._apply_map_sizes_from_settings()
+
+
+    # ----------------------------
+    # Drag&Drop (GPX/FIT)
+    # ----------------------------
+    def _extract_paths(self, mime):
+        paths = []
+        if mime and mime.hasUrls():
+            for u in mime.urls():
+                if u.isLocalFile():
+                    paths.append(u.toLocalFile())
+        elif mime and mime.hasText():
+            for line in mime.text().splitlines():
+                line = line.strip()
+                if line:
+                    paths.append(line)
+        return paths
+
+    def _is_track(self, path: str) -> bool:
+        return path.lower().endswith((".gpx", ".fit"))
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        if self._dnd_shield:
+            self._dnd_shield.setGeometry(self.rect())
+
+    def dragEnterEvent(self, e):
+        ok = any(self._is_track(p) for p in self._extract_paths(e.mimeData()))
+        if ok:
+            self._dnd_shield.show()
+            self._dnd_shield.raise_()
+            e.acceptProposedAction()
+        else:
+            e.ignore()
+
+    def dragMoveEvent(self, e):
+        e.acceptProposedAction()
+
+    def dragLeaveEvent(self, e):
+        self._dnd_shield.hide()
+        e.accept()
+
+    def dropEvent(self, e):
+        self._dnd_shield.hide()
+        paths = [p for p in self._extract_paths(e.mimeData()) if self._is_track(p)]
+        if paths:
+            try:
+                self.tracksDropped.emit(paths)
+            except Exception:
+                pass
+            e.acceptProposedAction()
+        else:
+            e.ignore()
 
     @Slot(float, float, int)
     def _on_new_point_inserted(self, lat, lon, idx):
