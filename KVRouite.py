@@ -23,46 +23,23 @@ import sys
 import shutil
 import platform
 
-"""
-# rasend schnell, aber mit konsole
-def _is_debug():
-    a = " ".join(sys.argv).lower()
-    if " -v" in a or " --verbose" in a:
-        return True
-    try:
-        from PySide6.QtCore import QSettings
-        if QSettings("KVRouite","KVRouite").value("app/debug", False, type=bool):
-            return True
-    except Exception:
-        pass
-    return False
-
-DEBUG = _is_debug()
-
-# --- Alle print()s global stummschalten, wenn nicht Debug ---
-import builtins, sys as _sys
-_real_print = builtins.print
-
-if not DEBUG:
-    def _noop_print(*args, **kwargs):
-        # komplett stumm; minimaler Overhead
-        return None
-    builtins.print = _noop_print
-
-# Optional: force_print() für seltene, immer-sichtbare Ausgaben
-def force_print(*args, **kwargs):
-    end = kwargs.get("end", "\n")
-    _sys.__stdout__.write(" ".join(map(str, args)) + end)
-    _sys.__stdout__.flush()
-    
-    
-"""
 
 
-# auch schnell, Konsole ist "unten"
+
+
 # --- Debug/Verbose-Schalter + Konsole behandeln (nur Windows) ---
 import sys, platform, builtins
 
+REAL_STDOUT = sys.__stdout__
+REAL_STDERR = sys.__stderr__
+
+def force_print(*args, sep=" ", end="\n"):
+    REAL_STDOUT.write(sep.join(map(str, args)) + end)
+    REAL_STDOUT.flush()
+
+def force_error(*args, sep=" ", end="\n"):
+    REAL_STDERR.write(sep.join(map(str, args)) + end)
+    REAL_STDERR.flush()
 def _is_verbose():
     a = " ".join(sys.argv).lower()
     if " -v" in a or " --verbose" in a:
@@ -122,13 +99,18 @@ if platform.system() == "Windows":
                     k32.FillConsoleOutputAttribute(hStdOut, csbi.wAttributes, buf_cells, wt._COORD(0, 0), ctypes.byref(chars_written))
                     # 3) Cursor auf 0,0
                     k32.SetConsoleCursorPosition(hStdOut, wt._COORD(0, 0))
+                    force_print("====   KVRouite DEBUG Konsole    ====")
+                    force_print("====         Don´t Close!        ====")
+                    force_print("==== closing will close the APP! ====")
+                    
                 # 4) Fenster unsichtbar (Konsole bleibt vorhanden → Performance ok)
+                
                 SW_HIDE = 0
                 u32.ShowWindow(hwnd, SW_HIDE)
             else:
                 # Debug sichtbar lassen – optional Banner
                 try:
-                    print("==== KVRouite DEBUG Konsole ====")
+                    force_print("==== KVRouite DEBUG Konsole ====")
                 except Exception:
                     pass
     except Exception:

@@ -637,7 +637,7 @@ class MainWindow(QMainWindow):
         shortcuts_menu.addSeparator()
 
         # 3) Shortcuts… Hilfe
-        self.action_show_shortcuts = QAction("Shortcuts…", self)
+        self.action_show_shortcuts = QAction("Show Shortcuts", self)
         self.action_show_shortcuts.setStatusTip("Open a quick reference of all available shortcuts")
         self.action_show_shortcuts.triggered.connect(self._show_shortcuts_help)
         shortcuts_menu.addAction(self.action_show_shortcuts)
