@@ -150,6 +150,8 @@ class GPXListWidget(QWidget):
         )
         self._dnd_overlay.setAlignment(Qt.AlignCenter)
         self._dnd_overlay.hide()
+        self._dnd_overlay.setGeometry(self.rect())
+        self._dnd_overlay.show()  # leer -> Hinweis sichtbar
     #    -------------------------------------------------
     # markB markE und Deselect
     # ---------------------------------------------------
@@ -694,10 +696,15 @@ class GPXListWidget(QWidget):
             n = len(data)
             self.table.clearContents()
             self.table.setRowCount(n)
+            
+            
             self._gpx_times = [0.0] * n
             self._last_video_row = None
-
+    
             if n == 0:
+                if hasattr(self, "_dnd_overlay"):
+                    self._dnd_overlay.setText("Drag & Drop 1 GPX/FIT here")
+                    self._dnd_overlay.show()
                 return
 
             base_dt = data[0].get("time", None)
@@ -751,6 +758,9 @@ class GPXListWidget(QWidget):
         finally:
             # End of bulk update: restore widget state
             self._end_table_update()
+            
+            if hasattr(self, "_dnd_overlay"):
+                self._dnd_overlay.hide()
     # ----------------------------
     # Drag&Drop (GPX/FIT)
     # ----------------------------
@@ -928,3 +938,10 @@ class GPXListWidget(QWidget):
         if not self._gpx_data or row_idx < 0 or row_idx >= len(self._gpx_data):
             return None
         return self._gpx_data[row_idx].get("time", None)    
+        
+    # NEU ergänzen:
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        if hasattr(self, "_dnd_overlay") and self._dnd_overlay:
+            self._dnd_overlay.setGeometry(self.rect())
+    

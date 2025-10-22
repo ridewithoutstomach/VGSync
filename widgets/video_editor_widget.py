@@ -67,7 +67,9 @@ class VideoEditorWidget(QWidget):
         )
         self._dnd_overlay.setAlignment(Qt.AlignCenter)
         self._dnd_overlay.hide()
-
+        self._dnd_overlay.setGeometry(self.rect())
+        self._dnd_overlay.setText("Drop video file(s) here")
+        self._dnd_overlay.show()  # beim Start leer -> Hinweis sichtbar
         
         self._cut_intervals = []
     
@@ -529,6 +531,7 @@ class VideoEditorWidget(QWidget):
         self._player.command("playlist-clear")
         if not video_list:
             self.playlist = []
+            self.set_empty_hint_visible(True)
             return
         # Erstes normal load
         self._player.command("loadfile", video_list[0])
@@ -541,6 +544,7 @@ class VideoEditorWidget(QWidget):
         self.is_playing = False
 
         self.playlist = video_list
+        self.set_empty_hint_visible(False)
 
     def _jump_to_global_time(self, wanted_s: float):
         """
@@ -745,4 +749,19 @@ class VideoEditorWidget(QWidget):
         self._player.video_pan_x = 0.0
         self._player.video_pan_y = 0.0
         self._show_speed_label("View reset")
+        
+    # NEU in der Klasse ergänzen:
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        if hasattr(self, "_dnd_overlay") and self._dnd_overlay:
+            self._dnd_overlay.setGeometry(self.rect())
+
+    def set_empty_hint_visible(self, visible: bool):
+        if visible:
+            self._dnd_overlay.setText("Drag & Drop video file(s) here")
+            self._dnd_overlay.show()
+            self._dnd_overlay.raise_()
+        else:
+            self._dnd_overlay.hide()
+    
     
