@@ -610,7 +610,7 @@ class MainWindow(QMainWindow):
         file_menu.addAction(render_action)
 
         # --- Shortcuts-Menü (ehemals "Edit") ---
-        shortcuts_menu = menubar.addMenu("Shortcuts")
+        shortcuts_menu = menubar.addMenu("Edit")
         shortcuts_menu.setStatusTip("Keyboard shortcuts and player controls")
 
         # 1) Undo
@@ -621,18 +621,10 @@ class MainWindow(QMainWindow):
         # (Deine bestehende Zeile unten im Code behalten:)
         # undo_action.triggered.connect(self.on_global_undo)
 
-        # 2) 360° Video Toggle (Taste V)
-        self.action_toggle_360 = QAction("360° Video", self, checkable=True)
-        self.action_toggle_360.setStatusTip("Toggle 360° mode for pan/tilt/zoom (key: V)")
-        self.action_toggle_360.setShortcut(QKeySequence("V"))
-        shortcuts_menu.addAction(self.action_toggle_360)
-
-        self.action_toggle_360.triggered.connect(self._on_toggle_360_from_menu)
-
         shortcuts_menu.addSeparator()
 
         # 3) Shortcuts… Hilfe
-        self.action_show_shortcuts = QAction("Show Shortcuts", self)
+        self.action_show_shortcuts = QAction("Shortcuts", self)
         self.action_show_shortcuts.setStatusTip("Open a quick reference of all available shortcuts")
         self.action_show_shortcuts.triggered.connect(self._show_shortcuts_help)
         shortcuts_menu.addAction(self.action_show_shortcuts)
@@ -654,15 +646,21 @@ class MainWindow(QMainWindow):
         self.action_toggle_video = QAction("Video (detach)", self)
         self.action_toggle_video.setStatusTip("Detach/Attach the Video-Editor.")
         self.action_toggle_video.triggered.connect(self._toggle_video)
-        
-        view_menu.addAction(self.action_toggle_video)
-        
 
         self.action_toggle_map = QAction("Map (detach)", self)
         self.action_toggle_map.setStatusTip("Detach/Attach the Map.")
         self.action_toggle_map.triggered.connect(self._toggle_map)
         view_menu.addAction(self.action_toggle_map)
         
+        view_menu.addAction(self.action_toggle_video)
+        
+         # 360° Video Toggle (Taste V)
+        self.action_toggle_360 = QAction("360° Video", self, checkable=True)
+        self.action_toggle_360.setStatusTip("Toggle 360° mode for pan/tilt/zoom (key: V)")
+        self.action_toggle_360.setShortcut(QKeySequence("V"))
+        view_menu.addAction(self.action_toggle_360)
+
+        self.action_toggle_360.triggered.connect(self._on_toggle_360_from_menu)
         
         setup_menu = menubar.addMenu("Config")
         
@@ -923,16 +921,6 @@ class MainWindow(QMainWindow):
         
         gpx_info_menu = menubar.addMenu("GPX-Info")
         
-
-        info_menu = menubar.addMenu("About")
-        
-        copyright_action = info_menu.addAction("Copyright + License")
-        copyright_action.triggered.connect(self._show_copyright_dialog)
-        
-       
-        
-        
-        
         
         help_menu = menubar.addMenu("Help")
 
@@ -944,6 +932,9 @@ class MainWindow(QMainWindow):
         tutorials_action.setStatusTip("Open KVRouite YouTube channel with tutorials")
         tutorials_action.triggered.connect(self._on_open_tutorials)
         help_menu.addAction(tutorials_action)
+
+        copyright_action = help_menu.addAction("Copyright + License")
+        copyright_action.triggered.connect(self._show_copyright_dialog)
         
         self.action_global_time.setChecked(True)
         timer_menu.addAction(self.action_global_time)
