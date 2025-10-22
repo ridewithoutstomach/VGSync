@@ -38,9 +38,13 @@ from PySide6.QtWidgets import (
     QWidget, QGridLayout, QFrame, QLabel, QVBoxLayout
 )
 from PySide6.QtCore import Qt, QTimer, Signal
+
 from PySide6.QtGui import QShortcut, QKeySequence
 
 class VideoEditorWidget(QWidget):
+     #Signal MUSS als Klassenattribut definiert werden
+    videosDropped = Signal(list)  # list[str]
+    
     """
     Ein mpv-basierter Video-Player, der die alten Methoden (show_first_frame_at_index,
     set_playback_rate, etc.) bereitstellt, damit dein restlicher Code weiter funktioniert.
@@ -53,6 +57,18 @@ class VideoEditorWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        
+       # --- Drag&Drop: Videos ---
+        self.setAcceptDrops(True)
+        self._dnd_overlay = QLabel("Drop videos to import…", self)
+        self._dnd_overlay.setStyleSheet(
+            "background: rgba(0,0,0,0.55); color: white; border: 2px dashed #ddd;"
+            "border-radius: 12px; font-size: 18px; padding: 16px;"
+        )
+        self._dnd_overlay.setAlignment(Qt.AlignCenter)
+        self._dnd_overlay.hide()
+
+        
         self._cut_intervals = []
     
     
@@ -75,7 +91,9 @@ class VideoEditorWidget(QWidget):
         layout.addWidget(self.video_frame, 0, 0)
         layout.setRowStretch(0, 1)
         layout.setColumnStretch(0, 1)
-
+        # Overlay deckt die Fläche
+        self._dnd_overlay.raise_()
+        
         # Oben Rechts: Speed-Label
         self.speed_label = QLabel("", self)
         self.speed_label.setStyleSheet("color:white; background-color:rgba(0,0,0,120); padding:2px;")
@@ -226,7 +244,57 @@ class VideoEditorWidget(QWidget):
         QShortcut(QKeySequence(Qt.CTRL | Qt.Key_Up),    self, activated=lambda: self._nudge_pan(dy=+0.05))
         QShortcut(QKeySequence(Qt.CTRL | Qt.Key_Down),  self, activated=lambda: self._nudge_pan(dy=-0.05))
 
-        
+   # ----------------------------
+   # Drag&Drop (Videos)
+   # ----------------------------
+    def _extract_paths(self, mime):
+        paths = []
+        if mime and mime.hasUrls():
+            for u in mime.urls():
+                if u.isLocalFile():
+                    paths.append(u.toLocalFile())
+        elif mime and mime.hasText():
+            for line in mime.text().splitlines():
+                line = line.strip()
+                if line:
+                    paths.append(line)
+        return paths
+
+    def _is_video(self, path: str) -> bool:
+        return path.lower().endswith((".mp4", ".mov", ".mkv", ".avi"))
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        # Overlay immer auf volle Größe
+        self._dnd_overlay.setGeometry(self.rect())
+
+    def dragEnterEvent(self, e):
+        ok = any(self._is_video(p) for p in self._extract_paths(e.mimeData()))
+        if ok:
+            self._dnd_overlay.show()
+            e.acceptProposedAction()
+        else:
+            e.ignore()
+
+    def dragMoveEvent(self, e):
+        e.acceptProposedAction()
+
+    def dragLeaveEvent(self, e):
+        self._dnd_overlay.hide()
+        e.accept()
+
+    def dropEvent(self, e):
+        self._dnd_overlay.hide()
+        paths = [p for p in self._extract_paths(e.mimeData()) if self._is_video(p)]
+        if paths:
+            # Emit nach MainWindow; dort Abfrage "New/Append/Cancel"
+            try:
+                self.videosDropped.emit(paths)
+            except Exception:
+                pass
+            e.acceptProposedAction()
+        else:
+            e.ignore()
         
 
     def toggle_360_mode(self):
