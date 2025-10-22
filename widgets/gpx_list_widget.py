@@ -143,7 +143,7 @@ class GPXListWidget(QWidget):
         
         # --- Drag&Drop: GPX/FIT ---
         self.setAcceptDrops(True)  # auf dem ganzen Widget (Tabelle füllt es ohnehin)
-        self._dnd_overlay = QLabel("Drop GPX / FIT to import…", self)
+        self._dnd_overlay = QLabel("Drop 1x GPX / FIT to import…", self)
         self._dnd_overlay.setStyleSheet(
             "background: rgba(0,0,0,0.55); color: white; border: 2px dashed #ddd;"
             "border-radius: 12px; font-size: 18px; padding: 16px;"

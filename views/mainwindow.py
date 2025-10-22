@@ -7711,19 +7711,48 @@ class MainWindow(QMainWindow):
     def _on_tracks_dropped(self, paths: list[str]):
         if not paths:
             return
-        # Wenn nix geladen ist => Default "new", sonst nachfragen
-        default = "append" if getattr(self, "_gpx_data", None) else "new"
-        choice = self._ask_new_append("Import Tracks", "Import dropped GPX/FIT?", default)
-        if choice == "cancel":
-            return
-        for p in paths:
-            pl = p.lower()
+
+        # Max. 1 Datei zulassen
+        p0 = paths[0]
+        if len(paths) > 1:
             try:
-                if pl.endswith(".gpx"):
-                    self.process_open_gpx(p, mode=choice)   # falls du 'mode' nutzt
-                elif pl.endswith(".fit"):
-                    self.process_open_fit(p, mode=choice)
-            except Exception as e:
-                print(f"[Drop Track] Error on {p}: {e}")    
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.information(
+                    self, "Multiple files",
+                    "Please load only one GPX/FIT-Datei via Drag & Drop.\n"
+                    "I import the first one!."
+                )
+            except Exception:
+                pass  # not critical for headless/test runs
+
+        pl = p0.lower()
+        is_gpx = pl.endswith(".gpx")
+        is_fit = pl.endswith(".fit")
+        if not (is_gpx or is_fit):
+            try:
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "Unsupported", f"Not a GPX/FIT file:\n{p0}")
+            except Exception:
+                pass
+            return
+
+        # Wenn noch keine GPX/FIT geladen ist: immer New (ohne Dialog)
+        has_tracks = bool(getattr(self, "_gpx_data", None))
+        if not has_tracks:
+            choice = "new"
+        else:
+            # Es sind bereits Tracks vorhanden → nachfragen
+            choice = self._ask_new_append("Import Tracks", "Import dropped GPX/FIT?", "append")
+            if choice == "cancel":
+                return
+
+        try:
+            if is_gpx:
+                self.process_open_gpx(p0, mode=choice)   # deine Loader unterstützen 'mode'
+            else:
+                self.process_open_fit(p0, mode=choice)
+        except Exception as e:
+            print(f"[Drop Track] Error on {p0}: {e}")
+
         
     
