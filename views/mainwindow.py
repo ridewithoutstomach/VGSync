@@ -627,12 +627,7 @@ class MainWindow(QMainWindow):
         self.action_toggle_360.setShortcut(QKeySequence("V"))
         shortcuts_menu.addAction(self.action_toggle_360)
 
-        def _on_toggle_360_from_menu(checked):
-            # Editor schaltet selbst um; Menü-Check danach mit tatsächlichem Zustand synchronisieren
-            self.video_editor.toggle_360_mode()
-            self.action_toggle_360.setChecked(bool(getattr(self.video_editor, "_is_360_mode", False)))
-
-        self.action_toggle_360.triggered.connect(_on_toggle_360_from_menu)
+        self.action_toggle_360.triggered.connect(self._on_toggle_360_from_menu)
 
         shortcuts_menu.addSeparator()
 
@@ -3665,6 +3660,10 @@ class MainWindow(QMainWindow):
             elif result == 2:
                 self._set_edit_mode("encode")
 
+            w = self.video_editor._player.width
+            h = self.video_editor._player.height
+            if w==h*2 and not self.video_editor.is_360_mode():
+                self._on_toggle_360_from_menu(True)
             self.proposeVideoGpxSync()
 
     def proposeVideoGpxSync(self):
@@ -7547,9 +7546,15 @@ class MainWindow(QMainWindow):
             # YouTube-Kanal im Browser öffnen
             QDesktopServices.openUrl(url)
             
+    def _on_toggle_360_from_menu(self,checked: bool):
+        # Editor schaltet selbst um; Menü-Check danach mit tatsächlichem Zustand synchronisieren
+        self.video_editor.toggle_360_mode()
+        self.action_toggle_360.setChecked(bool(getattr(self.video_editor, "_is_360_mode", False)))
+
+
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_V:
-            self.video_editor.toggle_360_mode()
+            self._on_toggle_360_from_menu(True)
         else:
             super().keyPressEvent(event)
             
