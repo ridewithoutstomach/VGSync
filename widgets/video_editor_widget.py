@@ -677,4 +677,30 @@ class VideoEditorWidget(QWidget):
         self._player.video_pan_x = 0.0
         self._player.video_pan_y = 0.0
         self._show_speed_label("View reset")
+
+        # ---- Mouse-based pan (for 360° view) ----
+    def mousePressEvent(self, event):
+        if event.buttons() & Qt.LeftButton and self._is_360_mode:
+            self._last_mouse_pos = event.pos()
+            self.setCursor(Qt.ClosedHandCursor)
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if hasattr(self, "_last_mouse_pos") and self._is_360_mode:
+            delta = event.pos() - self._last_mouse_pos
+            self._last_mouse_pos = event.pos()
+
+            # adjust sensitivity here
+            dx = delta.x() / 1000.0
+            dy = delta.y() / 1000.0
+
+            self._nudge_pan(dx, dy)
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if hasattr(self, "_last_mouse_pos"):
+            del self._last_mouse_pos
+        self.setCursor(Qt.ArrowCursor)
+        super().mouseReleaseEvent(event)
+
     
