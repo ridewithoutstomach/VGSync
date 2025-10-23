@@ -7655,7 +7655,8 @@ class MainWindow(QMainWindow):
             # kein Dialog, einfach "New"
             self._clear_video_playlist()   # nur Videos leeren (s.u.)
             try:
-                self.process_open_mp4(paths)   # <— kein append-Argument
+                self.process_open_mp4(paths)  
+                self._maybe_prompt_edit_mode_after_first_load() 
             except Exception as e:
                 print(f"[Drop Videos] Error (first import): {e}")
             return
@@ -7749,6 +7750,49 @@ class MainWindow(QMainWindow):
                 self.process_open_fit(p0, mode=choice)
         except Exception as e:
             print(f"[Drop Track] Error on {p0}: {e}")
+            
+            
+    # mainwindow.py
+    def _maybe_prompt_edit_mode_after_first_load(self):
+        # Nur fragen, wenn aktuell OFF ist (wie beim normalen Load)
+        if getattr(self, "_edit_mode", "off") != "off":
+            return
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QDialogButtonBox, QPushButton
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Edit video")
+        vbox = QVBoxLayout(dlg)
+        vbox.addWidget(QLabel("Select video edition mode"))
+
+        btns = QDialogButtonBox()
+        b_copy = QPushButton("Copy");   btns.addButton(b_copy,  QDialogButtonBox.YesRole);    b_copy.clicked.connect(lambda: dlg.done(1))
+        b_enc  = QPushButton("Encode"); btns.addButton(b_enc,   QDialogButtonBox.ActionRole); b_enc.clicked.connect(lambda: dlg.done(2))
+        b_no   = QPushButton("No Edit");btns.addButton(b_no,    QDialogButtonBox.RejectRole); b_no.clicked.connect(lambda: dlg.reject())
+        vbox.addWidget(btns)
+
+        res = dlg.exec()
+        if res == 1:
+            self._set_edit_mode("copy")    # zeigt anschließend eure Index-Dialog-Logik an
+        elif res == 2:
+            self._set_edit_mode("encode")  # dito
+
+        # wie im normalen Flow
+        try:
+            self.proposeVideoGpxSync()
+        except Exception:
+            pass
+        QTimer.singleShot(120, self._auto_enable_360_if_needed)
 
         
+        
+    # NEU: kleine Hilfsfunktion neben deinem Helper platzieren
+    def _auto_enable_360_if_needed(self):
+        try:
+            w = getattr(self.video_editor._player, "width", 0) or 0
+            h = getattr(self.video_editor._player, "height", 0) or 0
+            if h > 0 and w == h * 2 and not self.video_editor.is_360_mode():
+                self._on_toggle_360_from_menu(True)  # schaltet Menü+Player sauber um
+        except Exception as e:
+            print(f"[DEBUG] _auto_enable_360_if_needed: {e}")
+    
     
