@@ -154,6 +154,7 @@ class GoProExtractorDialog(QDialog):
         self.is_cancelled = False
         self._temp_gpx_files = []  # Liste der temporären GPX-Dateien
 
+
     def start_extraction(self):
         self.text_append("Starting GoPro GPS extraction...")
         self.text_append(f"Found {len(self.video_list)} video(s) to process")
@@ -1144,7 +1145,33 @@ class MainWindow(QMainWindow):
         self.gpx_control.cutClicked.connect(self.gpx_control.on_cut_range_clicked)
         self.gpx_control.removeClicked.connect(self.gpx_control.on_remove_range_clicked)
         
-        
+                # --- GPX-List -> Chart: Sync-Range als graues Overlay  ---
+        self._marked_B = None
+        self._marked_E = None
+
+        def _sync_update():
+            if self._marked_B is not None and self._marked_E is not None:
+                self.chart.set_sync_range(self._marked_B, self._marked_E)
+            else:
+                self.chart.clear_sync_range()
+
+        def _on_markB(idx: int):
+            self._marked_B = idx
+            _sync_update()
+
+        def _on_markE(idx: int):
+            self._marked_E = idx
+            _sync_update()
+
+        def _on_clear():
+            self._marked_B = None
+            self._marked_E = None
+            _sync_update()
+
+        self.gpx_widget.gpx_list.markBSet.connect(_on_markB)
+        self.gpx_widget.gpx_list.markESet.connect(_on_markE)
+        self.gpx_widget.gpx_list.markRangeCleared.connect(_on_clear)
+
             
         
         
@@ -4862,6 +4889,11 @@ class MainWindow(QMainWindow):
             if self._edit_mode != "off":
                 self.video_control.set_editing_mode(True,True) #to refresh the button state
             self._update_gpx_overview()
+            self.chart.set_gpx_data(self._gpx_data)
+            self.chart.update()
+            if getattr(self, "mini_chart_widget", None):
+                self.mini_chart_widget.set_gpx_data(self._gpx_data)
+                self.mini_chart_widget.update()
             
     def on_sync_clicked(self):
         """
@@ -4899,8 +4931,9 @@ class MainWindow(QMainWindow):
         self.chart.highlight_gpx_index(best_idx)
                 
         self._gpx_slots[self._active_gpx_slot]["sync_marker"] = best_idx
+        self.chart.update() 
         print(f"[DEBUG] Slot {self._active_gpx_slot}: saved sync_marker idx={best_idx}")
-
+        
         
     def on_map_sync_any(self):
         """
@@ -4945,7 +4978,9 @@ class MainWindow(QMainWindow):
         # 4) => Video-Position
         print(f"[DEBUG] on_map_sync_any => idx={idx_map}, final_s={final_s:.2f}, global_s={global_s:.2f}")
         self.on_time_hms_set_clicked(hh, mm, ss, ms)
-
+        self.chart.update()  
+        
+        
         if self.cut_manager.markB_time_s >= 0 and self._autoSyncVideoEnabled and self.real_total_duration - global_s < 1:
             reply = QMessageBox.question(
                 self,
