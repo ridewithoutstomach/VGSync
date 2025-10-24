@@ -26,7 +26,8 @@ import math
 import urllib.request
 import urllib.error
 import json
-
+import os
+"""
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QPushButton, QStyle,
     QVBoxLayout, QLabel, QSizePolicy, QFrame,
@@ -34,12 +35,19 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox, QMessageBox, QFileDialog,
     QLineEdit
 )
+"""
+from PySide6.QtCore import Qt, Signal, QPoint, QUrl, QEvent
+from PySide6.QtGui import QIcon, QPixmap, QCursor, QDesktopServices
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QPushButton, QStyle, QVBoxLayout, QLabel, QSizePolicy, QFrame, QMenu, QDialog, QRadioButton, QButtonGroup, QDoubleSpinBox, QMessageBox, QFileDialog, QLineEdit
+import os
 
-from PySide6.QtCore import Qt, Signal, QPoint
+
 from PySide6.QtGui import QIcon
 
 from datetime import timedelta
 from core.gpx_parser import recalc_gpx_data, get_gpx_video_shift, set_gpx_video_shift
+
+MAX_LOGO_H = 48
 
 
 class GPXControlWidget(QWidget):
@@ -88,10 +96,19 @@ class GPXControlWidget(QWidget):
         )
 
         # Oberstes (vertikales) Layout, darin: Buttons-Zeile + Info-Zeile
-        self.main_vbox = QVBoxLayout(self)
-        self.main_vbox.setContentsMargins(5, 5, 5, 5)
+        # Oberstes Layout: HBox -> links die zwei Zeilen (Buttons+Info), rechts das Kinomap-Logo
+        self._main_hbox = QHBoxLayout(self)
+        self._main_hbox.setContentsMargins(5, 5, 20, 5)
+        self._main_hbox.setSpacing(8)
+
+        self.main_vbox = QVBoxLayout()      # bleibt dein bestehendes "zentral-Layout"
+        self.main_vbox.setContentsMargins(0, 0, 0, 0)
         self.main_vbox.setSpacing(5)
 
+        # linke Seite (Buttons + Info) in die HBox
+        self._main_hbox.addLayout(self.main_vbox, 1)
+
+        
         # ---------------------------------------------
         # (A) Erste Zeile: Buttons
         # ---------------------------------------------
@@ -173,17 +190,7 @@ class GPXControlWidget(QWidget):
         # (Menü anlegen)
         self.more_menu = QMenu(self.more_button)
         
-        #action_maxslope = self.more_menu.addAction("show max%")
-        #action_maxslope.triggered.connect(self.showMaxSlopeClicked.emit)
         
-        #action_minslope = self.more_menu.addAction("show min%")
-        #action_minslope.triggered.connect(self.showMinSlopeClicked.emit)
-        
-        #action_maxspeed = self.more_menu.addAction("show MaxSpeed")
-        #action_minispeed = self.more_menu.addAction("show MinSpeed")
-
-        #action_maxspeed.triggered.connect(self.maxSpeedClicked.emit)
-        #action_minispeed.triggered.connect(self.minSpeedClicked.emit)
         
         action_avgspeed = self.more_menu.addAction("Set AverageSpeed")
         action_avgspeed.triggered.connect(self.averageSpeedClicked.emit)
@@ -209,8 +216,7 @@ class GPXControlWidget(QWidget):
         self._action_set_gpx2video.setEnabled(False)  # standard aus
         self._action_set_gpx2video.triggered.connect(self._on_set_gpx2video_triggered)
         
-        #action_get_ele = self.more_menu.addAction("GetElevation from Open-Elevation")
-        #action_get_ele.triggered.connect(self._on_get_ele_open_elevation)
+        
         
         action_get_ele_mapbox = self.more_menu.addAction("GetElevation from Mapbox")
         action_get_ele_mapbox.triggered.connect(self._on_get_ele_mapbox)
@@ -227,11 +233,7 @@ class GPXControlWidget(QWidget):
         self.more_button.clicked.connect(self._on_more_button_clicked)
               
 
-        # 8) Undo
-        #self.undo_button = QPushButton("Undo", self)
-        #self.undo_button.setMaximumWidth(50)
-        #self.undo_button.clicked.connect(self.undoClicked.emit)
-        #self._buttons_layout.addWidget(self.undo_button)
+        
 
         # 9) Smooth
         self.smooth_button = QPushButton("Smooth", self)
@@ -242,7 +244,7 @@ class GPXControlWidget(QWidget):
 
 
         self.slot_button = QPushButton("Slot 1", self)
-        self.slot_button.setToolTip("Switch GPX Slot: 1 (Import GPX/FIT, green) ↔ 2 (GoPro Extractor, yellow)")
+        self.slot_button.setToolTip("Switch GPX Slot: 1 (Import GPX/FIT, green) ↔ 2 (GoPro Extractor, blue)")
         self.slot_button.setMaximumWidth(70)
         self.slot_button.setCheckable(True)  # checked => Slot 2
         self._buttons_layout.addWidget(self.slot_button)
@@ -287,16 +289,61 @@ class GPXControlWidget(QWidget):
         self.label_zerospeed = QLabel("ZeroSpeed: 0", self)
         self._info_layout.addWidget(self.label_zerospeed)
         
-        self.label_paused = QLabel("Breaks: 0", self)
+        self.label_paused = QLabel("TimeGaps: 0", self)
         self._info_layout.addWidget(self.label_paused)
+        self.label_paused.setToolTip("Time gaps: consecutive GPX points with Δt above threshold")
         
 
         # Falls du sie mittig haben willst, kannst du z. B. links und rechts stretch:
         #self._info_layout.insertStretch(0)  # links
         self._info_layout.addStretch()      # rechts
+        # ===== Rechts: großes Kinomap-Logo über volle Höhe =====
+        base_dir    = os.path.dirname(os.path.abspath(__file__))
+        project_dir = os.path.dirname(base_dir)
+        logo_path   = os.path.join(project_dir, "doc", "Kinomap_Logo.png")  # dein Logo-Pfad
+       
+        self._kinomap_big = QLabel(self)
+        self._kinomap_big.setToolTip("Open Kinomap")
+        self._kinomap_big.setCursor(QCursor(Qt.PointingHandCursor))
+        self._kinomap_big.setContentsMargins(10, 0, 0, 0)  # etwas Luft zur Mitte
         
+        
+        self._kinomap_big.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self._kinomap_big.setMaximumHeight(MAX_LOGO_H)    
+
+        # Bild laden + Seitenverhältnis merken
+        pm = QPixmap(logo_path) if os.path.exists(logo_path) else QPixmap()
+        self._kinomap_aspect = (pm.width() / pm.height()) if (not pm.isNull() and pm.height() > 0) else 2.5
+
+        # Label soll Bild proportional skalieren
+        self._kinomap_big.setScaledContents(True)
+        if not pm.isNull():
+            self._kinomap_big.setPixmap(pm)
+        else:
+            self._kinomap_big.setText("Kinomap")
+            self._kinomap_big.setAlignment(Qt.AlignCenter)
+            self._kinomap_big.setMinimumWidth(90)
+
+        # Klick öffnet Kinomap
+        def _open_kinomap(_evt=None):
+            QDesktopServices.openUrl(QUrl("https://www.kinomap.com/"))
+        self._kinomap_big.mousePressEvent = _open_kinomap
+
+        # Rechts in die HBox einhängen
+        self._main_hbox.addWidget(self._kinomap_big, 0, Qt.AlignRight | Qt.AlignVCenter)
+
+        # Beim Resizen Breite = Höhe * Aspect halten (damit volle Control-Höhe genutzt wird)
+        self._kinomap_big.installEventFilter(self)
+
     
-    
+    def eventFilter(self, obj, event):
+        if obj is getattr(self, "_kinomap_big", None) and event.type() == QEvent.Resize:
+            h = min(self._kinomap_big.height(), MAX_LOGO_H)
+            if h > 0 and getattr(self, "_kinomap_aspect", None):
+                w = int(h * self._kinomap_aspect)
+                self._kinomap_big.setFixedWidth(max(60, w))
+        return super().eventFilter(obj, event)
+
     def on_setHeight_B2E_clicked(self):
         mw = self._mainwindow
         if not mw:
@@ -999,7 +1046,7 @@ class GPXControlWidget(QWidget):
         self.label_slope_max.setText(f"Max%: {slope_max:.1f}%")
         self.label_slope_min.setText(f"Min%: {slope_min:.1f}%")
         self.label_zerospeed.setText(f"ZeroSpeed: {zero_speed_count}")
-        self.label_paused.setText(f"Paused: {paused_count}")    
+        self.label_paused.setText(f"TimeGaps: {paused_count}")    
         
         
     def set_markE_visibility(self, visible: bool):

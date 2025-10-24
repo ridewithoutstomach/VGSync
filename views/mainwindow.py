@@ -826,13 +826,13 @@ class MainWindow(QMainWindow):
         chart_menu.addAction(limit_speed_action)
         limit_speed_action.triggered.connect(self._on_set_limit_speed)
         
-        zero_speed_action = QAction("ZeroSpeed...", self)
+        zero_speed_action = QAction("Mark ZeroSpeed...", self)
         zero_speed_action.setStatusTip("Set the ZeroSpeed we mark in the chart, all speeds lower are marked")
         zero_speed_action.triggered.connect(self._on_zero_speed_action)
         chart_menu.addAction(zero_speed_action)
         
         
-        action_mark_stops = QAction("Mark Stops...", self)
+        action_mark_stops = QAction("Mark TimeGaps...", self)
         action_mark_stops.setStatusTip("Set the MarkStops Value, all GPX-Points with a higher value will be marked in the chart")
         action_mark_stops.triggered.connect(self._on_set_stop_threshold)
         chart_menu.addAction(action_mark_stops)
@@ -1602,7 +1602,7 @@ class MainWindow(QMainWindow):
         new_val, ok = QInputDialog.getDouble(
             self,
             "Stop Threshold",
-            "Mark stops greater than X seconds:",
+            "Mark TimeGAPS greater than X seconds:",
             current_val,
             0.1,    # minimaler Wert
             1000.0, # maximaler Wert

@@ -66,6 +66,8 @@ class ChartWidget(QWidget):
         self.setAttribute(Qt.WA_OpaquePaintEvent, True)
         self.setAutoFillBackground(True)
         
+        
+        
     def set_stop_threshold(self, value: float):
         self._stop_threshold = value
         self.update()  # Damit das Diagramm neu gezeichnet wird    
@@ -461,7 +463,16 @@ class ChartWidget(QWidget):
         # **NEU**: Blaue Marker für "Stops"
         # wenn Zeitdifferenz > self._stop_threshold
         # ------------------------------------------------------
-        painter.setPen(QPen(QColor(255, 165, 0), 4))  # Blau, Dicke=2
+        
+        painter.setPen(QPen(QColor(255, 215, 0), 3))  # Time Gaps: GELB (Gold)
+        #painter.setPen(QPen(QColor(0, 153, 255), 3))  # Time Gaps: BLAU
+        #painter.setPen(QPen(QColor(0, 255, 255), 4))  # Cyan
+        #painter.setPen(QPen(QColor(173, 255, 47), 4)) # Lime
+        #painter.setPen(QPen(QColor(255, 105, 180), 4))# Pink
+        #painter.setPen(QPen(QColor(148, 0, 211), 4))  # Violett
+        
+        #painter.setPen(QPen(QColor(255, 255, 255), 4))# Weiß
+        
         for i in range(1, count):
             # Zeitdifferenz zwischen Punkt i-1 und i:
             dt = (self._gpx_data[i]["time"] - self._gpx_data[i-1]["time"]).total_seconds() if self._gpx_data[i]["time"] else 0
