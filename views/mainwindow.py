@@ -6403,7 +6403,7 @@ class MainWindow(QMainWindow):
             file_history.remove(path)  # Move it to the top
         file_history.insert(0, path)
 
-        file_history = file_history[:5]  # Keep only the last 5
+        file_history = file_history[:10]  # Keep only the last 5
 
         s.setValue("file_history", file_history)
 
@@ -7694,6 +7694,12 @@ class MainWindow(QMainWindow):
             try:
                 self.process_open_mp4(paths)  
                 self._maybe_prompt_edit_mode_after_first_load() 
+                try:
+                    if paths:
+                        self.save_recent_file(paths[0])
+                        self.update_recent_files_menu()
+                except Exception:
+                    pass
             except Exception as e:
                 print(f"[Drop Videos] Error (first import): {e}")
             return
@@ -7707,8 +7713,21 @@ class MainWindow(QMainWindow):
             if choice == "new":
                 self._clear_video_playlist()
                 self.process_open_mp4(paths)
+                try:
+                    if paths:
+                        self.save_recent_file(paths[0])
+                        self.update_recent_files_menu()
+                except Exception:
+                    pass
+                
             else:  # "append"
                 self.process_open_mp4(paths)
+                try:
+                    if paths:
+                        self.save_recent_file(paths[0])
+                        self.update_recent_files_menu()
+                except Exception:
+                    pass
         except Exception as e:
             print(f"[Drop Videos] Error: {e}")
 
@@ -7783,8 +7802,18 @@ class MainWindow(QMainWindow):
         try:
             if is_gpx:
                 self.process_open_gpx(p0, mode=choice)   # deine Loader unterstützen 'mode'
+                try:
+                    self.save_recent_file(p0)
+                    self.update_recent_files_menu()
+                except Exception:
+                    pass
             else:
                 self.process_open_fit(p0, mode=choice)
+                try:
+                    self.save_recent_file(p0)
+                    self.update_recent_files_menu()
+                except Exception:
+                    pass
         except Exception as e:
             print(f"[Drop Track] Error on {p0}: {e}")
             

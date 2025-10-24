@@ -3534,6 +3534,7 @@ class GPXControlWidget(QWidget):
         reply = QMessageBox.question(
             self,
             "Resample to 1s",
+            "This function should be applied before syncing or editing!\n\n"
             "Do you really want to resample the entire track to 1-second intervals?\n\n"
             "This may slightly change the total distance and elevation.\n"
             "If this GPX was already synchronized with the video, "
