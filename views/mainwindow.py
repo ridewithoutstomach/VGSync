@@ -1131,6 +1131,8 @@ class MainWindow(QMainWindow):
         speed_cap = s.value("chart/speedCap", 70.0, type=float)
         self.chart.set_speed_cap(speed_cap)
         
+        self.chart.raiseTrackRequested.connect(self._on_raise_track_above_sea)
+        
         # GpxControl -> GpxList
         self.gpx_widget.gpx_list.markBSet.connect(self._on_markB_in_list)
         self.gpx_widget.gpx_list.markESet.connect(self._on_markE_in_list)
@@ -7829,5 +7831,58 @@ class MainWindow(QMainWindow):
                 self._on_toggle_360_from_menu(True)  # schaltet Menü+Player sauber um
         except Exception as e:
             print(f"[DEBUG] _auto_enable_360_if_needed: {e}")
+
     
-    
+    def _on_raise_track_above_sea(self, delta_m: float):
+        """
+        Raises the entire GPX track by 'delta_m' meters (including greyed points).
+        Recomputes derived values and refreshes all views.
+        """
+        if not self._gpx_data or delta_m <= 0:
+            return
+
+        
+        try:
+            self.register_gpx_undo_snapshot()
+        except Exception:
+            pass
+
+        # 1) Elevation aller Punkte erhöhen (auch graue)
+        for pt in self._gpx_data:
+            if pt.get("ele") is not None:
+                pt["ele"] = float(pt["ele"]) + float(delta_m)
+
+        # 2) Abgeleitete Werte neu berechnen
+        try:
+            from core.gpx_parser import recalc_gpx_data
+            recalc_gpx_data(self._gpx_data)
+        except Exception:
+            pass
+
+        # 3) Alle Views updaten
+        try:
+            self.gpx_widget.set_gpx_data(self._gpx_data)
+        except Exception:
+            pass
+        try:
+            self._update_gpx_overview()
+        except Exception:
+            pass
+        try:
+            self.chart.set_gpx_data(self._gpx_data)
+        except Exception:
+            pass
+        try:
+            # Map neu zeichnen 
+            new_geojson = self._build_route_geojson_from_gpx(self._gpx_data)
+            self.map_widget.loadRoute(new_geojson, do_fit=False)
+        except Exception:
+            pass
+        
+        try:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(self, "Track lifted",
+                                    f"Raised entire track by {delta_m:.2f} m.")
+                                    
+        except Exception:
+            pass

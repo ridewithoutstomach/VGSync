@@ -27,9 +27,10 @@ from PySide6.QtGui import (
 )
                            
 
-
+ELE_EPS = 0.05
 class ChartWidget(QWidget):
     markerClicked = Signal(int)
+    raiseTrackRequested = Signal(float)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -75,7 +76,58 @@ class ChartWidget(QWidget):
         self.setAttribute(Qt.WA_OpaquePaintEvent, True)
         self.setAutoFillBackground(True)
         
+        self._usl_badge_rect = None   # clickable area of the badge
+        self._usl_idx_cursor = -1     # cycling cursor for USL points
         
+        
+    def _prevideo_cut_idx(self) -> int:
+        """
+        Index-Grenze für das Vorlauf-Grau bei negativem Video-Shift.
+        Alles < return-Wert gilt als 'grau' (ausgeschlossen).
+        """
+        try:
+            from core.gpx_parser import get_gpx_video_shift
+            shift = get_gpx_video_shift()
+        except Exception:
+            shift = 0
+        if not (self._gpx_data and shift is not None and shift < 0 and self._gpx_data[0].get("time")):
+            return 0
+        from datetime import timedelta
+        positive_time = self._gpx_data[0]["time"] + timedelta(seconds=abs(shift))
+        cut_idx = 0
+        for i, pt in enumerate(self._gpx_data):
+            ti = pt.get("time")
+            if ti and ti >= positive_time:
+                cut_idx = i
+                break
+            else:
+                cut_idx = i + 1
+        return max(0, min(cut_idx, len(self._gpx_data)))
+    
+    def _effective_usl_indices(self):
+        """
+        Liefert die Liste aller 'unter Meer' Indizes, ABER
+        ausgeschlossen werden:
+          - B..E (self._sync_idx_start.._end), falls gesetzt
+          - Vorlaufbereich 0..pre_cut_idx-1 bei negativem Shift
+        """
+        base = [i for i, pt in enumerate(self._gpx_data)
+                if (pt.get("ele") is not None and pt["ele"] < -ELE_EPS)]
+        if not base:
+            return []
+        # Vorlauf (pre-video) grau ausschließen
+        cut0 = self._prevideo_cut_idx()
+        base = [i for i in base if i >= cut0]
+
+        # Markierter B..E-Bereich ausschließen (falls gesetzt)
+        if getattr(self, "_sync_idx_start", None) is not None and getattr(self, "_sync_idx_end", None) is not None:
+            i0 = int(min(self._sync_idx_start, self._sync_idx_end))
+            i1 = int(max(self._sync_idx_start, self._sync_idx_end))
+            base = [i for i in base if not (i0 <= i <= i1)]
+
+        return base
+
+    
         
     def set_stop_threshold(self, value: float):
         self._stop_threshold = value
@@ -609,7 +661,9 @@ class ChartWidget(QWidget):
         # ... dein bestehender Marker-Zeichencode ...
 
         # === NEU: Warn-Badge "unter 0 m" einblenden, wenn min_ele < 0 ===
-        if min_ele < 0.0:
+        usl_list = self._effective_usl_indices()
+        
+        if usl_list:  # nur wenn es (gefilterte) USL-Punkte gibt
             # Text & Style
             badge_text = "⚠ under sea level ⚠ (0m)"
             try:
@@ -658,7 +712,9 @@ class ChartWidget(QWidget):
             spd_val = speed_vals[self._marker_index]  # gecappter Wert
             grad_val = pt_.get("gradient", 0.0)
     
-            line1 = f"{ele_val:.1f}".replace(".", ",") + "m"
+            #line1 = f"{ele_val:.1f}".replace(".", ",") + "m"
+            e_show = ele_val if abs(ele_val) >= ELE_EPS else 0.0
+            line1  = f"{e_show:.1f}".replace(".", ",") + "m"
             line2 = f"{spd_val:.1f}".replace(".", ",") + "km/h"
             line3 = f"{grad_val:.1f}".replace(".", ",") + "%"
     
@@ -673,29 +729,66 @@ class ChartWidget(QWidget):
                 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
-            # 1) Klick in "Under sea level"-Badge?
-            if self._usl_badge_rect and self._usl_badge_rect.contains(event.pos()) and self._usl_indices:
-                self._usl_idx_cursor = (self._usl_idx_cursor + 1) % len(self._usl_indices)
-                idx = self._usl_indices[self._usl_idx_cursor]
-                # Marker setzen + zeichnen
-                self.highlight_gpx_index(idx)
-                # Auch das übliche Signal feuern, damit MainWindow/Map/GPX mitziehen:
-                self.markerClicked.emit(idx)
+            # 1) Klick auf den USL-Badge => Dialog
+            if self._usl_badge_rect and self._usl_badge_rect.contains(event.pos()):
+                usl = self._effective_usl_indices()
+                if not usl:
+                    event.accept()
+                    return
+                # tiefster Punkt suchen
+                min_idx = min(usl, key=lambda i: (self._gpx_data[i].get("ele", 0.0)))
+                min_ele = self._gpx_data[min_idx].get("ele", 0.0)
+
+                # Dialog (englisch)
+                from PySide6.QtWidgets import QMessageBox
+                msg = QMessageBox(self)
+                msg.setWindowTitle("Under sea level")
+                msg.setText(f"Deepest point: {min_ele:.2f} m\nWhat would you like to do?")
+                show_btn = msg.addButton("Show", QMessageBox.AcceptRole)
+                move_btn = msg.addButton("Raise track above sea level", QMessageBox.ActionRole)
+                cancel_btn = msg.addButton("Cancel", QMessageBox.RejectRole)
+                msg.exec()
+
+                btn = msg.clickedButton()
+                if btn is show_btn:
+                    # marker + notify world
+                    self.highlight_gpx_index(min_idx)
+                    self.markerClicked.emit(min_idx)
+                elif btn is move_btn:
+                    # delta = -min_ele + buffer (aktuell 0)
+                    buffer_m = 0.0
+                    delta = max(0.0, -min_ele + buffer_m)
+                    if delta > 0:
+                        self.raiseTrackRequested.emit(delta)
                 event.accept()
                 return
-            # 2) Standardverhalten: Klick ins Chart -> Marker an diese Stelle
+
+            # 2) normaler Left-Click ins Chart -> Marker dahin
             idx = self._index_for_x(event.pos().x())
             self._marker_index = idx
             self.update()
             self.markerClicked.emit(idx)
             event.accept()
+
         elif event.button() == Qt.RightButton:
+            # 1) Rechtsklick auf Badge -> USL zyklisch durchgehen
+            if self._usl_badge_rect and self._usl_badge_rect.contains(event.pos()):
+                usl = self._effective_usl_indices()
+                if usl:
+                    self._usl_idx_cursor = (self._usl_idx_cursor + 1) % len(usl)
+                    idx = usl[self._usl_idx_cursor]
+                    self.highlight_gpx_index(idx)
+                    self.markerClicked.emit(idx)
+                event.accept()
+                return
+            # 2) sonst: Scroll-Drag wie gehabt
             self._dragging_scroll = True
             self._drag_start_x = event.pos().x()
             self._offset_start = self._horizontal_offset
             event.accept()
         else:
             super().mousePressEvent(event)
+
  
 
     # -----------------------------------------------------
