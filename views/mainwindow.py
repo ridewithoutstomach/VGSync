@@ -2002,14 +2002,28 @@ class MainWindow(QMainWindow):
             
         self._update_set_gpx2video_enabled()
 
-
     def _on_encoder_setup_clicked(self):
-        # Hier öffnen wir den Dialog
+        # xfade vor dem Öffnen merken
+        s = QSettings("KVRouite", "KVRouite")
+        old_xfade = s.value("encoder/xfade", 2, type=int)
+
         dlg = EncoderSetupDialog(self)
-        if dlg.exec() == dlg.accepted:
+        result = dlg.exec()
+
+        # xfade nach dem Schließen erneut lesen
+        new_xfade = s.value("encoder/xfade", 2, type=int)
+
+        if result == dlg.accepted:
             print("[DEBUG] => Encoder-Setup saved.")
         else:
             print("[DEBUG] => Encoder-Setup canceled.")
+
+        # WICHTIG: auch bei 'canceled' prüfen, falls der Dialog Werte geschrieben hat
+        if new_xfade != old_xfade:
+            print(f"[DEBUG] encoder/xfade changed: {old_xfade} -> {new_xfade} (validating overlays)")
+            self._validate_overlays_after_xfade_change()
+
+    
             
     def _on_overlay_setup_clicked(self):
         """
@@ -7832,3 +7846,71 @@ class MainWindow(QMainWindow):
                                     
         except Exception:
             pass
+
+    def _validate_overlays_after_xfade_change(self) -> bool:
+        """
+        Prüft alle bestehenden Overlays gegen das aktuell in QSettings gesetzte encoder/xfade.
+        Gibt True zurück, wenn alles ok; bei Verstößen Warnhinweis (englisch) und False.
+        """
+        
+        
+
+        # 1) Aktuelles xfade aus dem Setup
+        s = QSettings("KVRouite", "KVRouite")
+        try:
+            xfade = float(s.value("encoder/xfade", 2, type=int))
+        except Exception:
+            xfade = 2.0
+        if xfade < 0:
+            xfade = 0.0
+
+        total = float(getattr(self, "real_total_duration", 0.0))
+        if total <= 0.0:
+            return True  # kein Video => nichts zu prüfen
+
+        # 2) Cuts/Keep-Segmente holen (deine bestehende Logik)
+        cuts = list(self.cut_manager.get_cut_intervals())
+        keep_list = self._compute_keep_intervals(cuts, total)
+
+        # 3) Alle Overlays prüfen
+        violations = []
+        for ovl in self._overlay_manager.get_all_overlays():
+            start_s = float(ovl.get("start", 0.0))
+            end_s   = float(ovl.get("end",   0.0))
+            if end_s <= start_s:
+                continue
+
+            # passendes Keep-Segment finden, das den gesamten Bereich enthält
+            containing = None
+            for (ks, ke) in keep_list:
+                if start_s >= ks and end_s <= ke:
+                    containing = (ks, ke)
+                    break
+
+            if containing is None:
+                violations.append(
+                    f"[{start_s:.2f}s … {end_s:.2f}s] crosses a cut/video boundary"
+                )
+                continue
+
+            ks, ke = containing
+            allowed_start_min = ks + xfade
+            allowed_end_max   = ke - xfade
+
+            if start_s < allowed_start_min or end_s > allowed_end_max:
+                max_len_here = max(0.0, allowed_end_max - max(start_s, allowed_start_min))
+                violations.append(
+                    (f"[{start_s:.2f}s … {end_s:.2f}s] violates crossfade margins "
+                     f"(allowed window: {allowed_start_min:.2f}s … {allowed_end_max:.2f}s; "
+                     f"max length here: {max_len_here:.2f}s)")
+                )
+
+        if violations:
+            msg = ("Some existing overlays no longer fit the new crossfade setting.\n" 
+                    "You´re Video will not be longer in sync, remove the Overlays!\n\n" +
+                   "\n".join(violations[:8]) +
+                   ("\n… (more)" if len(violations) > 8 else ""))
+            QMessageBox.warning(self, "Overlays invalid with new xfade!", msg)
+            return False
+
+        return True
