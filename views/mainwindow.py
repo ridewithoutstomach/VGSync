@@ -1292,10 +1292,75 @@ class MainWindow(QMainWindow):
     def _on_gpx_row_selected(self, row_idx: int):
         self.map_widget.set_selected_point(row_idx)
 
+
+
     def _on_overlay_button_clicked(self):
+        """
+        Beim Setzen eines Overlays sicherstellen, dass am aktuellen Marker
+        links und rechts mindestens 'xfade' Sekunden Abstand zu Cut-Grenzen
+        bzw. Video-Start/-Ende vorhanden sind. Sonst warnen und abbrechen.
+        """
+        from PySide6.QtWidgets import QMessageBox
+        from PySide6.QtCore import QSettings
+
         marker_s = self.timeline.marker_position()
-        self._overlay_manager.ask_user_for_overlay(marker_s, parent=self)   
-        
+
+        # 1) Xfade-Länge aus Encoder-Settings
+        s = QSettings("KVRouite", "KVRouite")
+        try:
+            xfade_sec = s.value("encoder/xfade", 2, type=int)
+        except Exception:
+            xfade_sec = 2
+        if xfade_sec is None:
+            xfade_sec = 2
+        if xfade_sec < 0:
+            xfade_sec = 0
+
+        # 2) Gesamt-Dauer prüfen
+        total = getattr(self, "real_total_duration", 0.0)
+        if total <= 0:
+            QMessageBox.warning(self, "Overlay not possible",
+                                "No video loaded.")
+            return
+
+        # 3) Keep-Segmente (alles, was NICHT herausgeschnitten wird)
+        cut_intervals = self.cut_manager.get_cut_intervals()
+        keep_intervals = self._compute_keep_intervals(cut_intervals, total)  # vorhanden
+        # -> finde das Keep-Intervall, das den Marker enthält
+        containing = None
+        for (kst, ken) in keep_intervals:
+            if kst <= marker_s <= ken:
+                containing = (kst, ken)
+                break
+
+        if containing is None:
+            # Marker steht in einem Cut -> dort ist Overlay grundsätzlich unzulässig
+            QMessageBox.warning(
+                self,
+                "Overlay not possible",
+                "The current position lies inside a removed (cut) section.\n"
+                "Move the marker into a kept section."
+            )
+            return
+
+        # 4) Abstand links/rechts zu den Segmentgrenzen
+        kst, ken = containing
+        left_space = marker_s - kst
+        right_space = ken - marker_s
+
+        if left_space < xfade_sec or right_space < xfade_sec:
+            QMessageBox.warning(
+                self,
+                "Not enough space for crossfade",
+                (f"You need at least {xfade_sec}s free before and after the overlay position.\n\n"
+                 f"Available: left {left_space:.2f}s, right {right_space:.2f}s.\n\n"
+                 "Move the marker further away from cut boundaries, video start or end.")
+            )
+            return
+
+        # 5) OK -> Overlay-Dialog öffnen
+        self._overlay_manager.ask_user_for_overlay(marker_s, parent=self)
+    
     
     def _on_map_directions_toggled(self, checked: bool):
         """
