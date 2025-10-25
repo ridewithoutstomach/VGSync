@@ -73,6 +73,10 @@ from PySide6.QtCore import QProcess, QProcessEnvironment
 from PySide6.QtGui import QTextCursor
 
 
+#updates
+from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
+from PySide6.QtCore import QUrl, QTimer
+from PySide6.QtGui import QDesktopServices
 
 from .encoder_setup_dialog import EncoderSetupDialog  # Import Dialog
 
@@ -934,6 +938,33 @@ class MainWindow(QMainWindow):
         tutorials_action.setStatusTip("Open KVRouite YouTube channel with tutorials")
         tutorials_action.triggered.connect(self._on_open_tutorials)
         help_menu.addAction(tutorials_action)
+        
+        #updatecheck
+        # --- Updates (GitHub Releases) ---
+        self.action_check_updates = QAction("Check for Updates", self)
+        self.action_check_updates.setStatusTip("Check GitHub releases for newer versions")
+        self.action_check_updates.triggered.connect(self._kickoff_update_check)
+        help_menu.addAction(self.action_check_updates)
+
+        self.action_auto_update_check = QAction("Auto Check for Updates", self, checkable=True)
+        self.action_auto_update_check.setStatusTip("Check for updates on startup")
+        s = QSettings("KVRouite","KVRouite")
+        auto_on = s.value("updates/auto_check", True, type=bool)
+        self.action_auto_update_check.setChecked(bool(auto_on))
+        self.action_auto_update_check.toggled.connect(
+            lambda on: QSettings("KVRouite","KVRouite").setValue("updates/auto_check", bool(on))
+        )
+        help_menu.addAction(self.action_auto_update_check)
+
+        # Default-Repo fest verdrahten (einmalig setzen, wenn leer)
+        if not s.value("updates/repo", None, type=str):
+            s.setValue("updates/repo", "ridewithoutstomach/KVRouite")
+
+        # Auto-Check einige Sekunden nach Start
+        if self.action_auto_update_check.isChecked():
+            QTimer.singleShot(4000, self._kickoff_update_check)
+
+        #updatecheck
 
         copyright_action = help_menu.addAction("Copyright + License")
         copyright_action.triggered.connect(self._show_copyright_dialog)
@@ -7914,3 +7945,197 @@ class MainWindow(QMainWindow):
             return False
 
         return True
+
+    def _kickoff_update_check(self):
+        # Repo aus Settings (Default wurde im __init__ gesetzt)
+        s = QSettings("KVRouite","KVRouite")
+        repo = s.value("updates/repo", "ridewithoutstomach/KVRouite", type=str)
+
+        url = f"https://api.github.com/repos/{repo}/releases?per_page=10"
+        req = QNetworkRequest(QUrl(url))
+
+        # GitHub erwartet einen User-Agent
+        try:
+            from config import APP_VERSION
+            ua = f"KVRouite/{APP_VERSION}"
+        except Exception:
+            ua = "KVRouite"
+        req.setRawHeader(b"User-Agent", ua.encode("utf-8"))
+        req.setRawHeader(b"Accept", b"application/vnd.github+json")
+
+        self._update_nam = getattr(self, "_update_nam", QNetworkAccessManager(self))
+        reply = self._update_nam.get(req)
+        reply.finished.connect(lambda r=reply, reponame=repo: self._on_update_reply(r, reponame))
+
+
+    def _on_update_reply(self, reply, repo: str):
+        # Fehler robust prüfen (nicht truthy/falsy, sondern explizit)
+        err = reply.error()
+        status_code = reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
+        reason = reply.attribute(QNetworkRequest.HttpReasonPhraseAttribute)
+        body_bytes = bytes(reply.readAll())
+        body_text = body_bytes.decode("utf-8", errors="replace")
+
+        if err != QNetworkReply.NetworkError.NoError:
+            print(f"[updates] network error: {err} {reply.errorString()}  http={status_code} {reason}")
+            reply.deleteLater()
+            return
+
+        if status_code and int(status_code) >= 400:
+            print(f"[updates] HTTP error: {status_code} {reason}  body[:200]={body_text[:200]!r}")
+            reply.deleteLater()
+            return
+
+        # JSON parsen
+        import json
+        try:
+            data = json.loads(body_text)
+        except Exception as e:
+            print(f"[updates] JSON parse error: {e}  body[:200]={body_text[:200]!r}")
+            reply.deleteLater()
+            return
+
+        # tag_name aus Releases
+        tags = []
+        for rel in data:
+            tag = str(rel.get("tag_name") or rel.get("name") or "").strip()
+            if tag:
+                tags.append(tag)
+
+        reply.deleteLater()
+
+        if not tags:
+            # Fallback: /tags
+            url = f"https://api.github.com/repos/{repo}/tags?per_page=10"
+            req = QNetworkRequest(QUrl(url))
+            req.setRawHeader(b"User-Agent", b"KVRouite")
+            r2 = self._update_nam.get(req)
+            r2.finished.connect(lambda r=r2, reponame=repo: self._on_tags_reply(r, reponame))
+            return
+
+        self._evaluate_tags_and_notify(tags, repo)
+
+    def _on_tags_reply(self, reply, repo: str):
+        err = reply.error()
+        status_code = reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
+        reason = reply.attribute(QNetworkRequest.HttpReasonPhraseAttribute)
+        body_text = bytes(reply.readAll()).decode("utf-8", errors="replace")
+
+        if err != QNetworkReply.NetworkError.NoError:
+            print(f"[updates] tag fetch error: {err} {reply.errorString()}  http={status_code} {reason}")
+            reply.deleteLater()
+            return
+
+        if status_code and int(status_code) >= 400:
+            print(f"[updates] tag HTTP error: {status_code} {reason}  body[:200]={body_text[:200]!r}")
+            reply.deleteLater()
+            return
+
+        import json
+        try:
+            arr = json.loads(body_text)
+        except Exception as e:
+            print(f"[updates] tags JSON parse error: {e}  body[:200]={body_text[:200]!r}")
+            reply.deleteLater()
+            return
+
+        tags = []
+        for t in arr:
+            tag = str(t.get("name") or "").strip()
+            if tag:
+                tags.append(tag)
+
+        reply.deleteLater()
+        self._evaluate_tags_and_notify(tags, repo)
+        
+    def _evaluate_tags_and_notify(self, tags: list[str], repo: str):
+        """
+        Zeigt Updates nur für *stabile* Tags (genau vX.Y[.Z...]).
+        Pre-/Beta-/RC-Tags werden ignoriert.
+        Falls User selbst eine *_pre/-beta/-rc* Version hat, wird ein stabiles Release
+        mit gleichem oder höherem Core (z. B. 4.27 statt 4.27_pre) angeboten.
+        """
+        import re
+        if not tags:
+            print("[updates] no tags found")
+            return
+
+        # 1) Nur stabile Tags behalten: vX.Y[.Z...] ohne weiteren Suffix
+        stable_tags = []
+        for t in tags:
+            t = (t or "").strip()
+            if re.fullmatch(r"[vV]?\d+(?:\.\d+)*", t):
+                stable_tags.append(t)
+
+        if not stable_tags:
+            print("[updates] only pre-release tags found; no stable updates to show")
+            return
+
+        def to_tuple(ver: str):
+            """ 'v4.27' -> (4,27); '4.27.1' -> (4,27,1) """
+            v = ver.strip()
+            if v.lower().startswith("v"):
+                v = v[1:]
+            nums = tuple(int(x) for x in v.split(".") if x.isdigit())
+            return nums
+
+        # 2) Neueste stabile Version bestimmen
+        try:
+            newest_stable = sorted(stable_tags, key=to_tuple, reverse=True)[0]
+        except Exception:
+            newest_stable = stable_tags[0]
+
+        newest_core = to_tuple(newest_stable)
+
+        # 3) Aktuelle APP_VERSION normalisieren (Core + erkennen, ob "pre")
+        try:
+            from config import APP_VERSION
+            current_raw = f"{APP_VERSION}".strip()
+        except Exception:
+            current_raw = "0.0"
+
+        # Core extrahieren (nur Ziffern und Punkte am Anfang)
+        m = re.match(r"^[vV]?(\d+(?:\.\d+)*)", current_raw)
+        current_core_str = m.group(1) if m else "0.0"
+        current_core = to_tuple(current_core_str)
+
+        # Ist die aktuelle Version selbst ein Pre/Beta/RC?
+        is_current_prerelease = not re.fullmatch(r"[vV]?\d+(?:\.\d+)*", current_raw)
+
+        # 4) Vergleichslogik:
+        # - Wenn aktueller Core kleiner als neuester stabiler Core -> Update anbieten (auf newest_stable)
+        # - Wenn aktueller Core == neuester stabiler Core,
+        #   aber aktuelle Build ist *pre/beta/rc* -> "Stable available" auf newest_stable anbieten
+        # - Sonst: nichts anzeigen
+        if current_core < newest_core:
+            self._notify_new_version(current_raw, newest_stable, repo)
+        elif current_core == newest_core and is_current_prerelease:
+            self._notify_new_version(current_raw, newest_stable, repo)
+        else:
+            # Optional leise informieren:
+            # self.statusBar().showMessage("You are on the latest stable version.", 4000)
+            print(f"[updates] up-to-date (stable). current={current_raw}, latest_stable={newest_stable}")
+            return
+
+    def _notify_new_version(self, current: str, newest_stable: str, repo: str):
+        from PySide6.QtWidgets import QMessageBox
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        releases_url = f"https://github.com/{repo}/releases"
+        answer = QMessageBox.information(
+            self,
+            "New Version Available",
+            (f"A newer *stable* version is available on GitHub.\n\n"
+             f"Current: {current}\n"
+             f"Latest (stable): {newest_stable}\n\n"
+             "Open the releases page now?"),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes
+        )
+        if answer == QMessageBox.Yes:
+            QDesktopServices.openUrl(QUrl(releases_url))
+    
+
+    
+
+    
