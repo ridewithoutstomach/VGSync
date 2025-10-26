@@ -65,14 +65,11 @@ def _get_app_base_dir() -> str:
     else:
         return os.path.dirname(os.path.abspath(__file__))
 
-
+"""#deadcode
 def _get_license_path() -> str:
-    """
-    Baut den Pfad zu 'license.lic' auf, basierend auf dem von _get_app_base_dir().
-    """
     base_dir = _get_app_base_dir()
     return os.path.join(base_dir, "license.lic")
-
+"""#deadcode
 
 ##############################################################################
 # 3) Globale Variablen & Defaults
@@ -147,27 +144,12 @@ def is_edit_video_enabled() -> bool:
     val = s.value("video/editEnabled", False, type=bool)
     return val
 
-
+"""#deadcode
 def set_edit_video_enabled(enabled: bool):
-    """
-    Schreibt in QSettings, ob 'video/editEnabled' True/False ist.
-    """
+    
     s = QSettings("KVRouite", "KVRouite")
     s.setValue("video/editEnabled", enabled)
-
-"""
-def check_app_version_and_reset_if_necessary():
-   
-   
-    s = QSettings("KVRouite", "KVRouite")
-    stored_version = s.value("appVersion", "", type=str)
-    if stored_version != APP_VERSION:
-        s.clear()
-        s.setValue("appVersion", APP_VERSION)
-        return True
-    else:
-        return False
-"""    
+"""#deadcode    
     
 def check_app_version_and_reset_if_necessary():
     """
@@ -197,10 +179,11 @@ def clear_temp_directories():
             except Exception as e:
                 print(f"[WARN] Konnte {tmp_dir} nicht löschen: {e}")
         os.makedirs(tmp_dir, exist_ok=True)  # Neu anlegen, falls nötig        
-
+"""#deadcode
 def set_soft_opengl_enabled(enabled: bool):
     s = QSettings("KVRouite", "KVRouite")
     s.setValue("softOpenGLEnabled", enabled)
+"""#deadcode
 
 #def is_soft_opengl_enabled() -> bool:
 #    s = QSettings("KVRouite", "KVRouite")

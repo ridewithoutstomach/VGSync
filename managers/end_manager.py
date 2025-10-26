@@ -227,12 +227,13 @@ class EndManager(QObject):
             self.video_editor.is_playing = False
 
         QTimer.singleShot(50, after_switch)
-
+"""deadcode
     def _take_snapshot(self, out_file: str):
         w = self.video_editor.video_frame.width()
         h = self.video_editor.video_frame.height()
         self.video_editor.media_player.video_take_snapshot(0, out_file, w, h)
-
+"""#deadcode
+"""deadcode
     def _show_snapshot_dialog(self, path_to_image: str):
         dlg = QDialog()
         dlg.setWindowTitle("Schnappschuss – letztes Frame")
@@ -248,3 +249,4 @@ class EndManager(QObject):
         vbox.addWidget(btn)
 
         dlg.exec()
+"""#deadcode

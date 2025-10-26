@@ -192,12 +192,9 @@ def recalc_gpx_data(gpx_data: list[dict]):
                 pt["gradient"] = 0.0
 
     # Keine Rückgabe, weil gpx_data in-place aktualisiert wird
-    
+"""deadcode    
 def ensure_gpx_stable_ids(gpx_data: list[dict]):
-    """
-    Weist jedem GPX-Punkt ein 'stable_id' zu, falls nicht vorhanden.
-    Bleibt unverändert, selbst wenn Index / Reihenfolge sich ändert.
-    """
     for pt in gpx_data:
         if not pt.get("stable_id"):
             pt["stable_id"] = str(uuid.uuid4())
+"""#deadcode

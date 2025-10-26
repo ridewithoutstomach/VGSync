@@ -103,7 +103,7 @@ class VideoCutManager(QObject):
         self.timeline.set_markE_time(-1)
         self._emit_cuts_changed()
         self.video_editor.set_cut_intervals(self._cut_intervals)
-
+    """deadcode
     def on_undo_clicked(self):
         if not self._cut_intervals:
             return
@@ -111,7 +111,7 @@ class VideoCutManager(QObject):
         self.timeline.remove_last_cut_interval()
         self._emit_cuts_changed()
         self.video_editor.set_cut_intervals(self._cut_intervals)
-
+    """#deadcode
     def on_markClear_clicked(self):
         if self.markB_time_s >= 0 or self.markE_time_s >= 0:
             self.markB_time_s = -1.0
@@ -230,21 +230,21 @@ class VideoCutManager(QObject):
 
 
         from PySide6.QtCore import QTimer
-        #QTimer.singleShot(50, self._really_force_play)
+        #QTimer.singleShot(50, )
         # 1) Normale Verzögerung für Sprünge innerhalb desselben Videos
         QTimer.singleShot(50, _ensure_playing)
 
         # 2) Falls ein Video-Wechsel stattfand, nochmals nachprüfen
         QTimer.singleShot(500, _ensure_playing)
-
+    """deadcode
     def _really_force_play(self):
-        """
-        Analog zum alten Code: Startet MPV-Wiedergabe wirklich neu
-        (statt 'media_list_player.play()').
-        """
+        
+        #Analog zum alten Code: Startet MPV-Wiedergabe wirklich neu
+        #(statt 'media_list_player.play()').
+        
         self.video_editor._player.pause = False
         self.video_editor.is_playing = True
-
+    """#deadcode
     def _block_timeline_marker(self):
         if self._orig_marker_func is not None:
             return

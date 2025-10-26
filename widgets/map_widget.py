@@ -145,7 +145,7 @@ class MapWidget(QWidget):
         super().resizeEvent(e)
         if self._dnd_shield:
             self._dnd_shield.setGeometry(self.rect())
-
+    """deadcode
     def dragEnterEvent(self, e):
         ok = any(self._is_track(p) for p in self._extract_paths(e.mimeData()))
         if ok:
@@ -154,14 +154,17 @@ class MapWidget(QWidget):
             e.acceptProposedAction()
         else:
             e.ignore()
-
+    """#deadcode
+    """deadcode
     def dragMoveEvent(self, e):
         e.acceptProposedAction()
-
+    """#deadcode    
+    """deadcode
     def dragLeaveEvent(self, e):
         self._dnd_shield.hide()
         e.accept()
-
+    """#deadcode
+    """deadcode
     def dropEvent(self, e):
         self._dnd_shield.hide()
         paths = [p for p in self._extract_paths(e.mimeData()) if self._is_track(p)]
@@ -173,7 +176,8 @@ class MapWidget(QWidget):
             e.acceptProposedAction()
         else:
             e.ignore()
-
+    """#deadcode
+    
     @Slot(float, float, int)
     def _on_new_point_inserted(self, lat, lon, idx):
         """
@@ -374,6 +378,7 @@ class MapWidget(QWidget):
     # ----------------------------------------------------------
     # Farblogik (rot bei MarkB..MarkE, sonst schwarz)
     # ----------------------------------------------------------
+    """deadcode
     def is_in_marked_range(self, idx: int) -> bool:
         if self._markB_idx is not None and self._markE_idx is not None:
             b = min(self._markB_idx, self._markE_idx)
@@ -385,6 +390,7 @@ class MapWidget(QWidget):
             return (idx == self._markE_idx)
         else:
             return False
+    """#deadcode        
 
     def get_default_color_for_index(self, i: int) -> str:
         """
@@ -425,7 +431,7 @@ class MapWidget(QWidget):
             pass
 
         return "black"
-
+    """deadcode
     def get_default_size_for_color(self, color: str) -> int:
         s = QSettings("KVRouite", "KVRouite")
 
@@ -447,7 +453,7 @@ class MapWidget(QWidget):
 
         val = s.value(f"mapSize/{color_key}", default_val, type=int)
         return val
-
+    """#deadcode
     def set_selected_point(self, idx: int):
         print(f"[DEBUG] MapWidget: selected_point set to idx={idx}")
         self._blue_idx = idx

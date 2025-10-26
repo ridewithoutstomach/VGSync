@@ -403,7 +403,7 @@ class VideoControlWidget(QWidget):
         dlg.move(QCursor.pos())
         dlg.exec()    
     
-
+    """deadcode
     def _show_time_popup_at_cursor(self, hh_str: str, mm_str: str, ss_str: str):
 
 
@@ -452,7 +452,7 @@ class VideoControlWidget(QWidget):
         dlg.setModal(True)
         dlg.move(QCursor.pos())
         dlg.exec()
-
+    """#deadcode
     def _popup_accepted(self, dlg, edit_h, edit_m, edit_s):
         txtH = edit_h.text().strip()
         txtM = edit_m.text().strip()
