@@ -1219,13 +1219,18 @@ class GPXControlWidget(QWidget):
                     mw.map_widget.clear_marked_range()
                 if hasattr(mw.video_control, "update_set_sync_highlight"):
                     mw.video_control.update_set_sync_highlight()
+                if hasattr(mw, "chart") and hasattr(mw.chart, "clear_sync_range"):
+                    mw.chart.clear_sync_range()    
                 QMessageBox.information(
                     mw,
                     "Set a new sync",
                     "Please select the matching GPX point and set the current video frame, "
                     "then click 'Sync' (GSync) to create a new alignment."
                 )
-
+            else:
+                if hasattr(mw, "chart") and hasattr(mw.chart, "clear_sync_range"):
+                    mw.chart.clear_sync_range() 
+                    
         if hasattr(mw, "_autoSyncVideoEnabled") and mw._autoSyncVideoEnabled:
             mw.cut_manager.on_markClear_clicked()
 
