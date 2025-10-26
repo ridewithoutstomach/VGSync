@@ -129,13 +129,15 @@ FIT_BUILD = False  # Set to True if you want to enable Fit Immersion export func
 
 ### CLASS ####
 class GoProExtractorDialog(QDialog):
-    def __init__(self, video_list, parent=None):
+    def __init__(self, video_list, parent=None, keep_append=False):  # <--- NEU
         super().__init__(parent)
         self.video_list = video_list
         self.parent = parent
         self.setWindowTitle("Extracting GoPro GPS...")
         self.setMinimumSize(600, 400)
-
+        self.keep_append = keep_append
+        
+        
         layout = QVBoxLayout()
         self.status_label = QLabel(f"Processing 1/{len(video_list)} videos...")
         layout.addWidget(self.status_label)
@@ -343,6 +345,19 @@ class GoProExtractorDialog(QDialog):
             
             all_combined_data = []
             current_end_time = None
+            if getattr(self, "keep_append", False):
+                try:
+                    existing = self.parent._gpx_slots[2]["gpx_data"] or []
+                except Exception:
+                    existing = []
+                if existing:
+                    # Vorhandene Punkte übernehmen und Endzeit merken
+                    all_combined_data.extend(existing)
+                    try:
+                        current_end_time = existing[-1]["time"]
+                    except Exception:
+                        current_end_time = None
+                    self.text_append(f"↪ Appending to existing Slot 2 (ends at {current_end_time})")
         
             for i, temp_gpx_path in enumerate(self._temp_gpx_files):
                 self.text_append(f"\n--- Combining file {i+1}/{len(self._temp_gpx_files)} ---")
@@ -7146,6 +7161,8 @@ class MainWindow(QMainWindow):
         except Exception:
             slot2_has_gpx = False
 
+        keep_append = False 
+        
         if slot2_has_gpx:
             msg_box = QMessageBox(self)
             msg_box.setWindowTitle("Slot 2 already contains GPX")
@@ -7183,8 +7200,8 @@ class MainWindow(QMainWindow):
                     set_gpx_video_shift(None)
                     self._update_gpx_overview()
             else:
-                # Keep & Append: nichts leeren, einfach fortfahren
-                pass
+                
+                keep_append = True
 
         # jetzt erst prüfen, ob Videos geladen sind
         if not self.playlist:
@@ -7281,7 +7298,7 @@ class MainWindow(QMainWindow):
         print(f"[DEBUG] Extracting {len(chosen_files)} videos")
 
         # Starte den Extraktionsprozess - benutze DEINEN existierenden Dialog
-        dlg = GoProExtractorDialog(chosen_files, self)
+        dlg = GoProExtractorDialog(chosen_files, self, keep_append=keep_append)
         dlg.show()
         QApplication.processEvents()
         dlg.start_extraction()
