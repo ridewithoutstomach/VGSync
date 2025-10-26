@@ -3568,6 +3568,7 @@ class MainWindow(QMainWindow):
             self._time_mode = "final"
         self.update_timeline_marker()
         self.video_editor.set_time_mode(self._time_mode)    
+        self.video_editor.set_final_time_callback(self.get_final_time_for_global)
 
     def _get_offset_for_filepath(self, video_path):
         try:
@@ -4167,7 +4168,7 @@ class MainWindow(QMainWindow):
         mm = (s_rounded % 3600) // 60
         ss = s_rounded % 60
     
-        self.video_editor.set_current_time(display_time)
+        #self.video_editor.set_current_time(display_time)
         self.video_control.set_hms_time(hh, mm, ss)
 
         # 5) Wenn das Video gerade läuft => aktualisieren wir GPX/Map/Chart

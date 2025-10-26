@@ -115,6 +115,7 @@ class VideoEditorWidget(QWidget):
             "background-color:rgba(0,0,0,120); color: yellow; font-size:16px;"
             "padding:2px;"
         )
+        self._last_time_html = None
         vbox_time.addWidget(self.current_time_label)
         layout.addWidget(self.current_time_widget, 0, 0, alignment=Qt.AlignTop | Qt.AlignRight)
 
@@ -471,13 +472,18 @@ class VideoEditorWidget(QWidget):
 
     def set_current_time(self, secs: float):
         """
-        Wird evtl. aufgerufen, wenn Timeline den Schieberegler setzt und wir
-        nur das UI-Label anpassen wollen. (Oder optional -> self._player.seek())
+        Externe Updates (z.B. Timeline) liefern i.d.R. globale Zeit.
+        Wenn 'final' aktiv ist, wandeln wir vor der Anzeige um,
+        damit sich Anzeige und Timer nicht gegenseitig übermalen.
         """
-        # => wir machen hier NUR Label:
+        if self._time_mode == "final" and self._final_time_callback:
+            secs = self._final_time_callback(secs)
+
         text_html = self.format_seconds_html(secs)
-        self.current_time_label.setTextFormat(Qt.RichText)
-        self.current_time_label.setText(text_html)
+        # Nur updaten, wenn sich der Text tatsächlich ändert (verhindert unnötiges Repaint/Flackern)
+        if getattr(self, "_last_time_html", None) != text_html:
+            self.current_time_label.setText(text_html)
+            self._last_time_html = text_html
 
     def play_pause(self):
         if self.is_playing:
@@ -638,7 +644,9 @@ class VideoEditorWidget(QWidget):
             show_s = global_s
 
         text_html = self.format_seconds_html(show_s)
-        self.current_time_label.setText(text_html)
+        if getattr(self, "_last_time_html", None) != text_html:
+            self.current_time_label.setText(text_html)
+            self._last_time_html = text_html
 
     def stop(self):
         """
