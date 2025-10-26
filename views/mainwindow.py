@@ -136,7 +136,7 @@ class GoProExtractorDialog(QDialog):
         self.setWindowTitle("Extracting GoPro GPS...")
         self.setMinimumSize(600, 400)
         self.keep_append = keep_append
-        
+        self._update_check_is_manual = False
         
         layout = QVBoxLayout()
         self.status_label = QLabel(f"Processing 1/{len(video_list)} videos...")
@@ -948,7 +948,9 @@ class MainWindow(QMainWindow):
         # --- Updates (GitHub Releases) ---
         self.action_check_updates = QAction("Check for Updates", self)
         self.action_check_updates.setStatusTip("Check GitHub releases for newer versions")
-        self.action_check_updates.triggered.connect(self._kickoff_update_check)
+        #self.action_check_updates.triggered.connect(self._kickoff_update_check)
+        #self.action_check_updates.triggered.connect(self._check_updates_interactive)
+        self.action_check_updates.triggered.connect(lambda: (setattr(self, "_updates_manual", True), self._kickoff_update_check()))
         help_menu.addAction(self.action_check_updates)
 
         self.action_auto_update_check = QAction("Auto Check for Updates", self, checkable=True)
@@ -7954,6 +7956,14 @@ class MainWindow(QMainWindow):
 
         return True
 
+    def _check_updates_interactive(self):
+        """
+        Wird nur vom Menüpunkt 'Check for Updates' aufgerufen.
+        Markiert den Lauf als 'manuell', damit wir ggf. einen Dialog zeigen.
+        """
+        self._update_check_is_manual = True
+        self._kickoff_update_check()
+
     def _kickoff_update_check(self):
         # Repo aus Settings (Default wurde im __init__ gesetzt)
         s = QSettings("KVRouite","KVRouite")
@@ -8119,31 +8129,55 @@ class MainWindow(QMainWindow):
             self._notify_new_version(current_raw, newest_stable, repo)
         elif current_core == newest_core and is_current_prerelease:
             self._notify_new_version(current_raw, newest_stable, repo)
+        
         else:
-            # Optional leise informieren:
-            # self.statusBar().showMessage("You are on the latest stable version.", 4000)
             print(f"[updates] up-to-date (stable). current={current_raw}, latest_stable={newest_stable}")
+            # Nur wenn der User manuell geprüft hat, auch ein Fenster zeigen:
+            if getattr(self, "_updates_manual", False):
+                try:
+                    from PySide6.QtWidgets import QMessageBox
+                    QMessageBox.information(
+                        self,
+                        "You are up to date",
+                        (
+                            "<html>"
+                            "<div style='font-family:monospace; white-space:pre;'>"
+                            f"Current version: {current_raw}     \n"
+                            f"Latest stable:   {newest_stable}     \n"
+                            "</div>"
+                            "</html>"
+                        )
+                    )
+                finally:
+                    # Flag zurücksetzen, damit Auto-Check still bleibt
+                    self._updates_manual = False
             return
+    
+    
+    
+
+    
 
     def _notify_new_version(self, current: str, newest_stable: str, repo: str):
         from PySide6.QtWidgets import QMessageBox
-        from PySide6.QtCore import QUrl
+        from PySide6.QtCore import QUrl, QTimer
         from PySide6.QtGui import QDesktopServices
+
         releases_url = f"https://github.com/{repo}/releases"
-        answer = QMessageBox.information(
-            self,
-            "New Version Available",
-            (f"A newer *stable* version is available on GitHub.\n\n"
-             f"Current: {current}\n"
-             f"Latest (stable): {newest_stable}\n\n"
-             "Open the releases page now?"),
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.Yes
-        )
-        if answer == QMessageBox.Yes:
-            QDesktopServices.openUrl(QUrl(releases_url))
-    
 
-    
+        def _show():
+            answer = QMessageBox.information(
+                self,
+                "New Version Available",
+                (f"A newer *stable* version is available on GitHub.\n\n"
+                 f"Current: {current}\n"
+                 f"Latest (stable): {newest_stable}\n\n"
+                 "Open the releases page now?"),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes
+            )
+            if answer == QMessageBox.Yes:
+                QDesktopServices.openUrl(QUrl(releases_url))
 
-    
+        # Sicherstellen, dass der Dialog erst nach dem Paint-Cycle kommt
+        QTimer.singleShot(0, _show)
