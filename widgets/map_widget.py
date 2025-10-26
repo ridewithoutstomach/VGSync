@@ -82,6 +82,7 @@ class MapWidget(QWidget):
         # map_page.html laden
         base_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
         html_path = os.path.join(base_dir, "map_page.html")
+        self._html_url = QUrl.fromLocalFile(html_path)
         self.view.load(QUrl.fromLocalFile(html_path))
 
         # Callback, wenn HTML fertig geladen ist
@@ -210,18 +211,31 @@ class MapWidget(QWidget):
     def loadRoute(self, route_geojson: dict, do_fit: bool = True):
         """
         Ruft loadRoute(...) in JS auf, um ein GeoJSON in der Karte darzustellen.
+        Leer -> schneller Blank-Pfad (Reload), damit 'New Project' sofort ist.
         """
         if not route_geojson or not isinstance(route_geojson, dict):
             return
 
-        # Anzahl Points ermitteln
         features = route_geojson.get("features", [])
+        # --- FAST BLANK: Wenn keine Features -> Map schnell resetten (kein JS-Render) ---
+        if not features:
+            # internen State zurücksetzen
+            self._num_points = 0
+            self._blue_idx = None
+            self._yellow_idx = None
+            self._markB_idx = None
+            self._markE_idx = None
+            try:
+                # Seite neu laden = Startzustand, sehr schnell
+                self.view.load(self._html_url)
+            except Exception:
+                pass
+            return
+        # --- normaler Render-Pfad ---
         self._num_points = sum(
             1 for feat in features
             if feat.get("geometry", {}).get("type") == "Point"
         )
-
-        
         do_fit_str = "true" if do_fit else "false"
         js = f"loadRoute({json.dumps(route_geojson)}, {do_fit_str});"
         self.view.page().runJavaScript(js)
