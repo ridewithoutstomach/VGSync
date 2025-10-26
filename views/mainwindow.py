@@ -5012,6 +5012,19 @@ class MainWindow(QMainWindow):
             if getattr(self, "mini_chart_widget", None):
                 self.mini_chart_widget.set_gpx_data(self._gpx_data)
                 self.mini_chart_widget.update()
+                
+                
+    def _highlight_index_everywhere(self, idx: int):
+        # Map
+        self.map_widget.show_blue(idx, do_center=True)
+        # Chart
+        self.chart.highlight_gpx_index(idx)
+        # GpxList
+        self.gpx_widget.gpx_list.select_row_in_pause(idx)
+        # MiniChart
+        if self.mini_chart_widget:
+            self.mini_chart_widget.set_current_index(idx)    
+                    
             
     def on_sync_clicked(self):
         """
