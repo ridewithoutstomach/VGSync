@@ -5261,11 +5261,11 @@ class MainWindow(QMainWindow):
             
         except Exception as e:
             print(f"[ERROR] Fehler in _handle_video_end_state: {e}")
-                
+    """            
     def _handle_endcut_if_present(self):
-        """
-        Prüft, ob ein Endcut vorhanden ist und springt dann zum wirklichen Ende des Videos.
-        """
+        
+        #Prüft, ob ein Endcut vorhanden ist und springt dann zum wirklichen Ende des Videos.
+        
         # Prüfe, ob Endcut-Behandlung überhaupt aktiv ist
         if not self.action_show_endcut.isChecked():
             print("[DEBUG] Endcut handling is disabled - skipping")
@@ -5320,7 +5320,7 @@ class MainWindow(QMainWindow):
                 
         except Exception as e:
             print(f"[ERROR] Fehler in _handle_endcut_if_present: {e}")
-            
+    """        
             
     def _handle_video_end_state(self):
         """
