@@ -4314,10 +4314,9 @@ class MainWindow(QMainWindow):
 
             # Endcut vorhanden?
             has_endcut = abs(final_end_position - total_duration) > 0.1
-
-            # Sofort in stabilen Endzustand (Pause/UI)
-            self._handle_video_end_state()
-
+            
+            # Stabil pausieren & UI setzen, aber NICHT als 'am Ende' markieren
+            self._handle_video_end_state(mark_as_end=False)
             # Optional Popup wie in der Laufzeit-Erkennung
             #if has_endcut and getattr(self, "action_show_endcut", None) and self.action_show_endcut.isChecked():
             #    if getattr(self, "action_show_endcut_warning", None) and self.action_show_endcut_warning.isChecked():
@@ -5048,68 +5047,39 @@ class MainWindow(QMainWindow):
 
         return keep_list
 
-    def _handle_video_end_state(self):
-        """Setzt alle Player-Zustände korrekt für Video-Ende"""
+    
+    
+    def _handle_video_end_state(self, mark_as_end: bool = True):
+        """Setzt alle Player-Zustände korrekt für Video-Ende.
+        mark_as_end=False nutzen, wenn das Ende nur "angesteuert" wurde (z. B. Goto End),
+        damit nach Step-Back/Play nicht an den Anfang gesprungen wird.
+        """
         try:
-            # Sofortiger Stop
+            # Sofortiger Stop/Pause
             self.video_editor.is_playing = False
-            
-            # Player pausieren
             try:
                 if hasattr(self.video_editor, '_player') and self.video_editor._player:
                     self.video_editor._player.pause = True
             except Exception as e:
                 print(f"[WARN] Konnte Player nicht pausieren: {e}")
-            
-            # UI sofort aktualisieren
+
+            # UI aktualisieren
             self.video_control.update_play_pause_icon(False)
             self.gpx_widget.set_video_playing(False)
             self.map_widget.set_video_playing(False)
-            
+
             # Gelben Marker entfernen
             lw = self.gpx_widget.gpx_list
             if hasattr(lw, '_last_video_row') and lw._last_video_row is not None:
                 lw._mark_row_bg_except_markcol(lw._last_video_row, Qt.white)
                 lw._last_video_row = None
-            
-            self._video_at_end = True
-            
+
+            # Nur beim echten Abspiel-Ende auf "am Ende" setzen
+            self._video_at_end = bool(mark_as_end)
+
         except Exception as e:
-            print(f"[ERROR] Fehler in _handle_video_end_state: {e}")
-    
-            
-    def _handle_video_end_state(self):
-        """
-        Setzt alle Player-Zustände korrekt für Video-Ende.
-        """
-        try:
-            # Stelle sicher, dass alle Zustände korrekt zurückgesetzt werden
-            self.video_editor.is_playing = False
-            
-            # Versuche den Player zu pausieren
-            try:
-                if hasattr(self.video_editor, '_player') and self.video_editor._player:
-                    self.video_editor._player.pause = True
-            except Exception as e:
-                print(f"[WARN] Konnte Player nicht pausieren: {e}")
-            
-            # UI aktualisieren
-            self.video_control.update_play_pause_icon(False)
-            self.gpx_widget.set_video_playing(False)
-            self.map_widget.set_video_playing(False)
-            
-            # Gelben Marker entfernen
-            lw = self.gpx_widget.gpx_list
-            if lw._last_video_row is not None:
-                lw._mark_row_bg_except_markcol(lw._last_video_row, Qt.white)
-                lw._last_video_row = None
-            
-            self._video_at_end = True
-            
-            print("[DEBUG] Video-Endzustand erfolgreich gesetzt")
-            
-        except Exception as e:
-            print(f"[ERROR] Fehler in _handle_video_end_state: {e}")
+            print(f"[ERROR] Fehler in _handle_video_end_state: {e}")    
+                
     
     def _show_endcut_popup(self, end_position: float):
         """
