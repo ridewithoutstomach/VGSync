@@ -733,8 +733,8 @@ class MainWindow(QMainWindow):
         
         player_setup_menu = setup_menu.addMenu("Player-Setup")
 
+       
         
-
         # "Show Endcut Warning" Option (standardmäßig an)
         self.action_show_endcut_warning = QAction("Show Endcut Warning", self)
         self.action_show_endcut_warning.setStatusTip("Show popup warning when endcut is detected")
@@ -742,11 +742,10 @@ class MainWindow(QMainWindow):
         self.action_show_endcut_warning.setChecked(True)  # Standard: an
         self.action_show_endcut_warning.triggered.connect(self._on_show_endcut_warning_toggled)
         player_setup_menu.addAction(self.action_show_endcut_warning)
-        
-        
-        
-        timer_menu = setup_menu.addMenu("Time: Final/Glogal")
-        
+
+        # ▼ Time-Untermenü in Player-Setup (statt Top-Level)
+        time_submenu = player_setup_menu.addMenu("Time: Final/Global")
+
         self.timer_action_group = QActionGroup(self)
         self.timer_action_group.setExclusive(True)
 
@@ -760,8 +759,10 @@ class MainWindow(QMainWindow):
 
         self.timer_action_group.addAction(self.action_global_time)
         self.timer_action_group.addAction(self.action_final_time)
-        
-        
+
+        # HIER war vorher timer_menu.addAction(...): jetzt ins time_submenu hängen
+        time_submenu.addAction(self.action_global_time)
+        time_submenu.addAction(self.action_final_time)
 
         
         
@@ -971,8 +972,8 @@ class MainWindow(QMainWindow):
         copyright_action.triggered.connect(self._show_copyright_dialog)
         
         self.action_global_time.setChecked(True)
-        timer_menu.addAction(self.action_global_time)
-        timer_menu.addAction(self.action_final_time)
+        time_submenu.addAction(self.action_global_time)
+        time_submenu.addAction(self.action_final_time)
 
         self.action_global_time.triggered.connect(self._on_timer_mode_changed)
         self.action_final_time.triggered.connect(self._on_timer_mode_changed)
