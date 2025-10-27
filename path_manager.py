@@ -202,12 +202,6 @@ def ensure_ffmpeg(parent_widget) -> bool:
         s.setValue("paths/ffmpeg", chosen)
         add_to_process_path(chosen)
         return True
-"""deadcode        
-    def get_license_path():
-        
-        base_dir = get_base_dir()
-        return os.path.join(base_dir, "license.lic")
-"""#deadcode        
         
 def is_valid_mpv_folder(folder: str) -> bool:
     """
@@ -228,12 +222,6 @@ def is_valid_mpv_folder(folder: str) -> bool:
     except Exception as e:
         print(f"[WARN] libmpv-2.dll in {folder} konnte nicht geladen werden: {e}")
         return False
-
-"""#deadcode
-def ensure_mpv_library(parent_widget, base_dir: str) -> None:
-    
-    ensure_mpv(parent_widget)
-"""#deadcode    
     
 ### mac:
 def is_valid_mpv_folder_mac(folder: str) -> bool:

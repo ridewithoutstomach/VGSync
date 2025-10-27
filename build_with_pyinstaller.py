@@ -176,16 +176,7 @@ def build_windows():
     else:
         print("[WARN] GUI-Icon-Ordner fehlt:", gui_icon_dir_src)
 
-    # --- doc-Ordner nach _internal/doc ---
-    """
-    doc_dir = os.path.join(BASE_DIR, "doc")
-    if os.path.isdir(doc_dir):
-        doc_target_dir = os.path.join(internal_dir, "doc")
-        print(f"[INFO] Kopiere doc/ nach {doc_target_dir}")
-        copy_tree_all(doc_dir, doc_target_dir)
-    else:
-        print("[INFO] 'doc' Ordner nicht vorhanden oder kein Ordner. Überspringe Kopie.")
-    """
+    
     doc_dir = os.path.join(BASE_DIR, "doc")
     if os.path.isdir(doc_dir):
         doc_target_dir = os.path.join(internal_dir, "doc")

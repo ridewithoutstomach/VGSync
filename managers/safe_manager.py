@@ -59,14 +59,7 @@ class SafeManager(QDialog):
         self.cmd_list = cmd_list
         self.total_duration_s = total_duration_s
         self.ffmpeg_process = None
-    """deadcode
-    def start_saving(self):
-        if not self.cmd_list or len(self.cmd_list) < 2:
-            QMessageBox.critical(self, "Fehler", "Ungültiges ffmpeg-Kommando!")
-            self.close()
-            return
-        self._start_ffmpeg()
-    """#deadcode
+    
     def _start_ffmpeg(self):
         self.label_status.setText("Starte ffmpeg ...")
         self.progress_bar.setValue(0)

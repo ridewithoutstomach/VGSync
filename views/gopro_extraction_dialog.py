@@ -78,11 +78,3 @@ class GoProExtractionDialog(QDialog):
             self.accept()
         else:
             self.reject()
-"""deadcode
-    def was_successful(self):
-        return self.extraction_success
-"""#deadcode
-"""deadcode
-    def get_extracted_gpx_data(self):
-        return self.gpx_data
-"""#deadcode        

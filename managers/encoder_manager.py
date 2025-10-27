@@ -518,20 +518,6 @@ def map_preset_for_gpu(user_preset, hw_encode):
         return gpu_map_intel.get(up,"medium")
     return user_preset
     
-"""deadcode    
-def get_kf_le_with_margin(kf_list, time, margin):
-    
-    target = time - margin
-    if target < 0:
-        target = 0
-    best = kf_list[0]
-    for k in kf_list:
-        if k <= target:
-            best = k
-        else:
-            break
-    return best
-"""#deadcode    
 
 ###############################################################################
 # 3) DETERMINE ENCODER

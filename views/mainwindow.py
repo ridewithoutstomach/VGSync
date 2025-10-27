@@ -1658,10 +1658,7 @@ class MainWindow(QMainWindow):
 
     def _on_set_maptiler_key(self):
         self._show_key_dialog("mapTiler", self._maptiler_key)
-    """deadcode
-    def _on_set_bing_key(self):
-        self._show_key_dialog("bing", self._bing_key)
-    """#deadcode
+    
     def _on_set_mapbox_key(self):
         self._show_key_dialog("mapbox", self._mapbox_key)
 
@@ -1822,29 +1819,6 @@ class MainWindow(QMainWindow):
             f"{color_str.capitalize()} points changed to size={new_val}."
         )
     
-    
-
-
-    
-    """deadcode        
-    def _update_map_points_of_color(self, color_str: str, new_size: int):
-        
-        #Ruft in map_page.html => updateAllPointsByColor(color_str, new_size) auf.
-        #'color_str' ist einer der Farbnamen: 'black', 'red', 'blue', 'yellow'.
-        
-        if not self.map_widget:
-            return
-
-        # Wenn 'color_str' mal was Unbekanntes ist, fallback auf 'black':
-        valid_colors = {'black', 'red', 'blue', 'yellow'}
-        color_lower = color_str.lower()
-        if color_lower not in valid_colors:
-            color_lower = 'black'
-
-        # Dann direkt mit dem Farbnamen ins JS
-        js_code = f"updateAllPointsByColor('{color_lower}', {new_size});"
-        self.map_widget.view.page().runJavaScript(js_code)
-    """#deadcode
         
         
     def _on_zero_speed_action(self):
@@ -2541,13 +2515,8 @@ class MainWindow(QMainWindow):
             self.map_widget.set_selected_point(row)
             print(f"[UNDO] Punkt {row} nach Undo erneut in Map selektiert")
 
-    """deadcode
-    def append_gpx_history(self, gpx_data: list):
-        old_data = copy.deepcopy(gpx_data)
-        self.gpx_widget.gpx_list._history_stack.append(old_data)      
-    """#deadcode        
             
-    ####################################################################
+    
     def _on_reset_config_triggered(self):
        
     
@@ -3119,36 +3088,6 @@ class MainWindow(QMainWindow):
         )
 
 
-    
-        
-    """deadcode  
-    def on_map_sync_idx(self, gpx_index: int):
-       
-        print(f"[DEBUG] on_map_sync_idx => idx={gpx_index}")
-
-        # 0) Index-Prüfung
-        if not (0 <= gpx_index < len(self._gpx_data)):
-            print("[DEBUG] on_map_sync_idx => invalid gpx_index or no gpx_data loaded.")
-            return
-
-        # 1) GPX-Punkt auslesen
-        point = self._gpx_data[gpx_index]
-        print(f"[DEBUG] on_map_sync_idx => point={point}")
-
-        rel_s = point.get("time", 0.0) - timedelta(seconds = get_gpx_video_shift())
-
-        hh = int(rel_s // 3600)
-        mm = int((rel_s % 3600) // 60)
-        ss = int(rel_s % 60)
-    
-        # Extra Debug:
-        print(f"[DEBUG] => resolved time => hh={hh}, mm={mm}, ss={ss}")
-
-        # 4) Aufruf => on_time_hms_set_clicked(hh, mm, ss)
-        self.on_time_hms_set_clicked(hh, mm, ss)
-        #self.on_time_hms_set_clicked(hh, mm, ss)
-    """#deadcode    
-    
         
         
     def on_user_selected_index(self, new_index: int):
@@ -3307,14 +3246,6 @@ class MainWindow(QMainWindow):
     # -----------------------------------------------------------------------
     # Methoden und Slots (weitgehend unverändert)
     # -----------------------------------------------------------------------
-    """deadcode
-    def format_seconds_to_hms(self, secs: float) -> tuple[int,int,int]:
-        s_rounded = round(secs)
-        h = s_rounded // 3600
-        m = (s_rounded % 3600) // 60
-        s = (s_rounded % 60)
-        return (h, m, s)
-    """#deadcode
     
     
     def on_markB_clicked_video(self):
@@ -4013,49 +3944,6 @@ class MainWindow(QMainWindow):
 
 
 
-
-    """deadcode
-    def load_gpx_file(self):
-        # (A) Wenn schon GPX da ist => sofort Dialog
-        if self._gpx_data:
-            msg_box = QMessageBox(self)
-            msg_box.setWindowTitle("Load GPX")
-            msg_box.setText("A GPX is already loaded.\n"
-                            "Do you want to start a new GPX or append the new file?")
-            new_btn = msg_box.addButton("New", QMessageBox.AcceptRole)
-            append_btn = msg_box.addButton("Append", QMessageBox.YesRole)
-            cancel_btn = msg_box.addButton("Cancel", QMessageBox.RejectRole)
-
-            msg_box.setWindowModality(Qt.WindowModal)
-            msg_box.show()
-            QApplication.processEvents()  # damit man ihn sofort sieht
-
-            msg_box.exec()
-            clicked = msg_box.clickedButton()
-            if clicked == cancel_btn:
-                return  # Nutzer hat abgebrochen
-            elif clicked == new_btn:
-                mode = "new"
-                self._sync_prompt_answer = None
-            else:
-                mode = "append"
-        else:
-            # => Noch keine GPX => Modus: new
-            mode = "new"
-    
-            
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select GPX File",
-            "",
-            "GPX Files (*.gpx)",
-        )
-        if not file_path:
-            return  # Abbruch
-    
-        self.process_open_gpx(file_path, mode)
-        self.save_recent_file(file_path)
-    """#deadcode
     def process_open_gpx(self, file_path, mode="new"):
         self.map_widget.view.page().runJavaScript("showLoading('Loading GPX...');")
         QApplication.processEvents()
@@ -4408,20 +4296,6 @@ class MainWindow(QMainWindow):
             ...
             self.cut_manager.start_skip_timer()
     
-    """deadcode
-    def _get_cut_end_if_any(self) -> float:
-        
-        #Falls es in cut_manager._cut_intervals einen Bereich (0.0, end_s) gibt,
-        #gib end_s zurück. Sonst 0.0
-        
-        cut_intervals = self.cut_manager.get_cut_intervals()  # Liste (start_s, end_s)
-        for (start_s, end_s) in cut_intervals:
-            # Prüfen mit kleinem Toleranzwert:
-            if abs(start_s) < 0.0001:
-                return end_s
-        return 0.0
-    """#deadcode    
-    
     def on_stop(self):
         self.video_editor.stop()
 
@@ -4461,28 +4335,7 @@ class MainWindow(QMainWindow):
    
    
    
-    """        
-    def on_play_ended(self):
-        self.video_editor.media_player
-        self.video_control.update_play_pause_icon(False)
-
-        # 1) Player manuell in "Pause"-State
-        # mpv self.video_editor.media_player.pause()
-        self.video_editor._player.pause = True
-        self.video_editor.is_playing = False
-
-        # 2) GPX/Map => wir sind in Pause
-        self.gpx_widget.set_video_playing(False)
-        self.map_widget.set_video_playing(False)
-
-        # 3) Gelben Marker entfernen
-        lw = self.gpx_widget.gpx_list
-        if lw._last_video_row is not None:
-            lw._mark_row_bg_except_markcol(lw._last_video_row, Qt.white)
-            lw._last_video_row = None
-        
-        self._video_at_end = True
-    """
+    
     def on_play_ended(self):
         """Wird aufgerufen, wenn das Video natürlich endet"""
         # Stelle sicher, dass alle Zustände korrekt zurückgesetzt werden
@@ -4557,33 +4410,6 @@ class MainWindow(QMainWindow):
         #
     
     
-        
-    """deadcode
-    def _really_pause(self):
-        
-        #Pausiert das Video => wir bleiben direkt am Zielbild stehen
-        #(statt weiterzulaufen wie zuvor).
-        
-        # mpv self.video_editor.media_player.pause()
-        self.video_editor._player.pause = True
-        # Falls du NICHT willst, dass "is_playing=True" war, 
-        # lässt du es weg - hier also is_playing=False, 
-        # oder gar nicht verändern.
-        self.video_editor.is_playing = False
-    """#deadcode
-    """deadcode
-    def _pause_player_popup(self):
-        # mpv self.video_editor.media_player.pause()
-        self.video_editor._player.pause = True
-        self.video_editor.is_playing = False
-        real_s = self.video_editor.get_current_position_s()
-        self.video_editor.set_current_time(real_s)
-
-        hh = int(real_s // 3600)
-        mm = int((real_s % 3600) // 60)
-        ss = int(real_s % 60)
-        #self.video_control.set_hms_time(hh, mm, ss)
-    """#deadcode
     
     def _on_cuts_changed(self, sum_of_cuts_s):
         print("[DEBUG] _on_cuts_changed => sum_of_cuts_s:", sum_of_cuts_s)
@@ -5250,66 +5076,7 @@ class MainWindow(QMainWindow):
             
         except Exception as e:
             print(f"[ERROR] Fehler in _handle_video_end_state: {e}")
-    """            
-    def _handle_endcut_if_present(self):
-        
-        #Prüft, ob ein Endcut vorhanden ist und springt dann zum wirklichen Ende des Videos.
-        
-        # Prüfe, ob Endcut-Behandlung überhaupt aktiv ist
-        if not self.action_show_endcut.isChecked():
-            print("[DEBUG] Endcut handling is disabled - skipping")
-            return
-        
-        try:
-            total_duration = self.real_total_duration
-            cut_intervals = self.cut_manager._cut_intervals
-            
-            if not cut_intervals:
-                print("[DEBUG] Keine Schnitte vorhanden")
-                return
-            
-            # Berechne Endposition
-            final_position = total_duration
-            if cut_intervals:
-                sorted_cuts = sorted(cut_intervals, key=lambda x: x[1], reverse=True)
-                current_end = total_duration
-                TOLERANCE = 0.001
-                
-                for cut_start, cut_end in sorted_cuts:
-                    # Prüfe ob dieser Schnitt das aktuelle Ende beeinflusst
-                    if abs(cut_end - current_end) < TOLERANCE or cut_end >= current_end:
-                        # Dieser Schnitt beeinflusst das Ende - setze Ende auf Schnittstart
-                        current_end = cut_start
-                
-                final_position = current_end
-            
-            current_pos = self.video_editor.get_current_position_s()
-            
-            # Debug-Ausgabe
-            print(f"[DEBUG] Endcut-Prüfung: current_pos={current_pos:.2f}, final_position={final_position:.2f}, total_duration={total_duration:.2f}")
-            
-            # Prüfe, ob wir uns nicht bereits am richtigen Ende befinden
-            if abs(final_position - current_pos) > 0.1 and abs(final_position - total_duration) > 0.001:
-                print(f"[DEBUG] Endcut erkannt: springe von {current_pos:.2f}s zu {final_position:.2f}s")
-                
-                # Zeige Popup-Warnung, wenn aktiviert
-                if self.action_show_endcut_warning.isChecked():
-                    self._show_endcut_popup(final_position)
-                
-                # Zustand setzen und Sprung durchführen
-                self._handle_video_end_state()
-                
-                # Sprung zum Endcut mit Verzögerung
-                QTimer.singleShot(100, lambda: self.video_editor._jump_to_global_time(final_position))
-                QTimer.singleShot(350, lambda: self.video_editor._jump_to_global_time(final_position))
-                
-                print(f"[DEBUG] Endcut-Sprung initiiert zu {final_position:.2f}s")
-            else:
-                print("[DEBUG] Kein Endcut erkannt oder bereits am richtigen Ende")
-                
-        except Exception as e:
-            print(f"[ERROR] Fehler in _handle_endcut_if_present: {e}")
-    """        
+    
             
     def _handle_video_end_state(self):
         """
@@ -5400,24 +5167,7 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(2500, popup.close)
         
         return popup
-    """deadcode
-    def _fade_popup_in(self, popup):
-        #Fade-In Animation für das Popup
-        current_opacity = popup.windowOpacity()
-        if current_opacity < 1.0:
-            popup.setWindowOpacity(current_opacity + 0.1)
-        else:
-            # Stoppe den Timer wenn maximale Opazität erreicht
-            popup.findChild(QTimer).stop()
-    """#deadcode
-    """deadcode
-    def _fade_popup_out(self, popup):
-        #Fade-Out Animation für das Popup
-        fade_out = QTimer(popup)
-        fade_out.timeout.connect(lambda: self._fade_popout_out_step(popup, fade_out))
-        fade_out.start(50)
-    """#deadcode    
-
+    
     def _fade_popout_out_step(self, popup, timer):
         """Ein Schritt der Fade-Out Animation"""
         current_opacity = popup.windowOpacity()
@@ -5426,15 +5176,6 @@ class MainWindow(QMainWindow):
         else:
             timer.stop()
             popup.close()
-    """deadcode
-    def _show_endcut_notification(self, end_position):
-        
-        #Zeigt eine kurze Benachrichtigung über den Endcut.
-        
-        # Nur zeigen, wenn das Fenster aktiv ist
-        if self.isActiveWindow():
-            self.statusBar().showMessage(f"Endcut: Zum wirklichen Ende bei {end_position:.1f}s gesprungen", 3000)
-    """#deadcode
     
     def _save_gpx_to_file(self, gpx_points, out_file: str):
         """
@@ -5776,38 +5517,6 @@ class MainWindow(QMainWindow):
             )
     
     
-            
-   
-  
-    """deadcode        
-    def _partial_recalc_gpx(self, i: int):
-        
-        #Neuberechnung nur für index i und i+1 
-        #(sowie i-1.. i, falls i>0)
-        
-       
-        gpx = self.gpx_widget.gpx_list._gpx_data
-        n = len(gpx)
-        if n < 2:
-            return
-
-        start_i = max(0, i-1)
-        end_i   = min(n-1, i+1)
-
-        # => Einfacher Weg: extrahiere Subarray, recalc, schreibe zurück
-        sub = gpx[start_i:end_i+1]
-
-        # recalc_gpx_data kann das gesamte Array => wir machen 
-        # --> Variante A) sub
-        # --> Variante B) In-Place code (selber berechnen).
-
-        # Hier der "grosse" Weg: wir rufen recalc_gpx_data auf ALLE, 
-        # ist simpler & kein Performanceproblem
-       
-        recalc_gpx_data(gpx)
-
-        # Falls du nur sub recalc willst, ist das aufwändiger.
-    """#deadcode    
         
     
     def add_or_update_point_on_map(self, stable_id: str, lat: float, lon: float, 
@@ -6977,78 +6686,9 @@ class MainWindow(QMainWindow):
 
 
 
-    """deadcode
-    def _current_mark_overlaps_grey(self) -> bool:
-        
-        #True, wenn die aktuell markierte GPX-Range (markB..markE)
-        #den grauen Vorbereich (durch negativen gpx-video-shift) berührt.
-        
-        try:
-            shift = get_gpx_video_shift()
-        except Exception:
-            shift = 0
-        if shift >= 0:
-            return False  # kein grauer Bereich aktiv
+    
 
-        data = getattr(self, "_gpx_data", None)
-        if not data:
-            return False
-
-        # markierte Range aus deinem GPX-Widget lesen
-        b = getattr(self.gpx_widget.gpx_list, "_markB_idx", None)
-        e = getattr(self.gpx_widget.gpx_list, "_markE_idx", None)
-        if b is None or e is None:
-            return False
-        if b > e:
-            b, e = e, b
-    
-        positive_time = data[0]["time"] + timedelta(seconds=abs(shift))
-        # Range berührt grau, wenn der Startpunkt der Range vor positive_time liegt
-        return data[b]["time"] < positive_time
-    """#deadcode
-    """deadcode
-    def _discard_sync_and_maybe_resync(self):
-        
-        #Sync verwerfen (Shift=0), Route neu laden, Anzeige refreshen,
-        #und den User fragen, ob er jetzt sofort neu syncen will.
-        
-        try:
-            cur_shift = get_gpx_video_shift()
-        except Exception:
-            cur_shift = 0
-        if cur_shift == 0:
-            return  # nichts zu tun
-    
-        reply = QMessageBox.question(
-            self,
-            "Sync may be invalid",
-            f"You manually cut inside the pre-video (grey) section.\n"
-            f"The current GPX–video shift ({cur_shift:+.1f}s) will be cleared.\n\n"
-            f"Do you want to set a new sync now?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.Yes
-        )
-    
-        # Sync verwerfen
-        set_gpx_video_shift(0)
-
-        # Route IMMER neu laden, damit grau sofort verschwindet
-        route_geojson = self._build_route_geojson_from_gpx(self._gpx_data)
-        self.map_widget.loadRoute(route_geojson, do_fit=False)
-    
-        # GPX-Liste & Controls refreshen
-        self.gpx_widget.gpx_list.set_gpx_data(self._gpx_data)
-        self.video_control.activate_controls()
-        if hasattr(self.video_control, "update_set_sync_highlight"):
-            self.video_control.update_set_sync_highlight()
-    
-        # Optional: sofort neu syncen lassen
-        if reply == QMessageBox.Yes:
-            self.on_set_video_gpx_sync_clicked()
-    """#deadcode
-    # Neue Methoden für FIT-Support:
-
-    # Neue kombinierte Methode:
+    # Neue kombinierte Methode GPX/FIT:
 
     def load_track_file(self):
         """Lädt entweder eine GPX oder FIT Datei - automatisch erkannt an der Endung"""
@@ -7416,45 +7056,6 @@ class MainWindow(QMainWindow):
     
 
     
-    
-    """deadcode
-    def _clear_gpx_data(self):
-        
-        #Löscht alle GPX-Daten und setzt die UI-Komponenten zurück.
-        
-        # GPX-Daten löschen
-        self._gpx_data.clear()
-        
-        # UI-Komponenten zurücksetzen
-        self.gpx_widget.set_gpx_data([])
-        self.chart.set_gpx_data([])
-        if self.mini_chart_widget:
-            self.mini_chart_widget.set_gpx_data([])
-        
-        # Map zurücksetzen
-        self.map_widget.loadRoute({"type": "FeatureCollection", "features": []}, do_fit=True)
-        
-        # GPX-Video-Shift zurücksetzen
-        set_gpx_video_shift(None)
-        
-        # UI-Status aktualisieren
-        self._update_gpx_overview()
-        
-        # Video-Sync deaktivieren
-        self.enableVideoGpxSync(False)
-        
-        store = self._get_active_slot_store()
-        store["gpx_data"] = []
-        store["markB"] = None
-        store["markE"] = None
-        store["gpx_video_shift"] = None
-        
-    
-        print("GPX data cleared successfully")
-        self._sync_prompt_answer = None
-        self._last_gpx_load_mode = None
-    """#deadcode
-    
     def _import_gopro_gpx(self, gpx_path, is_first_video=True):
         """
         Vereinfachte Import-Funktion - erwartet bereits korrekt zusammengeführte GPX
@@ -7519,49 +7120,6 @@ class MainWindow(QMainWindow):
                 f"Failed to import combined GPX:\n{str(e)}"
             )
             
-    """
-    def _propose_gopro_sync(self):
-       
-        if not (self._gpx_data and self.playlist_counter > 0):
-            return
-
-        # do not ask if last load was append
-        if getattr(self, "_last_gpx_load_mode", None) == "append":
-            return
-
-        # already answered once? don't ask again (until reset on NEW/New Project)
-        if self._sync_prompt_answer is not None:
-            return
-
-        msg_box = QMessageBox(self)
-        msg_box.setWindowTitle("Video & GPX Sync")
-
-        yes_btn = msg_box.addButton("Yes", QMessageBox.AcceptRole)
-        msg_box.setText("Do your GPX and video start at the same time?\n "
-                        "If so, let's activate video / GPX sync mode.")
-        no_btn = msg_box.addButton("No", QMessageBox.RejectRole)
-    
-        msg_box.setWindowModality(Qt.WindowModal)
-        msg_box.show()
-        QApplication.processEvents()
-    
-        msg_box.exec()
-        clicked = msg_box.clickedButton()
-        if clicked == yes_btn:
-            self._sync_prompt_answer = True
-            set_gpx_video_shift(0)
-            self.enableVideoGpxSync(True)
-            if self._edit_mode != "off":
-                self.video_control.set_editing_mode(True, True)
-        else:
-            self._sync_prompt_answer = False
-            QMessageBox.information(
-                self, "Video & GPX Sync",
-                "In this case it is advised to define the sync point.\n "
-                "Select a GPX point, find it in video and click on the red button"
-            )
-
-    """
     
     def _complete_gpx_integration(self):
         """

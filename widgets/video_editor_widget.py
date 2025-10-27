@@ -191,18 +191,7 @@ class VideoEditorWidget(QWidget):
         self._time_timer.timeout.connect(self._update_time_label)
         self._time_timer.start(200)  # alle 200ms
         
-        # -------- Keyboard Shortcuts --------
-        """
-        # Speed: + / -  (auch Numpad; mehrere Sequenzen, damit alle Layouts greifen)
-        #s = QShortcut(QKeySequence("+"),          self, activated=lambda: self._nudge_speed(+0.10)); s.setContext(Qt.ApplicationShortcut)
-        #s = QShortcut(QKeySequence("-"),          self, activated=lambda: self._nudge_speed(-0.10)); s.setContext(Qt.ApplicationShortcut)
-        s = QShortcut(QKeySequence(Qt.Key_Plus),  self, activated=lambda: self._nudge_speed(+0.10)); s.setContext(Qt.ApplicationShortcut)
-        s = QShortcut(QKeySequence(Qt.Key_Minus), self, activated=lambda: self._nudge_speed(-0.10)); s.setContext(Qt.ApplicationShortcut)
-        s = QShortcut(QKeySequence(Qt.Key_Equal), self, activated=lambda: self._nudge_speed(+0.10)); s.setContext(Qt.ApplicationShortcut)  # Shift+='+' Layouts
-        # Speed reset: 1
-        s = QShortcut(QKeySequence("1"),          self, activated=lambda: self.set_playback_rate(1.0)); s.setContext(Qt.ApplicationShortcut)
-        """
-        # -------- Keyboard Shortcuts (keine Ambiguität) --------
+        
         self._speed_shortcuts = []
 
         def _sc(seq, cb):

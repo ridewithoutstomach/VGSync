@@ -27,15 +27,7 @@ import urllib.request
 import urllib.error
 import json
 import os
-"""
-from PySide6.QtWidgets import (
-    QWidget, QHBoxLayout, QPushButton, QStyle,
-    QVBoxLayout, QLabel, QSizePolicy, QFrame,
-    QMenu, QDialog, QRadioButton, QButtonGroup,
-    QDoubleSpinBox, QMessageBox, QFileDialog,
-    QLineEdit
-)
-"""
+
 from PySide6.QtCore import Qt, Signal, QPoint, QUrl, QEvent
 from PySide6.QtGui import QIcon, QPixmap, QCursor, QDesktopServices
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QPushButton, QStyle, QVBoxLayout, QLabel, QSizePolicy, QFrame, QMenu, QDialog, QRadioButton, QButtonGroup, QDoubleSpinBox, QMessageBox, QFileDialog, QLineEdit
@@ -1240,26 +1232,6 @@ class GPXControlWidget(QWidget):
     def on_remove_range_clicked(self):
        self._process_delete_points(False)
         
-    """deadcode        
-    def on_undo_range_clicked(self):
-        mw = self._mainwindow
-        
-        #Wird ausgelöst, wenn der Undo-Button 
-        #im gpx_control_widget geklickt wurde.
-        #=> Leitet an die gpx_list weiter.
-        
-        mw.map_widget.view.page().runJavaScript("showLoading('Undo GPX-Range...');")
-        mw.gpx_widget.gpx_list.undo_delete()
-        mw._update_gpx_overview()
-        mw._gpx_data = mw.gpx_widget.gpx_list._gpx_data
-        route_geojson = mw._build_route_geojson_from_gpx(mw._gpx_data)
-        mw.map_widget.loadRoute(route_geojson, do_fit=False)
-        mw.chart.set_gpx_data(mw._gpx_data)
-        if mw.mini_chart_widget:
-            mw.mini_chart_widget.set_gpx_data(mw._gpx_data)
-
-        mw.map_widget.view.page().runJavaScript("hideLoading();")    
-    """#deadcode        
         
     def _on_show_max_slope(self):
         mw = self._mainwindow
@@ -2216,10 +2188,7 @@ class GPXControlWidget(QWidget):
         and shifts subsequent points accordingly.
         All user-facing texts are in English.
         """
-        #from PySide6.QtWidgets import (
-        #    QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-        #    QDoubleSpinBox, QPushButton, QMessageBox
-        #)
+        
         
     
         gpx_data = mw.gpx_widget.gpx_list._gpx_data

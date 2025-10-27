@@ -146,38 +146,7 @@ class MapWidget(QWidget):
         super().resizeEvent(e)
         if self._dnd_shield:
             self._dnd_shield.setGeometry(self.rect())
-    """deadcode
-    def dragEnterEvent(self, e):
-        ok = any(self._is_track(p) for p in self._extract_paths(e.mimeData()))
-        if ok:
-            self._dnd_shield.show()
-            self._dnd_shield.raise_()
-            e.acceptProposedAction()
-        else:
-            e.ignore()
-    """#deadcode
-    """deadcode
-    def dragMoveEvent(self, e):
-        e.acceptProposedAction()
-    """#deadcode    
-    """deadcode
-    def dragLeaveEvent(self, e):
-        self._dnd_shield.hide()
-        e.accept()
-    """#deadcode
-    """deadcode
-    def dropEvent(self, e):
-        self._dnd_shield.hide()
-        paths = [p for p in self._extract_paths(e.mimeData()) if self._is_track(p)]
-        if paths:
-            try:
-                self.tracksDropped.emit(paths)
-            except Exception:
-                pass
-            e.acceptProposedAction()
-        else:
-            e.ignore()
-    """#deadcode
+    
     
     @Slot(float, float, int)
     def _on_new_point_inserted(self, lat, lon, idx):
@@ -392,19 +361,7 @@ class MapWidget(QWidget):
     # ----------------------------------------------------------
     # Farblogik (rot bei MarkB..MarkE, sonst schwarz)
     # ----------------------------------------------------------
-    """deadcode
-    def is_in_marked_range(self, idx: int) -> bool:
-        if self._markB_idx is not None and self._markE_idx is not None:
-            b = min(self._markB_idx, self._markE_idx)
-            e = max(self._markB_idx, self._markE_idx)
-            return (b <= idx <= e)
-        elif self._markB_idx is not None:
-            return (idx == self._markB_idx)
-        elif self._markE_idx is not None:
-            return (idx == self._markE_idx)
-        else:
-            return False
-    """#deadcode        
+    
 
     def get_default_color_for_index(self, i: int) -> str:
         """
@@ -445,29 +402,7 @@ class MapWidget(QWidget):
             pass
 
         return "black"
-    """deadcode
-    def get_default_size_for_color(self, color: str) -> int:
-        s = QSettings("KVRouite", "KVRouite")
-
-        c = color.lower()
-        if c in ("#ff0000"):
-            color_key = "#FF0000"  # wir speichern dann in QSettings => mapSize/#FF0000
-        elif c in ("#0000ff"):
-            color_key = "#0000FF"
-        elif c in ("#ffff00"):
-            color_key = "#FFFF00"
-        else:
-            color_key = "#000000"
-
-        # Standardwert 6 bei gelb, sonst 4
-        if color_key == "#FFFF00":
-            default_val = 6
-        else:
-            default_val = 4
-
-        val = s.value(f"mapSize/{color_key}", default_val, type=int)
-        return val
-    """#deadcode
+    
     def set_selected_point(self, idx: int):
         print(f"[DEBUG] MapWidget: selected_point set to idx={idx}")
         self._blue_idx = idx
