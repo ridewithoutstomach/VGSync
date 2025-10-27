@@ -63,11 +63,49 @@ class EndManager(QObject):
         e_row = max_row
     
         # Markierung setzen (sichtbar in rot)
-        gpx_list.clear_marked_range()
-        gpx_list.set_markB_row(b_row)
-        gpx_list.set_markE_row(e_row)
-        map_widget.set_markB_point(b_row)
-        map_widget.set_markE_point(e_row)
+        #gpx_list.clear_marked_range()
+        #gpx_list.set_markB_row(b_row)
+        #gpx_list.set_markE_row(e_row)
+        #map_widget.set_markB_point(b_row)
+        #map_widget.set_markE_point(e_row)
+        """
+        if getattr(self.mainwindow, "_autoSyncVideoEnabled", False):
+            gpx_list.clear_marked_range()
+            gpx_list.set_markB_row(b_row)
+            gpx_list.set_markE_row(e_row)
+            map_widget.set_markB_point(b_row)
+            map_widget.set_markE_point(e_row)
+        else:
+            # Sicherstellen, dass keine ältere Markierung sichtbar bleibt
+            try:
+                gpx_list.clear_marked_range()
+            except Exception:
+                pass
+        """
+        
+        # --- Nur markieren, wenn AutoCut Video&GPX = ON ---
+        autocut_on = bool(getattr(self.mainwindow, "_autoSyncVideoEnabled", False)) or (
+            getattr(self.mainwindow, "action_auto_sync_video", None)
+            and self.mainwindow.action_auto_sync_video.isChecked()
+        )
+
+        have_gpx = bool(getattr(gpx_list, "_gpx_data", []))
+
+        if autocut_on and have_gpx:
+            gpx_list.clear_marked_range()
+            gpx_list.set_markB_row(b_row)
+            gpx_list.set_markE_row(e_row)
+            if hasattr(map_widget, "set_markB_point"):
+                map_widget.set_markB_point(b_row)
+            if hasattr(map_widget, "set_markE_point"):
+                map_widget.set_markE_point(e_row)
+        else:
+            # keine Markierung bei OFF (optional: alte Markierung wegräumen)
+            try:
+                gpx_list.clear_marked_range()
+            except Exception:
+                pass
+      
 
         # Dialogtext
         if self.mainwindow._autoSyncVideoEnabled:

@@ -2232,7 +2232,14 @@ class MainWindow(QMainWindow):
             
             # Entferne den vorhandenen Cut am Anfang
             if existing_begin_cut:
-                self.cut_manager._cut_intervals.remove(existing_begin_cut)
+                #self.cut_manager._cut_intervals.remove(existing_begin_cut)
+                if not self._remove_interval_with_tol(self.cut_manager._cut_intervals, existing_begin_cut, tol=0.10):
+                    # Fallback: wenn 'existing_begin_cut' nicht exakt passt, entferne "das Begin-Intervall",
+                    # also jenes mit Start sehr nahe 0.0 (typisch für Anfangsschnitt)
+                    for i, (cs, ce) in enumerate(list(self.cut_manager._cut_intervals)):
+                        if cs <= 0.10:  # 100 ms Toleranz am Anfang
+                            self.cut_manager._cut_intervals.pop(i)
+                            break
                  # Timeline aktualisieren, indem wir alle Cuts löschen und neu hinzufügen
                 self.timeline.clear_all_cuts()
                 for cut in self.cut_manager._cut_intervals:
@@ -5218,7 +5225,20 @@ class MainWindow(QMainWindow):
         print(f"[DEBUG] _save_gpx_to_file => wrote {len(gpx_points)} points to {out_file}")
         
         
-   
+    def _remove_interval_with_tol(self, cuts, interval, tol=0.05):
+        """
+        Entfernt ein Intervall (start, end) aus 'cuts' mit Toleranz.
+        Gibt True zurück, wenn etwas entfernt wurde.
+        """
+        if not interval or not cuts:
+            return False
+        s, e = interval
+        for i, (cs, ce) in enumerate(list(cuts)):  # Kopie, falls während Iteration geändert wird
+            if abs(cs - s) <= tol and abs(ce - e) <= tol:
+                cuts.pop(i)
+                return True
+        return False
+
 
     ###############################################################################        
     
