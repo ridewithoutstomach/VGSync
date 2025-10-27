@@ -733,13 +733,7 @@ class MainWindow(QMainWindow):
         
         player_setup_menu = setup_menu.addMenu("Player-Setup")
 
-        # "Show Endcut" Option (standardmäßig an)
-        self.action_show_endcut = QAction("Show Endcut", self)
-        self.action_show_endcut.setStatusTip("Automatically jump to real end when endcut is detected")
-        self.action_show_endcut.setCheckable(True)
-        self.action_show_endcut.setChecked(True)  # Standard: an
-        self.action_show_endcut.triggered.connect(self._on_show_endcut_toggled)
-        player_setup_menu.addAction(self.action_show_endcut)
+        
 
         # "Show Endcut Warning" Option (standardmäßig an)
         self.action_show_endcut_warning = QAction("Show Endcut Warning", self)
@@ -4984,7 +4978,7 @@ class MainWindow(QMainWindow):
                 # Prüfe ob ein Endcut vorhanden ist
                 has_endcut = abs(final_end_position - total_duration) > 0.1
                 
-                if has_endcut and self.action_show_endcut.isChecked():
+                if has_endcut:
                     print(f"[ENDOFTIME] Endcut erkannt: {final_end_position:.3f} (Gesamt: {total_duration:.3f})")
                     
                     # Zeige Popup wenn aktiviert
@@ -7151,14 +7145,14 @@ class MainWindow(QMainWindow):
         s = QSettings("KVRouite", "KVRouite")
         
         # Standardwerte: True (beide Optionen aktiv)
-        show_endcut = s.value("player/show_endcut", True, type=bool)
+        #show_endcut = s.value("player/show_endcut", True, type=bool)
         show_endcut_warning = s.value("player/show_endcut_warning", True, type=bool)
         
         # Setze die Menü-Zustände
-        self.action_show_endcut.setChecked(show_endcut)
+        #self.action_show_endcut.setChecked(show_endcut)
         self.action_show_endcut_warning.setChecked(show_endcut_warning)
         
-        print(f"[DEBUG] Player settings loaded: endcut={show_endcut}, warning={show_endcut_warning}")
+        print(f"[DEBUG] Player settings loaded: warning={show_endcut_warning}")
 
     def _save_player_settings(self):
         """
@@ -7166,18 +7160,13 @@ class MainWindow(QMainWindow):
         """
         s = QSettings("KVRouite", "KVRouite")
         
-        s.setValue("player/show_endcut", self.action_show_endcut.isChecked())
+        
         s.setValue("player/show_endcut_warning", self.action_show_endcut_warning.isChecked())
         
         s.sync()
-        print(f"[DEBUG] Player settings saved: endcut={self.action_show_endcut.isChecked()}, warning={self.action_show_endcut_warning.isChecked()}")
+        print(f"[DEBUG] Player settings saved: warning={self.action_show_endcut_warning.isChecked()}")
 
-    def _on_show_endcut_toggled(self, checked: bool):
-        """
-        Wird aufgerufen, wenn "Show Endcut" an/aus geschaltet wird.
-        """
-        print(f"[DEBUG] Show Endcut: {checked}")
-        self._save_player_settings()
+    
 
     def _on_show_endcut_warning_toggled(self, checked: bool):
         """
