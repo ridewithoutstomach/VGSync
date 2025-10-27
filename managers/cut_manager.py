@@ -33,7 +33,7 @@ class VideoCutManager(QObject):
         self.markE_time_s = -1.0
         self._cut_intervals = []
         self._skip_timer = QTimer(self)
-        self._skip_timer.timeout.connect(self._check_cut_skip)
+        #self._skip_timer.timeout.connect(self._check_cut_skip)
         self._skip_timer.start(200)
 
         self.video_durations = []
@@ -129,7 +129,7 @@ class VideoCutManager(QObject):
     def get_cut_intervals(self):
         return self._cut_intervals
     
-   
+    """
     def _check_cut_skip(self):
         # 1) Prüfen, ob mpv überhaupt ein File abspielt
         if not self._has_active_file():
@@ -152,7 +152,7 @@ class VideoCutManager(QObject):
         else:
             self._last_skip_target = None
 
-
+    """
     def _has_active_file(self) -> bool:
         """Prüft, ob mpv noch eine gültige Datei (playlist/current_index) geladen hat."""
         # 1) Hat der VideoEditor eine Playlist?

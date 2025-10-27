@@ -5129,33 +5129,138 @@ class MainWindow(QMainWindow):
 
     def check_and_handle_video_end(self):
         """
-        Überprüft, ob das Video das Ende erreicht hat und setzt den Zustand korrekt zurück.
+        Robuste Endcut-Erkennung die direkt mit den Cut-Intervallen arbeitet
         """
-        # Debug-Ausgabe zur Überprüfung
-        # print(f"[DEBUG] check_and_handle_video_end: is_playing={self.video_editor.is_playing}")
-        
-        if self.video_editor.is_playing:
+        if not self.video_editor.is_playing:
+            return
+
+        try:
+            current_global_s = self.video_editor.get_current_global_time()
+            total_duration = self.real_total_duration
+            cut_intervals = getattr(self.cut_manager, "_cut_intervals", [])
+            
+            # Berechne die tatsächliche Endposition
+            final_end_position = total_duration
+            if cut_intervals:
+                keep_intervals = self._compute_keep_intervals(cut_intervals, total_duration)
+                if keep_intervals:
+                    final_end_position = keep_intervals[-1][1]
+
+            # Prüfe ob wir am Ende sind (mit verschiedenen Toleranzen)
+            time_to_end = final_end_position - current_global_s
+            
+            # Debug-Ausgabe bei Bedarf aktivieren:
+            # if time_to_end < 1.0:
+            #     print(f"[ENDOFTIME] current={current_global_s:.3f}, final_end={final_end_position:.3f}, time_to_end={time_to_end:.3f}")
+
+            # Wenn wir sehr nah am Ende sind (50ms Toleranz)
+            if time_to_end <= 0.05:
+                print(f"[ENDOFTIME] Ende erreicht: {current_global_s:.3f} von {final_end_position:.3f}")
+                
+                # Sofort Video stoppen
+                self._handle_video_end_state()
+                
+                # Prüfe ob ein Endcut vorhanden ist
+                has_endcut = abs(final_end_position - total_duration) > 0.1
+                
+                if has_endcut and self.action_show_endcut.isChecked():
+                    print(f"[ENDOFTIME] Endcut erkannt: {final_end_position:.3f} (Gesamt: {total_duration:.3f})")
+                    
+                    # Zeige Popup wenn aktiviert
+                    if self.action_show_endcut_warning.isChecked():
+                        self._show_endcut_popup(final_end_position)
+                    
+                    # Springe zum Endcut mit mehrfachen Sprüngen für Stabilität
+                    QTimer.singleShot(10, lambda: self.video_editor._jump_to_global_time(final_end_position))
+                    QTimer.singleShot(100, lambda: self.video_editor._jump_to_global_time(final_end_position))
+                    QTimer.singleShot(250, lambda: self.video_editor._jump_to_global_time(final_end_position))
+                    
+                else:
+                    # Kein Endcut - einfach am Ende bleiben
+                    QTimer.singleShot(10, lambda: self.video_editor._jump_to_global_time(final_end_position))
+
+        except Exception as e:
+            print(f"[ERROR] Fehler in check_and_handle_video_end: {e}")
+
+    def _show_endcut_popup(self, end_position):
+        """Zeigt das Endcut-Popup mit spezifischen Informationen"""
+        try:
+            total_duration = self.real_total_duration
+            cut_duration = total_duration - end_position
+            
+            msg = QMessageBox(self)
+            msg.setWindowTitle("Endcut Reached")
+            msg.setIcon(QMessageBox.Information)
+            msg.setText(
+                f"Endcut detected!\n\n"
+                f"Video continues for {cut_duration:.1f}s after GPX track ends.\n"
+                f"Jumped to end of GPX track at {end_position:.1f}s."
+            )
+            
+            # Timer um das Popup automatisch zu schließen
+            QTimer.singleShot(3000, msg.accept)
+            msg.exec()
+            
+        except Exception as e:
+            print(f"[ERROR] Fehler beim Anzeigen des Endcut-Popups: {e}")
+
+    def _compute_keep_intervals(self, cut_intervals, total_duration):
+        """Berechnet die zu behaltenden Intervalle basierend auf Schnitten"""
+        if not cut_intervals:
+            return [(0.0, total_duration)]
+
+        sorted_cuts = sorted(cut_intervals, key=lambda x: x[0])
+        merged = []
+        current_start, current_end = sorted_cuts[0]
+        for i in range(1, len(sorted_cuts)):
+            (st, en) = sorted_cuts[i]
+            if st <= current_end:
+                if en > current_end:
+                    current_end = en
+            else:
+                merged.append((current_start, current_end))
+                current_start, current_end = st, en
+        merged.append((current_start, current_end))
+
+        keep_list = []
+        pos = 0.0
+        for (cst, cen) in merged:
+            if cst > pos:
+                keep_list.append((pos, cst))
+            pos = cen
+        if pos < total_duration:
+            keep_list.append((pos, total_duration))
+
+        return keep_list
+
+    def _handle_video_end_state(self):
+        """Setzt alle Player-Zustände korrekt für Video-Ende"""
+        try:
+            # Sofortiger Stop
+            self.video_editor.is_playing = False
+            
+            # Player pausieren
             try:
-                current_pos = self.video_editor.get_current_position_s()
-                total_duration = self.real_total_duration
-                
-                # Debug-Ausgabe
-                # print(f"[DEBUG] current_pos={current_pos:.2f}, total_duration={total_duration:.2f}")
-                
-                # Prüfe, ob wir am Ende sind (mit einer Toleranz von 0.5 Sekunden für bessere Erkennung)
-                if current_pos >= total_duration - 0.5:
-                    print(f"[DEBUG] Video-Ende erkannt! current_pos={current_pos:.2f}, total_duration={total_duration:.2f}")
-                    
-                    # Video-Ende erkannt - setze Zustand zurück
-                    self.video_editor.is_playing = False
-                    self.video_control.update_play_pause_icon(False)
-                    self.gpx_widget.set_video_playing(False)
-                    self.map_widget.set_video_playing(False)
-                    
-                    # Endcut-Behandlung
-                    self._handle_endcut_if_present()
+                if hasattr(self.video_editor, '_player') and self.video_editor._player:
+                    self.video_editor._player.pause = True
             except Exception as e:
-                print(f"[ERROR] Fehler in check_and_handle_video_end: {e}")
+                print(f"[WARN] Konnte Player nicht pausieren: {e}")
+            
+            # UI sofort aktualisieren
+            self.video_control.update_play_pause_icon(False)
+            self.gpx_widget.set_video_playing(False)
+            self.map_widget.set_video_playing(False)
+            
+            # Gelben Marker entfernen
+            lw = self.gpx_widget.gpx_list
+            if hasattr(lw, '_last_video_row') and lw._last_video_row is not None:
+                lw._mark_row_bg_except_markcol(lw._last_video_row, Qt.white)
+                lw._last_video_row = None
+            
+            self._video_at_end = True
+            
+        except Exception as e:
+            print(f"[ERROR] Fehler in _handle_video_end_state: {e}")
                 
     def _handle_endcut_if_present(self):
         """
