@@ -4427,51 +4427,40 @@ class MainWindow(QMainWindow):
 
     
     def on_goto_video_end_clicked(self):
-        """
-        Gehe zum tatsächlichen Ende des Videos nach allen Schnitten.
-        Führt den Sprung zweimal kurz hintereinander aus, um das Problem zu umgehen.
-        """
-        print(f"[DEBUG] === GOTO END DEBUG START ===")
-        print(f"[DEBUG] real_total_duration: {self.real_total_duration}")
-        print(f"[DEBUG] _cut_intervals: {self.cut_manager._cut_intervals}")
-    
-        # Berechne die tatsächliche Endposition in der URSPRÜNGLICHEN Timeline
-        total_duration = self.real_total_duration
-        cut_intervals = self.cut_manager._cut_intervals
-    
-        # Wenn keine Schnitte vorhanden sind, springe zum Ende
-        if not cut_intervals:
-            final_position = total_duration
-        else:
-            # Sortiere Schnitte nach Endzeit absteigend
-            sorted_cuts = sorted(cut_intervals, key=lambda x: x[1], reverse=True)
-            current_end = total_duration
-        
-            # Toleranz für Fließkomma-Vergleiche
-            TOLERANCE = 0.001
-            
-            for cut_start, cut_end in sorted_cuts:
-                # Prüfe ob dieser Schnitt das aktuelle Ende beeinflusst
-                # Wenn der Schnitt bis zum aktuellen Ende reicht oder darüber hinaus
-                if abs(cut_end - current_end) < TOLERANCE or cut_end >= current_end:
-                    # Dieser Schnitt beeinflusst das Ende - setze Ende auf Schnittstart
-                    current_end = cut_start
-            
-            final_position = current_end
-        
-        print(f"[DEBUG] Final position in original timeline: {final_position}")
-        
-        # Stelle sicher, dass die Position nicht negativ ist
-        if final_position < 0:
-            final_position = 0
-    
-        # Erster Sprung sofort
-        self.video_editor._jump_to_global_time(final_position)
-    
-        # Zweiter Sprung nach kurzer Verzögerung (Doppelklick-Effekt)
-        QTimer.singleShot(250, lambda: self.video_editor._jump_to_global_time(final_position))
-    
-        print(f"[DEBUG] === GOTO END DEBUG END ===")
+        try:
+            total_duration = self.real_total_duration
+            cut_intervals = getattr(self.cut_manager, "_cut_intervals", [])
+
+            # Finale Endposition bestimmen (Ende des letzten Keep-Segments)
+            final_end_position = total_duration
+            if cut_intervals:
+                keep_intervals = self._compute_keep_intervals(cut_intervals, total_duration)
+                if keep_intervals:
+                    final_end_position = keep_intervals[-1][1]
+
+            # Endcut vorhanden?
+            has_endcut = abs(final_end_position - total_duration) > 0.1
+
+            # Sofort in stabilen Endzustand (Pause/UI)
+            self._handle_video_end_state()
+
+            # Optional Popup wie in der Laufzeit-Erkennung
+            #if has_endcut and getattr(self, "action_show_endcut", None) and self.action_show_endcut.isChecked():
+            #    if getattr(self, "action_show_endcut_warning", None) and self.action_show_endcut_warning.isChecked():
+            #        self._show_endcut_popup(final_end_position)
+
+            # Mehrfacher Jump für exaktes Einrasten
+            QTimer.singleShot(10,  lambda: self.video_editor._jump_to_global_time(final_end_position))
+            QTimer.singleShot(100, lambda: self.video_editor._jump_to_global_time(final_end_position))
+            QTimer.singleShot(250, lambda: self.video_editor._jump_to_global_time(final_end_position))
+
+            print(f"[GOTO_END] jumped to {final_end_position:.3f}s (total={total_duration:.3f}, endcut={has_endcut})")
+        except Exception as e:
+            print(f"[ERROR] on_goto_video_end_clicked: {e}")   
+   
+   
+   
+   
     """        
     def on_play_ended(self):
         self.video_editor.media_player
