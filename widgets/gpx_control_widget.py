@@ -240,9 +240,7 @@ class GPXControlWidget(QWidget):
         self.slot_button.setMaximumWidth(70)
         self.slot_button.setCheckable(True)  # checked => Slot 2
         self._buttons_layout.addWidget(self.slot_button)
-        self.slot_button.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.slot_button.customContextMenuRequested.connect(self._on_slot_button_right_click)
-        
+        self.slot_button.setContextMenuPolicy(Qt.NoContextMenu)    
 
         # Farben initial: Slot 1 = grün, Slot 2 = gelb
         self._slot1_style = "background-color:#2ecc71; color:black;"
@@ -251,7 +249,33 @@ class GPXControlWidget(QWidget):
 
         self.slot_button.clicked.connect(self._on_slot_button_clicked)
         
-        self._buttons_layout.addStretch()  # optional: damit die Buttons nach links rücken
+        
+        
+        
+        try:
+            base_dir    = os.path.dirname(os.path.abspath(__file__))
+            project_dir = os.path.dirname(base_dir)
+            target_icon_path = os.path.join(project_dir, "icon", "target.png")
+        except Exception:
+            target_icon_path = "target.png"
+
+        self.slot_sync_button = QPushButton(self)
+        self.slot_sync_button.setToolTip(
+            "Slot-Sync: jump to the nearest matching GPX point in Slot 1."
+        )
+        if os.path.exists(target_icon_path):
+            self.slot_sync_button.setIcon(QIcon(target_icon_path))
+        else:
+            self.slot_sync_button.setText("Target")  # Fallback, falls Icon fehlt
+
+        self.slot_sync_button.setMaximumWidth(36)
+        self.slot_sync_button.clicked.connect(self._on_slot_sync_clicked)
+        self._buttons_layout.addWidget(self.slot_sync_button)
+        
+        self._buttons_layout.addStretch()
+
+        # standardmäßig Slot 1 aktiv -> Button verstecken
+        self.slot_sync_button.setVisible(False)
 
         # ---------------------------------------------
         # (B) Zweite Zeile: Info (Video/Length/Duration/Elev)
@@ -939,6 +963,7 @@ class GPXControlWidget(QWidget):
         auf ._gpx_data, .gpx_widget, .map_widget usw. zugreifen können.
         """
         self._mainwindow = mw   
+        
             
     def _on_slot_button_clicked(self):
         """
@@ -994,22 +1019,25 @@ class GPXControlWidget(QWidget):
         s.unpolish(btn)
         s.polish(btn)
         btn.update()
-
-    def _on_slot_button_right_click(self, _pos):
+        try:
+            self.slot_sync_button.setVisible(active_slot == 2)
+        except Exception:
+            pass
+    
+    def _on_slot_sync_clicked(self):
         """
-        Rechtsklick auf den Slot-Button:
-        - Nimmt den aktuell selektierten GPX-Punkt des AKTIVEN Slots,
-        - sucht im ANDEREN Slot den nächstgelegenen Punkt (nach Lat/Lon),
-        - wenn nahe genug: Slot wechseln und dort den Punkt selektieren & zoomen.
-        - wenn nicht: Hinweisdialog, kein Umschalten.
+        Gleiche Funktion wie Rechtsklick auf den Slot-Button:
+        - Nimmt den selektierten GPX-Punkt im aktiven Slot (hier: Slot 2),
+        - sucht im anderen Slot den nächstgelegenen Punkt,
+        - wechselt ggf. den Slot und selektiert/zoomt dorthin.
         """
         mw = getattr(self, "_mainwindow", None)
         if not mw:
             return
-        # Wir delegieren die Logik vollständig ans MainWindow, weil dort
-        # die Slot-Daten liegen und das Umschalten + UI-Selektieren passiert.
         mw.jump_to_nearest_point_in_other_slot()
 
+    
+    
 
     # ----------------------------------------------------------
     # Methode zum Aktualisieren der Info-Zeile

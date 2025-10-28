@@ -7077,6 +7077,7 @@ class MainWindow(QMainWindow):
                 btn.setText("Slot 2")
                 btn.setStyleSheet(self.gpx_control._slot2_style)
                 btn.blockSignals(False)
+                self.gpx_control.apply_slot_button_style(2)
             except Exception as e:
                 print(f"[DEBUG] Slot2 button update skipped: {e}")
 
