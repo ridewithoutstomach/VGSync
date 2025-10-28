@@ -7799,18 +7799,26 @@ class MainWindow(QMainWindow):
             if getattr(self, "_updates_manual", False):
                 try:
                     from PySide6.QtWidgets import QMessageBox
-                    QMessageBox.information(
-                        self,
-                        "You are up to date",
-                        (
-                            "<html>"
-                            "<div style='font-family:monospace; white-space:pre;'>"
-                            f"Current version: {current_raw}     \n"
-                            f"Latest stable:   {newest_stable}     \n"
-                            "</div>"
-                            "</html>"
-                        )
+                    # Anzeige: führendes "v"/"V" ausblenden
+                    disp_current = re.sub(r'^[vV]', '', str(current_raw or ""))
+                    disp_latest  = re.sub(r'^[vV]', '', str(newest_stable or ""))
+                    html = (
+                        "<html><head><style>"
+                        "td{font-family:Consolas,'DejaVu Sans Mono',monospace;font-size:10pt}"
+                        "td.label{white-space:nowrap}"
+                        "td.val{text-align:right;padding-left:12px;min-width:4em}"
+                        "</style></head><body>"
+                        "<table>"
+                        f"<tr><td class='label'>Current version:</td><td class='val'>{disp_current}</td></tr>"
+                        f"<tr><td class='label'>Latest stable:</td><td class='val'>{disp_latest}</td></tr>"
+                        "</table>"
+                        "</body></html>"
                     )
+
+                    QMessageBox.information(self, "You are up to date", html)
+                    
+                    
+
                 finally:
                     # Flag zurücksetzen, damit Auto-Check still bleibt
                     self._updates_manual = False
@@ -7829,16 +7837,33 @@ class MainWindow(QMainWindow):
         releases_url = f"https://github.com/{repo}/releases"
 
         def _show():
+            # Anzeige: führendes "v"/"V" ausblenden
+            disp_current = re.sub(r'^[vV]', '', str(current or ""))
+            disp_latest  = re.sub(r'^[vV]', '', str(newest_stable or ""))
+
+            html = (
+                "<html><head><style>"
+                "td{font-family:Consolas,'DejaVu Sans Mono',monospace;font-size:10pt}"
+                "td.label{white-space:nowrap}"
+                "td.val{text-align:right;padding-left:12px;min-width:4em}"
+                "</style></head><body>"
+                "<div>A newer <i>stable</i> version is available on GitHub.</div><br/>"
+                "<table>"
+                f"<tr><td class='label'>Current:</td><td class='val'>{disp_current}</td></tr>"
+                f"<tr><td class='label'>Latest (stable):</td><td class='val'>{disp_latest}</td></tr>"
+                "</table><br/>"
+                "<div>Open the releases page now?</div>"
+                "</body></html>"
+            )
+
             answer = QMessageBox.information(
                 self,
                 "New Version Available",
-                (f"A newer *stable* version is available on GitHub.\n\n"
-                 f"Current: {current}\n"
-                 f"Latest (stable): {newest_stable}\n\n"
-                 "Open the releases page now?"),
+                html,
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.Yes
             )
+
             if answer == QMessageBox.Yes:
                 QDesktopServices.openUrl(QUrl(releases_url))
 
