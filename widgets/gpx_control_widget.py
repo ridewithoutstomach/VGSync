@@ -3403,8 +3403,6 @@ class GPXControlWidget(QWidget):
     
         dlg.exec()    
         
-        
-        
     def _on_resample_to_1s_clicked(self):
         mw = self._mainwindow
         if not mw:
@@ -3415,37 +3413,128 @@ class GPXControlWidget(QWidget):
             QMessageBox.warning(self, "No GPX Data", "No or insufficient GPX data loaded.")
             return
 
+        # Prüfe, ob ein gültiger Bereich (B..E) markiert ist
+        b_idx = mw.gpx_widget.gpx_list._markB_idx
+        e_idx = mw.gpx_widget.gpx_list._markE_idx
+        has_range = False
+        if b_idx is not None and e_idx is not None:
+            if b_idx > e_idx:
+                b_idx, e_idx = e_idx, b_idx
+            if 0 <= b_idx < len(gpx_data) and 0 <= e_idx < len(gpx_data) and (e_idx - b_idx) >= 1:
+                has_range = True
+
+        if not has_range:
+            # === ALT: kompletter Track wie gehabt ===
+            reply = QMessageBox.question(
+                self,
+                "Resample to 1s",
+                "This function should be applied before syncing or editing!\n\n"
+                "Do you really want to resample the entire track to 1-second intervals?\n\n"
+                "This may slightly change the total distance and elevation.\n"
+                "If this GPX was already synchronized with the video, "
+                "you should re-check the alignment afterwards.",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            if reply != QMessageBox.Yes:
+                return
+
+            # Undo-Snapshot
+            self.register_gpx_undo_snapshot()
+
+            # Resample kompletter Track (nutzt deine MainWindow-Logik)
+            new_data = mw._resample_to_1s(gpx_data)  # :contentReference[oaicite:3]{index=3}
+
+            # Setzen + UI-Refresh (dein Muster)
+            mw._gpx_data = new_data
+            mw.gpx_widget.set_gpx_data(new_data)
+            mw._update_gpx_overview()
+            route_geojson = mw._build_route_geojson_from_gpx(new_data)
+            mw.map_widget.loadRoute(route_geojson, do_fit=False)
+            mw.chart.set_gpx_data(new_data)
+            if mw.mini_chart_widget:
+                mw.mini_chart_widget.set_gpx_data(new_data)
+
+            QMessageBox.information(self, "Done", "GPX track has been resampled to 1s intervals.")
+            return
+
+        # === NEU: nur markierten Bereich B..E resamplen ===
+        # Kurzer, bereichs-bezogener Hinweis
         reply = QMessageBox.question(
             self,
-            "Resample to 1s",
-            "This function should be applied before syncing or editing!\n\n"
-            "Do you really want to resample the entire track to 1-second intervals?\n\n"
-            "This may slightly change the total distance and elevation.\n"
-            "If this GPX was already synchronized with the video, "
-            "you should re-check the alignment afterwards.",
+            "Resample range to 1s",
+            (f"You selected a range {b_idx}..{e_idx}.\n"
+             "Only this range will be resampled to 1-second intervals.\n\n"
+             "Note: Total duration of the range may slightly change;\n"
+             "subsequent points will be shifted by that difference.\n\n"
+             "Proceed?"),
             QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
+            QMessageBox.Yes
         )
         if reply != QMessageBox.Yes:
             return
 
-        # Undo-Snapshot
-        self.register_gpx_undo_snapshot()
+        # Undo-Snapshot (dein GPX-Undo)
+        self.register_gpx_undo_snapshot()  # :contentReference[oaicite:4]{index=4}
 
-        # Resample
-        new_data = mw._resample_to_1s(gpx_data)
+        # Originaldauer des Segments
+        t_start = gpx_data[b_idx]["time"]
+        t_end   = gpx_data[e_idx]["time"]
+        old_total_s = (t_end - t_start).total_seconds()
+        if old_total_s <= 0:
+            QMessageBox.warning(self, "Invalid Range", "Selected range has zero or negative duration.")
+            return
 
-        # Setzen
-        mw._gpx_data = new_data
-        mw.gpx_widget.set_gpx_data(new_data)
+        # Teilsegment kopieren und mit deiner MainWindow-Routine resamplen
+        segment = [pt.copy() for pt in gpx_data[b_idx:e_idx + 1]]
+        
+        new_segment = mw._resample_to_1s(segment)  # nutzt base_time = segment[0]['time']  :contentReference[oaicite:5]{index=5}
+        if not new_segment or len(new_segment) < 2:
+            QMessageBox.warning(self, "Resample failed", "Could not resample the selected range.")
+            return
+
+        new_total_s = (new_segment[-1]["time"] - new_segment[0]["time"]).total_seconds()
+        diff_s = new_total_s - old_total_s
+
+        # Segment austauschen (Anzahl Punkte kann sich ändern)
+        # Achtung: Wir arbeiten direkt auf gpx_data, danach recalc + Refresh wie überall.
+        gpx_data[b_idx:e_idx + 1] = new_segment
+
+        # Nachfolgende Punkte zeitlich verschieben (falls nötig)
+        if (abs(diff_s) > 1e-9) and (b_idx + len(new_segment) - 1 < len(gpx_data) - 1):
+            shift_from = b_idx + len(new_segment)  # erster Punkt NACH dem neuen Ende
+            for j in range(shift_from, len(gpx_data)):
+                gpx_data[j]["time"] = gpx_data[j]["time"] + timedelta(seconds=diff_s)
+        for pt in gpx_data:
+            if "abs_s" in pt:
+                del pt["abs_s"]
+        # Recalc + UI-Refresh – exakt dein Muster
+        recalc_gpx_data(gpx_data)
+        mw.gpx_widget.set_gpx_data(gpx_data)
+        mw._gpx_data = gpx_data
         mw._update_gpx_overview()
-        route_geojson = mw._build_route_geojson_from_gpx(new_data)
+        route_geojson = mw._build_route_geojson_from_gpx(gpx_data)
         mw.map_widget.loadRoute(route_geojson, do_fit=False)
-        mw.chart.set_gpx_data(new_data)
+        mw.chart.set_gpx_data(gpx_data)
         if mw.mini_chart_widget:
-            mw.mini_chart_widget.set_gpx_data(new_data)
+            mw.mini_chart_widget.set_gpx_data(gpx_data)
 
-        QMessageBox.information(self, "Done", "GPX track has been resampled to 1s intervals.")
+        # Range in UI leeren (Liste + Map) + ggf. Video-AutoSync-Range löschen – wie an anderer Stelle
+        mw.gpx_widget.gpx_list.clear_marked_range()
+        mw.map_widget.clear_marked_range()
+        if hasattr(mw, "_autoSyncVideoEnabled") and mw._autoSyncVideoEnabled:
+            mw.cut_manager.on_markClear_clicked()  # :contentReference[oaicite:6]{index=6}
+
+        # Info für den User
+        QMessageBox.information(
+            self, "Done",
+            (f"Range {b_idx}..{e_idx} resampled to 1s.\n"
+             f"Old duration: {old_total_s:.3f} s\n"
+             f"New duration: {new_total_s:.3f} s\n"
+             f"Shift applied to subsequent points: {diff_s:+.3f} s")
+        )
+    
+        
     
 
     def export_fit_immersion(self, threshold: float = 1.0):
