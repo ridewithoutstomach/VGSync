@@ -56,6 +56,7 @@ from PySide6.QtGui import QAction, QActionGroup
 from PySide6.QtGui import QIcon
 from PySide6.QtGui import QKeySequence
 from PySide6.QtCore import QPoint
+from PySide6.QtCore import QSize
 
 
 from PySide6.QtWidgets import (
@@ -67,7 +68,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtWidgets import QDoubleSpinBox
 from PySide6.QtWidgets import QLineEdit, QDialogButtonBox
-
+from PySide6.QtWidgets import QListWidget, QListWidgetItem
+from PySide6.QtWidgets import QToolButton, QLabel, QStyle
 
 from PySide6.QtCore import QProcess, QProcessEnvironment
 from PySide6.QtGui import QTextCursor
@@ -642,6 +644,14 @@ class MainWindow(QMainWindow):
         
 
         self.playlist_menu = menubar.addMenu("Playlist")
+        
+        self._playlist_reorder_action = QAction("Reorder…", self)
+        self._playlist_reorder_action.setStatusTip("Change the order of the loaded videos")
+        self._playlist_reorder_action.triggered.connect(self._on_open_reorder_playlist_dialog)
+
+        # Beim initialen Aufbau oben in das Playlist-Menü einsetzen
+        self.playlist_menu.addAction(self._playlist_reorder_action)
+        self.playlist_menu.addSeparator()
         
         view_menu = menubar.addMenu("View")
 
@@ -6296,12 +6306,18 @@ class MainWindow(QMainWindow):
             
     def _rebuild_playlist_menu(self):
         self.playlist_menu.clear()
+
+        # Reorder… immer oben wieder einfügen (Action lebt, weil Parent=self)
+        self.playlist_menu.addAction(self._playlist_reorder_action)
+        self.playlist_menu.addSeparator()
+
         self.playlist_counter = 1
         for filepath in self.playlist:
             label_text = f"{self.playlist_counter}: {os.path.basename(filepath)}"
             action = self.playlist_menu.addAction(label_text)
             action.triggered.connect(lambda checked, f=filepath, a=action: self.confirm_remove(f, a))
-            self.playlist_counter += 1        
+            self.playlist_counter += 1
+     
         
     def _calculate_cut_total_duration(self):
         """
@@ -7828,3 +7844,231 @@ class MainWindow(QMainWindow):
 
         # Sicherstellen, dass der Dialog erst nach dem Paint-Cycle kommt
         QTimer.singleShot(0, _show)
+
+
+    ##################
+    def _on_open_reorder_playlist_dialog(self):
+        """
+        Reorder-Dialog mit Up/Down Buttons pro Eintrag (kein Drag&Drop).
+        - Fortlaufende Nummer vor dem Dateinamen
+        - Warnung bei vorhandenen Cuts/Overlays
+        - KEIN Undo-Eintrag
+        """
+        if not getattr(self, "playlist", None):
+            QMessageBox.information(self, "Reorder", "No videos loaded.")
+            return
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Reorder Playlist")
+        vbox = QVBoxLayout(dlg)
+
+        lw = QListWidget(dlg)
+        lw.setAlternatingRowColors(True)
+        lw.setDragDropMode(QListWidget.NoDragDrop)
+        vbox.addWidget(lw)
+
+        # ---------------- Hilfsfunktionen ----------------
+
+        def rebuild_row_numbers_and_buttons_state():
+            count = lw.count()
+            for i in range(count):
+                it = lw.item(i)
+                row_widget = lw.itemWidget(it)
+                if not row_widget:
+                    continue
+                num_label = row_widget.findChild(QLabel, "num_label")
+                if num_label is not None:
+                    num_label.setText(f"{i+1}.")
+                btn_up = row_widget.findChild(QToolButton, "btn_up")
+                btn_dn = row_widget.findChild(QToolButton, "btn_dn")
+                if btn_up is not None:
+                    btn_up.setEnabled(i > 0)
+                if btn_dn is not None:
+                    btn_dn.setEnabled(i < count - 1)
+        
+        def move_item(old_row: int, new_row: int):
+            """
+            Stabil: keine Item-Objekte verschieben (take/insert),
+            sondern nur die Inhalte (UserRole + Dateiname im Zeilen-Widget) tauschen.
+            """
+            count = lw.count()
+            if new_row < 0 or new_row >= count or new_row == old_row:
+                return
+
+            it_a = lw.item(old_row)
+            it_b = lw.item(new_row)
+            if it_a is None or it_b is None:
+                return
+
+            # Pfade (Schlüssel) tauschen
+            path_a = it_a.data(Qt.UserRole)
+            path_b = it_b.data(Qt.UserRole)
+            it_a.setData(Qt.UserRole, path_b)
+            it_b.setData(Qt.UserRole, path_a)
+
+            # Sichtbarer Name im Row-Widget tauschen
+            wa = lw.itemWidget(it_a)
+            wb = lw.itemWidget(it_b)
+            if wa is not None:
+                lbl_a = wa.findChild(QLabel, "name_label")
+                if lbl_a is not None:
+                    lbl_a.setText(os.path.basename(path_b))
+            if wb is not None:
+                lbl_b = wb.findChild(QLabel, "name_label")
+                if lbl_b is not None:
+                    lbl_b.setText(os.path.basename(path_a))
+
+            # Nummern & Button-Enable-States neu setzen
+            rebuild_row_numbers_and_buttons_state()
+
+        
+        
+
+        def make_row_widget(it: QListWidgetItem, path: str) -> QWidget:
+            w = QWidget(lw)
+            h = QHBoxLayout(w)
+            h.setContentsMargins(6, 2, 6, 2)
+            h.setSpacing(8)
+
+            # Nummer
+            lbl_num = QLabel(w)
+            lbl_num.setObjectName("num_label")
+            lbl_num.setMinimumWidth(26)
+            h.addWidget(lbl_num)
+
+            # Dateiname
+            name = os.path.basename(path)
+            lbl_name = QLabel(name, w)
+            lbl_name.setObjectName("name_label")
+            lbl_name.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            h.addWidget(lbl_name, 1)
+
+            # Up / Down
+            btn_up = QToolButton(w)
+            btn_up.setObjectName("btn_up")
+            btn_up.setIcon(self.style().standardIcon(QStyle.SP_ArrowUp))
+            btn_up.setToolTip("Move up")
+            h.addWidget(btn_up)
+
+            btn_dn = QToolButton(w)
+            btn_dn.setObjectName("btn_dn")
+            btn_dn.setIcon(self.style().standardIcon(QStyle.SP_ArrowDown))
+            btn_dn.setToolTip("Move down")
+            h.addWidget(btn_dn)
+
+            def on_up():
+                row = lw.row(it)
+                move_item(row, row - 1)
+
+            def on_dn():
+                row = lw.row(it)
+                move_item(row, row + 1)
+
+            btn_up.clicked.connect(on_up)
+            btn_dn.clicked.connect(on_dn)
+
+            return w
+
+        # -------- Liste befüllen (mit UserRole=Pfad) --------
+        for path in self.playlist:
+            it = QListWidgetItem()
+            it.setData(Qt.UserRole, path)
+            it.setSizeHint(QSize(0, 28))
+            lw.addItem(it)
+            lw.setItemWidget(it, make_row_widget(it, path))
+
+        # Initiale Nummerierung / Button-States
+        rebuild_row_numbers_and_buttons_state()
+
+        # OK/Cancel Buttons
+        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, parent=dlg)
+        vbox.addWidget(btns)
+        btns.accepted.connect(dlg.accept)
+        btns.rejected.connect(dlg.reject)
+
+        # Dialog starten
+        if dlg.exec() != QDialog.Accepted:
+            return
+
+        # neue Reihenfolge einsammeln
+        new_order = []
+        for i in range(lw.count()):
+            it = lw.item(i)
+            new_order.append(it.data(Qt.UserRole))
+
+        if new_order == self.playlist:
+            return
+
+        # Warnung, falls Edits vorhanden
+        has_cuts = bool(getattr(self.cut_manager, "_cut_intervals", []))
+
+        try:
+            has_ovl = bool(self._overlay_manager.get_all_overlays())
+        except Exception:
+            has_ovl = False
+
+        # NEU: „vorne grau“ prüfen – exakt wie deine GPX-Liste das färbt:
+        # rel_s < 0  => Zeile grau; rel_s steckt in _gpx_times
+        has_front_grey = False
+        try:
+            gpx_times = getattr(self.gpx_widget.gpx_list, "_gpx_times", [])
+            if gpx_times:
+                has_front_grey = any((t is not None and t < 0.0) for t in gpx_times)
+        except Exception:
+            has_front_grey = False
+            
+        has_front_grey = False
+        try:
+            gpx_data = getattr(self.gpx_widget.gpx_list, "_gpx_data", [])
+            if gpx_data:
+                try:
+                    shift = get_gpx_video_shift()   # gleicher Helper wie im Export
+                except Exception:
+                    shift = 0.0
+                # „vorne grau“ <=> Shift ist negativ
+                if shift < 0.0:
+                    has_front_grey = True
+        except Exception:
+            has_front_grey = False    
+
+        
+        if has_cuts or has_ovl or has_front_grey:    
+            parts = []
+            if has_cuts:
+                parts.append("cuts")
+            if has_ovl:
+                parts.append("overlays")
+            if has_front_grey:
+                parts.append("a front sync (pre-video grey section)")
+
+            detail = " and ".join(parts) if parts else "edits"
+            reply = QMessageBox.question(
+                self,
+                "Warning",
+                (
+                    f"You already have {detail}.\n"
+                    "Reordering can misalign your edits or invalidate the current sync.\n\n"
+                    "Proceed anyway?"
+                ),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            if reply != QMessageBox.Yes:
+                return
+
+        # Anwenden – KEIN Undo
+        self.playlist = new_order[:]                  # 1) Reihenfolge setzen
+        self.video_editor.set_playlist(self.playlist) # 2) mpv-Playlist neu
+        self.rebuild_timeline()                       # 3) Timeline neu berechnen
+        self._rebuild_playlist_menu()                 # 4) Menü neu aufbauen
+
+        try:
+            if self.playlist:
+                self.video_editor.show_first_frame_at_index(0)
+        except Exception:
+            pass
+
+        try:
+            self.statusBar().showMessage("Order changed. Timeline rebuilt.", 3000)
+        except Exception:
+            pass
