@@ -45,13 +45,14 @@ class VideoControlWidget(QWidget):
     markBClicked             = Signal()
     markEClicked             = Signal()
     cutClicked               = Signal()
-    #undoClicked              = Signal()
+    
     markClearClicked         = Signal()
-#safeClicked              = Signal()
+
     syncClicked              = Signal()
     set_beginClicked         = Signal()  
     overlayClicked        = Signal()
     setSyncClicked           = Signal()
+    gotoNextEditRequested   = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -85,6 +86,10 @@ class VideoControlWidget(QWidget):
         self.goto_end.setToolTip("Goto End (last frame)")
         self.goto_end.clicked.connect(self.goto_video_end_clicked.emit)
         layout.addWidget(self.goto_end)
+        
+        self.goto_end.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.goto_end.customContextMenuRequested.connect(lambda _pos: self.gotoNextEditRequested.emit())
+        
         
         self._step_values = ["s", "m", "k", "f"]  # <-- "f" ergänzt
         self._step_index = 0

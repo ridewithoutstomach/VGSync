@@ -1279,7 +1279,7 @@ class MainWindow(QMainWindow):
         self.video_control.markBClicked.connect(self.cut_manager.on_markB_clicked)
         self.video_control.markEClicked.connect(self.cut_manager.on_markE_clicked)
         self.video_control.cutClicked.connect(self.on_cut_clicked_video)
-        
+        self.video_control.gotoNextEditRequested.connect(self._on_goto_next_edit_requested)
         
         self.video_control.markClearClicked.connect(self.cut_manager.on_markClear_clicked)
         self.cut_manager.cutsChanged.connect(self._on_cuts_changed)
@@ -8072,3 +8072,105 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Order changed. Timeline rebuilt.", 3000)
         except Exception:
             pass
+
+    
+    def _on_goto_next_edit_requested(self):
+        """
+        Rechtsklick auf Goto-End:
+        springt zum nächsten Edit-Event nach aktueller globaler Zeit.
+        Priorität: Cut-Start -> Cut-Ende -> Merge-Point -> End.
+        Danach Wrap hart auf 0.000 s.
+        """
+        try:
+            # from PySide6.QtCore import QTimer  # falls noch nicht importiert
+            eps = 1e-4
+            wrap_window = 0.8  # Toleranz: "praktisch am Ende" (in Sekunden)
+
+            # 1) aktuelle globale Zeit
+            current = float(self.video_editor.get_current_global_time())
+
+            # 2) Gesamtdauer (Timeline-Ende)
+            total = 0.0
+            try:
+                if getattr(self, "video_durations", None):
+                    total = float(sum(float(d) for d in self.video_durations))
+                elif hasattr(self, "real_total_duration"):
+                    total = float(self.real_total_duration)
+            except Exception:
+                total = float(getattr(self, "real_total_duration", 0.0))
+
+            # 3) Wenn wir (praktisch) am Ende stehen -> Wrap direkt zu 0.0 s
+            if total > 0.0 and (total - current) <= wrap_window:
+                self._handle_video_end_state(mark_as_end=False)
+                for delay in (10, 100, 250):
+                    QTimer.singleShot(delay, lambda t=0.0: self.video_editor._jump_to_global_time(t))
+                try:
+                    self.statusBar().showMessage("Wrapped to 0.000s", 2000)
+                except Exception:
+                    pass
+                return
+
+            # Helper: Events ab einer Schwelle sammeln, inkl. 'end'
+            def collect_events(threshold):
+                evts = []  # (kind, time)
+
+                # Cuts
+                cuts = []
+                try:
+                    cuts = self.cut_manager.get_cut_intervals()
+                except Exception:
+                    cuts = getattr(self.cut_manager, "_cut_intervals", [])
+                for (st, en) in sorted(cuts, key=lambda x: (x[0], x[1])):
+                    if st is not None and st > threshold + eps:
+                        evts.append(("cut_start", float(st)))
+                    if en is not None and en > threshold + eps:
+                        evts.append(("cut_end", float(en)))
+
+                # Merge-Points (Videogrenzen) – letzte Grenze (== total) EXPLIZIT ausschließen!
+                if getattr(self, "video_durations", None):
+                    acc = 0.0
+                    for d in self.video_durations:
+                        acc += float(d)
+                        # nur "innere" Grenzen zulassen (strict < total - eps)
+                        if acc < (total - eps) and acc > threshold + eps:
+                            evts.append(("merge", acc))
+
+                # Ende der Timeline als eigenes Event
+                if total > threshold + eps:
+                    evts.append(("end", total))
+
+                return evts
+
+            # 4) Events nach current einsammeln
+            events = collect_events(current)
+
+            # 5) Wenn gar kein Event kommt -> Sicherheitshalber Wrap zu 0.0 s
+            if not events:
+                self._handle_video_end_state(mark_as_end=False)
+                for delay in (10, 100, 250):
+                    QTimer.singleShot(delay, lambda t=0.0: self.video_editor._jump_to_global_time(t))
+                try:
+                    self.statusBar().showMessage("Wrapped to 0.000s", 2000)
+                except Exception:
+                    pass
+                return
+
+            # 6) Nächstes Event wählen (Zeit, dann Priorität)
+            #    Priorität: cut_start (0) < cut_end (1) < merge (2) < end (3)
+            prio = {"cut_start": 0, "cut_end": 1, "merge": 2, "end": 3}
+            events.sort(key=lambda kv: (kv[1], prio.get(kv[0], 99)))
+            next_kind, next_t = events[0]
+
+            # 7) Springen (robust, wie bei Goto-End)
+            self._handle_video_end_state(mark_as_end=False)
+            for delay in (10, 100, 250):
+                QTimer.singleShot(delay, lambda t=next_t: self.video_editor._jump_to_global_time(t))
+
+            try:
+                label = next_kind.replace('_', ' ')
+                self.statusBar().showMessage(f"Jumped to next {label} @ {next_t:.3f}s", 2000)
+            except Exception:
+                pass
+
+        except Exception as e:
+            print(f"[ERROR] _on_goto_next_edit_requested: {e}")
