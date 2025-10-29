@@ -1,0 +1,43 @@
+KVRouite – End-User Agreement & Disclaimer
+==========================================
+
+Copyright (C) 2025  Bernd Eller
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with
+this program. If not, see <https://www.gnu.org/licenses/gpl-3.0.en.html>.
+
+
+Additional Disclaimers
+----------------------
+
+No Warranty (Restated):
+THERE IS NO WARRANTY FOR THE PROGRAM, TO THE EXTENT PERMITTED BY APPLICABLE LAW.
+EXCEPT WHEN OTHERWISE STATED IN WRITING, THE COPYRIGHT HOLDERS AND/OR OTHER PARTIES
+PROVIDE THE PROGRAM “AS IS” WITHOUT WARRANTY OF ANY KIND, EITHER EXPRESSED OR IMPLIED,
+INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+FOR A PARTICULAR PURPOSE. THE ENTIRE RISK AS TO THE QUALITY AND PERFORMANCE OF THE PROGRAM
+IS WITH YOU. SHOULD THE PROGRAM PROVE DEFECTIVE, YOU ASSUME THE COST OF ALL NECESSARY
+SERVICING, REPAIR OR CORRECTION.
+
+Patent Encumbrance Notice:
+Some codecs (e.g., x265) may be patent-encumbered in certain jurisdictions.
+It is the user's responsibility to ensure compliance with all applicable laws and
+regulations and to obtain any necessary patent licenses.
+
+Third-Party Libraries
+---------------------
+This application includes and distributes open-source libraries:
+- FFmpeg (GPL build) — https://ffmpeg.org
+- mpv (GPL build)    — https://mpv.io
+
+Full license texts for these libraries are located in the `_internal/ffmpeg`
+and `_internal/mpv` folders. Corresponding source code for FFmpeg and mpv, as
+used in this distribution, is available at: http://www.KVRouite.com
