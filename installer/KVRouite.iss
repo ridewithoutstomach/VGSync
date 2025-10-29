@@ -34,7 +34,7 @@ DisableProgramGroupPage=no
 
 ; Ausgabe nach dist\<Version>
 OutputDir={#SourcePath}\..\dist\{#MyAppVersion}
-OutputBaseFilename=KVRouite_Setup_v{#MyAppVersion}_Win_x64
+OutputBaseFilename=KVRouite_v{#MyAppVersion}_Win_x64_Installer
 
 WizardStyle=modern
 Compression=lzma2

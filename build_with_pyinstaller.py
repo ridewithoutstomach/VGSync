@@ -21,7 +21,7 @@
 #
 #####################################################
 
-##    use --build-setup to build the installer!
+##    use --build-installer to build the installer!
 
 ######################################################
 import os
@@ -360,7 +360,7 @@ def build_windows(build_setup: bool = False):
         print("[RUN] ISCC → OutputDir =", os.path.abspath(artifacts_root))
         subprocess.run([iscc, "/O" + os.path.abspath(artifacts_root)] + defines + [iss_file], check=True)
 
-        installer_path = os.path.join(artifacts_root, f"KVRouite_Setup_v{app_version}_Win_x64.exe")
+        installer_path = os.path.join(artifacts_root, f"KVRouite_v{app_version}_Win_x64_Installer.exe")
         if os.path.isfile(installer_path):
             print("[INFO] Installer erstellt:", installer_path)
             write_sha256(installer_path)
@@ -384,12 +384,12 @@ def build_windows(build_setup: bool = False):
 def main():
     import argparse
     p = argparse.ArgumentParser()
-    p.add_argument("--build-setup", action="store_true", help="Build Windows installer via Inno Setup")
+    p.add_argument("--build-installer", action="store_true", help="Build Windows installer via Inno Setup")
     args = p.parse_args()
     if platform.system() != "Windows":
         print("[WARN] Only Windows supported here.")
         sys.exit(1)
-    build_windows(build_setup=args.build_setup)
+    build_windows(build_setup=args.build_installer)
 
 if __name__ == "__main__":
     main()
