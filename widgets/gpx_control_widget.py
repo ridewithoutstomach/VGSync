@@ -26,7 +26,10 @@ import math
 import urllib.request
 import urllib.error
 import json
-import os
+import sys, os
+
+from pathlib import Path
+
 
 from PySide6.QtCore import Qt, Signal, QPoint, QUrl, QEvent
 from PySide6.QtGui import QIcon, QPixmap, QCursor, QDesktopServices
@@ -249,28 +252,42 @@ class GPXControlWidget(QWidget):
 
         self.slot_button.clicked.connect(self._on_slot_button_clicked)
         
-        
-        
-        
-        try:
-            base_dir    = os.path.dirname(os.path.abspath(__file__))
-            project_dir = os.path.dirname(base_dir)
-            target_icon_path = os.path.join(project_dir, "icon", "target.png")
-        except Exception:
-            target_icon_path = "target.png"
+        self.slot_button.clicked.connect(self._on_slot_button_clicked)
 
+        def _find_target_icon() -> str:
+            from pathlib import Path
+            import sys, os
+
+            candidates = []
+            # 1) PyInstaller-Bundle
+            if hasattr(sys, "_MEIPASS"):
+                candidates.append(Path(sys._MEIPASS) / "icon" / "target.png")
+            # 2) Laufzeit-/EXE-Ordner (auch bei "python KVRouite.py")
+            candidates.append(Path(os.path.abspath(os.path.dirname(sys.argv[0]))) / "icon" / "target.png")
+            # 3) Repo-Layout relativ zu dieser Datei
+            here = Path(__file__).resolve()
+            candidates.append(here.parent / "icon" / "target.png")        # …/icon/target.png
+            candidates.append(here.parent.parent / "icon" / "target.png") # …/../icon/target.png
+
+            for c in candidates:
+                if c.exists():
+                    return str(c)
+            return ""  # nichts gefunden => leerer String als Fallback
+
+        # --- Slot-Sync Button (neben "Slot 2") ---
         self.slot_sync_button = QPushButton(self)
-        self.slot_sync_button.setToolTip(
-            "Slot-Sync: jump to the nearest matching GPX point in Slot 1."
-        )
-        if os.path.exists(target_icon_path):
+        self.slot_sync_button.setToolTip("Slot-Sync: jump to the nearest matching GPX point in Slot 1.")
+
+        target_icon_path = _find_target_icon()
+        if target_icon_path and os.path.exists(target_icon_path):
             self.slot_sync_button.setIcon(QIcon(target_icon_path))
         else:
-            self.slot_sync_button.setText("Target")  # Fallback, falls Icon fehlt
+            self.slot_sync_button.setText("Target")  # Fallback
 
         self.slot_sync_button.setMaximumWidth(36)
         self.slot_sync_button.clicked.connect(self._on_slot_sync_clicked)
         self._buttons_layout.addWidget(self.slot_sync_button)
+
         
         self._buttons_layout.addStretch()
 
