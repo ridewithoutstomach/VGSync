@@ -20,6 +20,7 @@
 
 import subprocess
 import json
+import shutil
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QFormLayout, QDialogButtonBox,
@@ -30,11 +31,30 @@ from PySide6.QtCore import QSettings, Qt
 
 
 # Hilfsfunktion: kurzer Test, ob ein FFmpeg-Encoder läuft
+
 def can_encode_with(ffmpeg_enc_name, ffmpeg_path="ffmpeg", test_duration=0.5):
     """
     Versucht, ein kurzes Testvideo (test_duration Sek.) mit ffmpeg_enc_name zu encoden.
+    Schreibt ins Temp-Verzeichnis (Installer: Program Files ist schreibgeschützt).
     Gibt True zurück, wenn ffmpeg normal beendet wird, sonst False.
     """
+    import tempfile, os, subprocess, shutil
+
+    # ffmpeg auflösen wie zur Laufzeit: erst PATH, dann übergebenen String
+    if ffmpeg_path == "ffmpeg":
+        ffmpeg_path = shutil.which("ffmpeg") or "ffmpeg"
+
+    # Ziel-Datei im Temp-Verzeichnis (kollisionsfrei)
+    tmp_dir = tempfile.gettempdir()
+    out_path = os.path.join(tmp_dir, "kvr_hwtest.mp4")
+
+    # Aufräumen, falls vorher mal liegen geblieben
+    try:
+        if os.path.exists(out_path):
+            os.remove(out_path)
+    except Exception:
+        pass
+
     try:
         cmd = [
             ffmpeg_path, "-hide_banner", "-y",
@@ -43,12 +63,19 @@ def can_encode_with(ffmpeg_enc_name, ffmpeg_path="ffmpeg", test_duration=0.5):
             "-t", str(test_duration),
             "-c:v", ffmpeg_enc_name,
             "-an",
-            "test_enc.mp4"
+            out_path
         ]
         subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         return True
-    except:
+    except Exception:
         return False
+    finally:
+        # best effort cleanup
+        try:
+            if os.path.exists(out_path):
+                os.remove(out_path)
+        except Exception:
+            pass
 
 
 class EncoderSetupDialog(QDialog):
@@ -320,11 +347,13 @@ class EncoderSetupDialog(QDialog):
         }
 
         working = {"CPU"}  # CPU immer
+        
+        ffmpeg_exe = shutil.which("ffmpeg") or "ffmpeg"
         for label, ffenc in possible_hw_encs.items():
             # Falls der user das Dialog-Fenster schließt o.ä., brechen wir ab
             if progress.wasCanceled():
                 break
-            if can_encode_with(ffenc, test_duration=0.5):
+            if can_encode_with(ffenc, ffmpeg_path=ffmpeg_exe, test_duration=0.5):
                 working.add(label)
 
         # 3) Schließen wir den Warte-Dialog
