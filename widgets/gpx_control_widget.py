@@ -1132,17 +1132,9 @@ class GPXControlWidget(QWidget):
             cur_shift = get_gpx_video_shift()
         except Exception:
             cur_shift = 0.0
+
+        print("[DEBUG] Current GPX–Video shift:", cur_shift)
         auto_on = hasattr(mw, "action_auto_sync_video") and mw.action_auto_sync_video.isChecked()
-        hit_grey = False
-        if (not auto_on) and (cur_shift < 0):
-            data = gpx_data
-            b = mw.gpx_widget.gpx_list._markB_idx
-            e = mw.gpx_widget.gpx_list._markE_idx
-            if data and b is not None and e is not None:
-                if b > e:
-                    b, e = e, b
-                positive_time = data[0]["time"] + timedelta(seconds=abs(cur_shift))
-                hit_grey = data[b]["time"] < positive_time
 
         # --- Undo + Busy ---
         mw.register_gpx_undo_snapshot()
@@ -1176,7 +1168,7 @@ class GPXControlWidget(QWidget):
         mw.gpx_widget.gpx_list.delete_selected_range(shift_next)
 
         # --- Nachbearbeitung NUR für Head-Cut (Remove ab Index 0) ---
-        if headcut:
+        if headcut and shift_next:
             data_after = mw.gpx_widget.gpx_list._gpx_data
             if data_after and len(data_after) >= 2:
                 # 1) Δt ab Index 1 addieren (Index 1..N-1)
@@ -1237,37 +1229,6 @@ class GPXControlWidget(QWidget):
         if mw.mini_chart_widget and mw._gpx_data:
             mw.mini_chart_widget.set_gpx_data(mw._gpx_data)
         mw.map_widget.view.page().runJavaScript("hideLoading();")
-
-        # --- Graubereich-Dialog (wie gehabt) ---
-        if hit_grey:
-            reply = QMessageBox.question(
-                self,
-                "Sync may be invalid",
-                "You manually cut inside the pre-video (grey) section.\n"
-                f"The current GPX–video shift ({cur_shift:+.1f}s) will be cleared.\n\n"
-                "Do you want to set a new sync now?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.Yes
-            )
-            set_gpx_video_shift(0)
-            route_geojson = mw._build_route_geojson_from_gpx(mw._gpx_data)
-            mw.map_widget.loadRoute(route_geojson, do_fit=False)
-            mw.gpx_widget.gpx_list.set_gpx_data(mw._gpx_data)
-            mw.video_control.activate_controls()
-            if hasattr(mw.video_control, "update_set_sync_highlight"):
-                mw.video_control.update_set_sync_highlight()
-            if reply == QMessageBox.Yes:
-                mw.gpx_widget.gpx_list.clear_marked_range()
-                if hasattr(mw, "map_widget"):
-                    mw.map_widget.clear_marked_range()
-                if hasattr(mw.video_control, "update_set_sync_highlight"):
-                    mw.video_control.update_set_sync_highlight()
-                QMessageBox.information(
-                    mw,
-                    "Set a new sync",
-                    "Please select the matching GPX point and set the current video frame, "
-                    "then click 'Sync' (GSync) to create a new alignment."
-                )
 
         if hasattr(mw, "_autoSyncVideoEnabled") and mw._autoSyncVideoEnabled:
             mw.cut_manager.on_markClear_clicked()
