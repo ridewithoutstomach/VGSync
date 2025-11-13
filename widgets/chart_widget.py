@@ -19,15 +19,18 @@
 #
 
 from PySide6.QtWidgets import QWidget
-from PySide6.QtCore import Qt, QPoint, Signal, QPointF
+
+from PySide6.QtCore import Qt, QPoint, Signal, QPointF, QRect
+from datetime import timedelta
 from PySide6.QtGui import (
     QPainter, QPen, QBrush, QColor, QWheelEvent, QPolygonF, QFont
 )
                            
 
-
+ELE_EPS = 0.05
 class ChartWidget(QWidget):
     markerClicked = Signal(int)
+    raiseTrackRequested = Signal(float)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -58,6 +61,13 @@ class ChartWidget(QWidget):
         # Neuer Schwellenwert (z.B. 1 km/h)
         self._zero_speed_threshold = 1.0
         
+        # ausgrauen
+        self._sync_idx_start = None
+        self._sync_idx_end   = None
+        
+        self._usl_indices = []        # alle Indizes mit ele < 0
+        self._usl_idx_cursor = -1     # Cursor fürs Durchklicken
+        self._usl_badge_rect = None   # Klickfläche des Warn-Badges
         
          # ---------------------------
         # **NEU**: Schwellenwert für Stops
@@ -65,6 +75,59 @@ class ChartWidget(QWidget):
 
         self.setAttribute(Qt.WA_OpaquePaintEvent, True)
         self.setAutoFillBackground(True)
+        
+        self._usl_badge_rect = None   # clickable area of the badge
+        self._usl_idx_cursor = -1     # cycling cursor for USL points
+        
+        
+    def _prevideo_cut_idx(self) -> int:
+        """
+        Index-Grenze für das Vorlauf-Grau bei negativem Video-Shift.
+        Alles < return-Wert gilt als 'grau' (ausgeschlossen).
+        """
+        try:
+            from core.gpx_parser import get_gpx_video_shift
+            shift = get_gpx_video_shift()
+        except Exception:
+            shift = 0
+        if not (self._gpx_data and shift is not None and shift < 0 and self._gpx_data[0].get("time")):
+            return 0
+        from datetime import timedelta
+        positive_time = self._gpx_data[0]["time"] + timedelta(seconds=abs(shift))
+        cut_idx = 0
+        for i, pt in enumerate(self._gpx_data):
+            ti = pt.get("time")
+            if ti and ti >= positive_time:
+                cut_idx = i
+                break
+            else:
+                cut_idx = i + 1
+        return max(0, min(cut_idx, len(self._gpx_data)))
+    
+    def _effective_usl_indices(self):
+        """
+        Liefert die Liste aller 'unter Meer' Indizes, ABER
+        ausgeschlossen werden:
+          - B..E (self._sync_idx_start.._end), falls gesetzt
+          - Vorlaufbereich 0..pre_cut_idx-1 bei negativem Shift
+        """
+        base = [i for i, pt in enumerate(self._gpx_data)
+                if (pt.get("ele") is not None and pt["ele"] < -ELE_EPS)]
+        if not base:
+            return []
+        # Vorlauf (pre-video) grau ausschließen
+        cut0 = self._prevideo_cut_idx()
+        base = [i for i in base if i >= cut0]
+
+        # Markierter B..E-Bereich ausschließen (falls gesetzt)
+        if getattr(self, "_sync_idx_start", None) is not None and getattr(self, "_sync_idx_end", None) is not None:
+            i0 = int(min(self._sync_idx_start, self._sync_idx_end))
+            i1 = int(max(self._sync_idx_start, self._sync_idx_end))
+            base = [i for i in base if not (i0 <= i <= i1)]
+
+        return base
+
+    
         
     def set_stop_threshold(self, value: float):
         self._stop_threshold = value
@@ -98,6 +161,9 @@ class ChartWidget(QWidget):
         self._marker_index = 0
         self._zoom_factor = 1.0
         self._horizontal_offset = 0.0
+        self._usl_indices = [i for i, pt in enumerate(self._gpx_data) if pt.get("ele", 0.0) < 0.0]
+        self._usl_idx_cursor = -1
+        self._usl_badge_rect = None
         self.update()
 
     def highlight_gpx_index(self, index: int):
@@ -242,6 +308,9 @@ class ChartWidget(QWidget):
         w = rect_.width()
         h = rect_.height()
         painter.fillRect(rect_, QColor("#222222"))
+        
+        
+        
 
         # ------------------------------------------------------
         # LEGENDE (oben links)
@@ -363,27 +432,38 @@ class ChartWidget(QWidget):
         #  - min_ele <= 0 <= max_ele  -> Linie exakt bei 0 m (deutlich, gestrichelt)
         #  - min_ele > 0              -> dezente Linie am unteren Rand des Höhenplots
         #  - max_ele < 0              -> dezente Linie am oberen Rand des Höhenplots
-        any_below_zero = (min_ele < 0.0)
-        any_above_zero = (max_ele > 0.0)
-        if any_below_zero and any_above_zero:
+        
+        
+        # --- 0-Meter-Linie im Höhenbereich (robust) -------------------------------
+        eps = 1e-6
+        has_only_above = (min_ele > 0.0 + eps)
+        has_only_below = (max_ele < 0.0 - eps)
+
+        if not (has_only_above or has_only_below):
+            # 0 liegt im Bereich -> echte 0-m-Position
             zero_y = y_for_ele(0.0)
-            pen = QPen(QColor(255, 80, 80), 1, Qt.DashLine)  # gut sichtbar (leicht rötlich)
-        elif min_ele > 0.0:
-            zero_y = top_height - 1  # untere Kante des Höhenbereichs
-            pen = QPen(QColor(140, 140, 140), 1, Qt.DashLine)  # dezent
-        else:  # max_ele < 0.0
-            zero_y = 20  # obere Kante (wir zeichnen ab "20" nach unten)
-            pen = QPen(QColor(140, 140, 140), 1, Qt.DashLine)  # dezent
+            pen = QPen(QColor(255, 80, 80), 1, Qt.DashLine)  # gut sichtbar
+        elif has_only_above:
+            # alles über 0 -> Linie dezent am unteren Rand des Höhenplots
+            zero_y = int(top_height) - 1
+            pen = QPen(QColor(140, 140, 140), 1, Qt.DashLine)
+        else:
+            # alles unter 0 -> Linie dezent am oberen Rand des Höhenplots
+            zero_y = 20  # Plot beginnt ab ~20px
+            pen = QPen(QColor(140, 140, 140), 1, Qt.DashLine)
 
         painter.setPen(pen)
         painter.drawLine(0, zero_y, w, zero_y)
-        
+
+        # Label "0 m" nahe der Linie
         try:
             lab_font = QFont(self.font().family(), max(4, int(h * 0.025)))
             painter.setFont(lab_font)
         except Exception:
             pass
         painter.drawText(4, int(zero_y) - 2, "0 m")
+        # -------------------------------------------------------------------------
+
         # ------------------------------------------------------------------------
 
         # 2) Speed-Linie (cyan, 1px)
@@ -461,7 +541,16 @@ class ChartWidget(QWidget):
         # **NEU**: Blaue Marker für "Stops"
         # wenn Zeitdifferenz > self._stop_threshold
         # ------------------------------------------------------
-        painter.setPen(QPen(QColor(255, 165, 0), 4))  # Blau, Dicke=2
+        
+        painter.setPen(QPen(QColor(255, 215, 0), 3))  # Time Gaps: GELB (Gold)
+        #painter.setPen(QPen(QColor(0, 153, 255), 3))  # Time Gaps: BLAU
+        #painter.setPen(QPen(QColor(0, 255, 255), 4))  # Cyan
+        #painter.setPen(QPen(QColor(173, 255, 47), 4)) # Lime
+        #painter.setPen(QPen(QColor(255, 105, 180), 4))# Pink
+        #painter.setPen(QPen(QColor(148, 0, 211), 4))  # Violett
+        
+        #painter.setPen(QPen(QColor(255, 255, 255), 4))# Weiß
+        
         for i in range(1, count):
             # Zeitdifferenz zwischen Punkt i-1 und i:
             dt = (self._gpx_data[i]["time"] - self._gpx_data[i-1]["time"]).total_seconds() if self._gpx_data[i]["time"] else 0
@@ -470,7 +559,36 @@ class ChartWidget(QWidget):
                 x_ = path_spd[i][0]
                 # Hier zeichnen wir einen Strich nach oben (15px) vom zero_speed_y:
                 painter.drawLine(x_, zero_speed_y, x_, zero_speed_y + 15)
-    
+        
+        # === Sync-Overlay (aus der GPX-Liste) ==============================
+        if (self._sync_idx_start is not None and
+            self._sync_idx_end   is not None and
+            self._gpx_data and
+            path_spd and len(path_spd) == len(self._gpx_data)):
+
+            i0 = int(max(0, min(self._sync_idx_start, len(self._gpx_data) - 1)))
+            i1 = int(max(0, min(self._sync_idx_end,   len(self._gpx_data) - 1)))
+            if i0 > i1:
+                i0, i1 = i1, i0
+
+            # x-Koordinaten direkt aus path_spd (kein x_for_index nötig)
+            x0 = path_spd[i0][0]
+            x1 = path_spd[i1][0]
+
+            left  = max(0, min(w, min(x0, x1)))
+            right = max(0, min(w, max(x0, x1)))
+
+            if right - left > 1:
+                painter.save()
+                try:
+                    painter.setPen(Qt.NoPen)
+                    painter.setBrush(QColor(0, 0, 0, 110))  # halbtransparentes Grau
+                    painter.drawRect(left, 0, right - left, h)
+                finally:
+                    painter.restore()
+        # ===================================================================
+
+        
         # ------------------------------------------------------
         # Kreise auf den Datenpunkten (Elevation = gelb, Speed = cyan)
         # ------------------------------------------------------
@@ -502,7 +620,39 @@ class ChartWidget(QWidget):
         y0_spd = max(top_height, min(h - 1, y0_spd))
         painter.setPen(QColor(180, 180, 180))
         painter.drawText(6, y0_spd - 2, "0 km/h")
+        
+        try:
+            from core.gpx_parser import get_gpx_video_shift
+            shift = get_gpx_video_shift()
+        except Exception:
+            shift = 0
 
+        if shift is not None and shift < 0 and self._gpx_data and self._gpx_data[0].get("time"):
+            positive_time = self._gpx_data[0]["time"] + timedelta(seconds=abs(shift))
+
+            # Finde den ersten Index, dessen Zeit >= positive_time ist
+            cut_idx = 0
+            for i, pt in enumerate(self._gpx_data):
+                ti = pt.get("time")
+                if ti and ti >= positive_time:
+                    cut_idx = i
+                    break
+                else:
+                    cut_idx = i + 1  # falls alle < positive_time
+
+            if cut_idx > 0:
+                # x-Position des letzten "grauen" Punktes
+                x_right = path_spd[min(cut_idx - 1, len(path_spd)-1)][0]
+                # sichtbare Breite begrenzen (Scroll/Zoom beachten)
+                fill_to = x_right
+                if fill_to > 0:
+                    if fill_to > w:
+                        fill_to = w
+                    # halbtransparent grau über den gesamten Chart-Bereich
+                    painter.setPen(Qt.NoPen)
+                    painter.setBrush(QColor(128, 128, 128, 90))
+                    painter.drawRect(0, 0, fill_to, h)
+        # --------------------------------------------------------------------------
         
         # ------------------------------------------------------
         # Marker-Linie und Info-Texte
@@ -511,7 +661,9 @@ class ChartWidget(QWidget):
         # ... dein bestehender Marker-Zeichencode ...
 
         # === NEU: Warn-Badge "unter 0 m" einblenden, wenn min_ele < 0 ===
-        if min_ele < 0.0:
+        usl_list = self._effective_usl_indices()
+        
+        if usl_list:  # nur wenn es (gefilterte) USL-Punkte gibt
             # Text & Style
             badge_text = "⚠ under sea level ⚠ (0m)"
             try:
@@ -533,7 +685,9 @@ class ChartWidget(QWidget):
             th = fm.height()
             rect_w = tw + 2 * pad_x
             rect_h = th + 2 * pad_y
-
+            
+            self._usl_badge_rect = QRect(x_left, y_top, rect_w, rect_h)
+            
             # Kapsel (halbtransparent), rote Kontur, gut lesbarer Text
             painter.setBrush(QColor(60, 20, 20, 200))
             painter.setPen(QPen(QColor(255, 80, 80), 1))
@@ -558,7 +712,9 @@ class ChartWidget(QWidget):
             spd_val = speed_vals[self._marker_index]  # gecappter Wert
             grad_val = pt_.get("gradient", 0.0)
     
-            line1 = f"{ele_val:.1f}".replace(".", ",") + "m"
+            #line1 = f"{ele_val:.1f}".replace(".", ",") + "m"
+            e_show = ele_val if abs(ele_val) >= ELE_EPS else 0.0
+            line1  = f"{e_show:.1f}".replace(".", ",") + "m"
             line2 = f"{spd_val:.1f}".replace(".", ",") + "km/h"
             line3 = f"{grad_val:.1f}".replace(".", ",") + "%"
     
@@ -571,7 +727,69 @@ class ChartWidget(QWidget):
             painter.drawText(m_x + 5, y_start + 2 * y_step, line3)
     
                 
-     
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            # 1) Klick auf den USL-Badge => Dialog
+            if self._usl_badge_rect and self._usl_badge_rect.contains(event.pos()):
+                usl = self._effective_usl_indices()
+                if not usl:
+                    event.accept()
+                    return
+                # tiefster Punkt suchen
+                min_idx = min(usl, key=lambda i: (self._gpx_data[i].get("ele", 0.0)))
+                min_ele = self._gpx_data[min_idx].get("ele", 0.0)
+
+                # Dialog (englisch)
+                from PySide6.QtWidgets import QMessageBox
+                msg = QMessageBox(self)
+                msg.setWindowTitle("Under sea level")
+                msg.setText(f"Deepest point: {min_ele:.2f} m\nWhat would you like to do?")
+                show_btn = msg.addButton("Show", QMessageBox.AcceptRole)
+                move_btn = msg.addButton("Raise track above sea level", QMessageBox.ActionRole)
+                cancel_btn = msg.addButton("Cancel", QMessageBox.RejectRole)
+                msg.exec()
+
+                btn = msg.clickedButton()
+                if btn is show_btn:
+                    # marker + notify world
+                    self.highlight_gpx_index(min_idx)
+                    self.markerClicked.emit(min_idx)
+                elif btn is move_btn:
+                    # delta = -min_ele + buffer (aktuell 0)
+                    buffer_m = 0.0
+                    delta = max(0.0, -min_ele + buffer_m)
+                    if delta > 0:
+                        self.raiseTrackRequested.emit(delta)
+                event.accept()
+                return
+
+            # 2) normaler Left-Click ins Chart -> Marker dahin
+            idx = self._index_for_x(event.pos().x())
+            self._marker_index = idx
+            self.update()
+            self.markerClicked.emit(idx)
+            event.accept()
+
+        elif event.button() == Qt.RightButton:
+            # 1) Rechtsklick auf Badge -> USL zyklisch durchgehen
+            if self._usl_badge_rect and self._usl_badge_rect.contains(event.pos()):
+                usl = self._effective_usl_indices()
+                if usl:
+                    self._usl_idx_cursor = (self._usl_idx_cursor + 1) % len(usl)
+                    idx = usl[self._usl_idx_cursor]
+                    self.highlight_gpx_index(idx)
+                    self.markerClicked.emit(idx)
+                event.accept()
+                return
+            # 2) sonst: Scroll-Drag wie gehabt
+            self._dragging_scroll = True
+            self._drag_start_x = event.pos().x()
+            self._offset_start = self._horizontal_offset
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+ 
 
     # -----------------------------------------------------
     # Hilfsfunktion: x->Index
@@ -587,3 +805,20 @@ class ChartWidget(QWidget):
         ratio = max(0, min(ratio, 1))
         idx_ = int(round(ratio * (count - 1)))
         return max(0, min(idx_, count - 1))
+        
+    def set_sync_range(self, idx_start: int, idx_end: int):
+        if idx_start is None or idx_end is None:
+            self._sync_idx_start = None
+            self._sync_idx_end = None
+        else:
+            if idx_start > idx_end:
+                idx_start, idx_end = idx_end, idx_start
+            self._sync_idx_start = max(0, idx_start)
+            self._sync_idx_end   = max(0, idx_end)
+        self.update()
+
+    def clear_sync_range(self):
+        self._sync_idx_start = None
+        self._sync_idx_end   = None
+        self.update()
+    

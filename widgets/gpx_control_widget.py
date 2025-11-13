@@ -26,20 +26,23 @@ import math
 import urllib.request
 import urllib.error
 import json
+import sys, os
 
-from PySide6.QtWidgets import (
-    QWidget, QHBoxLayout, QPushButton, QStyle,
-    QVBoxLayout, QLabel, QSizePolicy, QFrame,
-    QMenu, QDialog, QRadioButton, QButtonGroup,
-    QDoubleSpinBox, QMessageBox, QFileDialog,
-    QLineEdit
-)
+from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal, QPoint
+
+from PySide6.QtCore import Qt, Signal, QPoint, QUrl, QEvent
+from PySide6.QtGui import QIcon, QPixmap, QCursor, QDesktopServices
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QPushButton, QStyle, QVBoxLayout, QLabel, QSizePolicy, QFrame, QMenu, QDialog, QRadioButton, QButtonGroup, QDoubleSpinBox, QMessageBox, QFileDialog, QLineEdit
+import os
+
+
 from PySide6.QtGui import QIcon
 
 from datetime import timedelta
 from core.gpx_parser import recalc_gpx_data, get_gpx_video_shift, set_gpx_video_shift
+
+MAX_LOGO_H = 48
 
 
 class GPXControlWidget(QWidget):
@@ -88,10 +91,19 @@ class GPXControlWidget(QWidget):
         )
 
         # Oberstes (vertikales) Layout, darin: Buttons-Zeile + Info-Zeile
-        self.main_vbox = QVBoxLayout(self)
-        self.main_vbox.setContentsMargins(5, 5, 5, 5)
+        # Oberstes Layout: HBox -> links die zwei Zeilen (Buttons+Info), rechts das Kinomap-Logo
+        self._main_hbox = QHBoxLayout(self)
+        self._main_hbox.setContentsMargins(5, 5, 20, 5)
+        self._main_hbox.setSpacing(8)
+
+        self.main_vbox = QVBoxLayout()      # bleibt dein bestehendes "zentral-Layout"
+        self.main_vbox.setContentsMargins(0, 0, 0, 0)
         self.main_vbox.setSpacing(5)
 
+        # linke Seite (Buttons + Info) in die HBox
+        self._main_hbox.addLayout(self.main_vbox, 1)
+
+        
         # ---------------------------------------------
         # (A) Erste Zeile: Buttons
         # ---------------------------------------------
@@ -173,17 +185,7 @@ class GPXControlWidget(QWidget):
         # (Menü anlegen)
         self.more_menu = QMenu(self.more_button)
         
-        #action_maxslope = self.more_menu.addAction("show max%")
-        #action_maxslope.triggered.connect(self.showMaxSlopeClicked.emit)
         
-        #action_minslope = self.more_menu.addAction("show min%")
-        #action_minslope.triggered.connect(self.showMinSlopeClicked.emit)
-        
-        #action_maxspeed = self.more_menu.addAction("show MaxSpeed")
-        #action_minispeed = self.more_menu.addAction("show MinSpeed")
-
-        #action_maxspeed.triggered.connect(self.maxSpeedClicked.emit)
-        #action_minispeed.triggered.connect(self.minSpeedClicked.emit)
         
         action_avgspeed = self.more_menu.addAction("Set AverageSpeed")
         action_avgspeed.triggered.connect(self.averageSpeedClicked.emit)
@@ -209,8 +211,7 @@ class GPXControlWidget(QWidget):
         self._action_set_gpx2video.setEnabled(False)  # standard aus
         self._action_set_gpx2video.triggered.connect(self._on_set_gpx2video_triggered)
         
-        #action_get_ele = self.more_menu.addAction("GetElevation from Open-Elevation")
-        #action_get_ele.triggered.connect(self._on_get_ele_open_elevation)
+        
         
         action_get_ele_mapbox = self.more_menu.addAction("GetElevation from Mapbox")
         action_get_ele_mapbox.triggered.connect(self._on_get_ele_mapbox)
@@ -227,11 +228,7 @@ class GPXControlWidget(QWidget):
         self.more_button.clicked.connect(self._on_more_button_clicked)
               
 
-        # 8) Undo
-        #self.undo_button = QPushButton("Undo", self)
-        #self.undo_button.setMaximumWidth(50)
-        #self.undo_button.clicked.connect(self.undoClicked.emit)
-        #self._buttons_layout.addWidget(self.undo_button)
+        
 
         # 9) Smooth
         self.smooth_button = QPushButton("Smooth", self)
@@ -242,13 +239,11 @@ class GPXControlWidget(QWidget):
 
 
         self.slot_button = QPushButton("Slot 1", self)
-        self.slot_button.setToolTip("Switch GPX Slot: 1 (Import GPX/FIT, green) ↔ 2 (GoPro Extractor, yellow)")
+        self.slot_button.setToolTip("Switch GPX Slot: 1 (Import GPX/FIT, green) ↔ 2 (GoPro Extractor, blue)")
         self.slot_button.setMaximumWidth(70)
         self.slot_button.setCheckable(True)  # checked => Slot 2
         self._buttons_layout.addWidget(self.slot_button)
-        self.slot_button.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.slot_button.customContextMenuRequested.connect(self._on_slot_button_right_click)
-        
+        self.slot_button.setContextMenuPolicy(Qt.NoContextMenu)    
 
         # Farben initial: Slot 1 = grün, Slot 2 = gelb
         self._slot1_style = "background-color:#2ecc71; color:black;"
@@ -257,7 +252,47 @@ class GPXControlWidget(QWidget):
 
         self.slot_button.clicked.connect(self._on_slot_button_clicked)
         
-        self._buttons_layout.addStretch()  # optional: damit die Buttons nach links rücken
+        self.slot_button.clicked.connect(self._on_slot_button_clicked)
+
+        def _find_target_icon() -> str:
+            from pathlib import Path
+            import sys, os
+
+            candidates = []
+            # 1) PyInstaller-Bundle
+            if hasattr(sys, "_MEIPASS"):
+                candidates.append(Path(sys._MEIPASS) / "icon" / "target.png")
+            # 2) Laufzeit-/EXE-Ordner (auch bei "python KVRouite.py")
+            candidates.append(Path(os.path.abspath(os.path.dirname(sys.argv[0]))) / "icon" / "target.png")
+            # 3) Repo-Layout relativ zu dieser Datei
+            here = Path(__file__).resolve()
+            candidates.append(here.parent / "icon" / "target.png")        # …/icon/target.png
+            candidates.append(here.parent.parent / "icon" / "target.png") # …/../icon/target.png
+
+            for c in candidates:
+                if c.exists():
+                    return str(c)
+            return ""  # nichts gefunden => leerer String als Fallback
+
+        # --- Slot-Sync Button (neben "Slot 2") ---
+        self.slot_sync_button = QPushButton(self)
+        self.slot_sync_button.setToolTip("Slot-Sync: jump to the nearest matching GPX point in Slot 1.")
+
+        target_icon_path = _find_target_icon()
+        if target_icon_path and os.path.exists(target_icon_path):
+            self.slot_sync_button.setIcon(QIcon(target_icon_path))
+        else:
+            self.slot_sync_button.setText("Target")  # Fallback
+
+        self.slot_sync_button.setMaximumWidth(36)
+        self.slot_sync_button.clicked.connect(self._on_slot_sync_clicked)
+        self._buttons_layout.addWidget(self.slot_sync_button)
+
+        
+        self._buttons_layout.addStretch()
+
+        # standardmäßig Slot 1 aktiv -> Button verstecken
+        self.slot_sync_button.setVisible(False)
 
         # ---------------------------------------------
         # (B) Zweite Zeile: Info (Video/Length/Duration/Elev)
@@ -287,16 +322,61 @@ class GPXControlWidget(QWidget):
         self.label_zerospeed = QLabel("ZeroSpeed: 0", self)
         self._info_layout.addWidget(self.label_zerospeed)
         
-        self.label_paused = QLabel("Breaks: 0", self)
+        self.label_paused = QLabel("TimeGaps: 0", self)
         self._info_layout.addWidget(self.label_paused)
+        self.label_paused.setToolTip("Time gaps: consecutive GPX points with Δt above threshold")
         
 
         # Falls du sie mittig haben willst, kannst du z. B. links und rechts stretch:
         #self._info_layout.insertStretch(0)  # links
         self._info_layout.addStretch()      # rechts
+        # ===== Rechts: großes Kinomap-Logo über volle Höhe =====
+        base_dir    = os.path.dirname(os.path.abspath(__file__))
+        project_dir = os.path.dirname(base_dir)
+        logo_path   = os.path.join(project_dir, "doc", "Kinomap_Logo.png")  # dein Logo-Pfad
+       
+        self._kinomap_big = QLabel(self)
+        self._kinomap_big.setToolTip("Open Kinomap")
+        self._kinomap_big.setCursor(QCursor(Qt.PointingHandCursor))
+        self._kinomap_big.setContentsMargins(10, 0, 0, 0)  # etwas Luft zur Mitte
         
+        
+        self._kinomap_big.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self._kinomap_big.setMaximumHeight(MAX_LOGO_H)    
+
+        # Bild laden + Seitenverhältnis merken
+        pm = QPixmap(logo_path) if os.path.exists(logo_path) else QPixmap()
+        self._kinomap_aspect = (pm.width() / pm.height()) if (not pm.isNull() and pm.height() > 0) else 2.5
+
+        # Label soll Bild proportional skalieren
+        self._kinomap_big.setScaledContents(True)
+        if not pm.isNull():
+            self._kinomap_big.setPixmap(pm)
+        else:
+            self._kinomap_big.setText("Kinomap")
+            self._kinomap_big.setAlignment(Qt.AlignCenter)
+            self._kinomap_big.setMinimumWidth(90)
+
+        # Klick öffnet Kinomap
+        def _open_kinomap(_evt=None):
+            QDesktopServices.openUrl(QUrl("https://www.kinomap.com/"))
+        self._kinomap_big.mousePressEvent = _open_kinomap
+
+        # Rechts in die HBox einhängen
+        self._main_hbox.addWidget(self._kinomap_big, 0, Qt.AlignRight | Qt.AlignVCenter)
+
+        # Beim Resizen Breite = Höhe * Aspect halten (damit volle Control-Höhe genutzt wird)
+        self._kinomap_big.installEventFilter(self)
+
     
-    
+    def eventFilter(self, obj, event):
+        if obj is getattr(self, "_kinomap_big", None) and event.type() == QEvent.Resize:
+            h = min(self._kinomap_big.height(), MAX_LOGO_H)
+            if h > 0 and getattr(self, "_kinomap_aspect", None):
+                w = int(h * self._kinomap_aspect)
+                self._kinomap_big.setFixedWidth(max(60, w))
+        return super().eventFilter(obj, event)
+
     def on_setHeight_B2E_clicked(self):
         mw = self._mainwindow
         if not mw:
@@ -900,6 +980,7 @@ class GPXControlWidget(QWidget):
         auf ._gpx_data, .gpx_widget, .map_widget usw. zugreifen können.
         """
         self._mainwindow = mw   
+        
             
     def _on_slot_button_clicked(self):
         """
@@ -955,22 +1036,25 @@ class GPXControlWidget(QWidget):
         s.unpolish(btn)
         s.polish(btn)
         btn.update()
-
-    def _on_slot_button_right_click(self, _pos):
+        try:
+            self.slot_sync_button.setVisible(active_slot == 2)
+        except Exception:
+            pass
+    
+    def _on_slot_sync_clicked(self):
         """
-        Rechtsklick auf den Slot-Button:
-        - Nimmt den aktuell selektierten GPX-Punkt des AKTIVEN Slots,
-        - sucht im ANDEREN Slot den nächstgelegenen Punkt (nach Lat/Lon),
-        - wenn nahe genug: Slot wechseln und dort den Punkt selektieren & zoomen.
-        - wenn nicht: Hinweisdialog, kein Umschalten.
+        Gleiche Funktion wie Rechtsklick auf den Slot-Button:
+        - Nimmt den selektierten GPX-Punkt im aktiven Slot (hier: Slot 2),
+        - sucht im anderen Slot den nächstgelegenen Punkt,
+        - wechselt ggf. den Slot und selektiert/zoomt dorthin.
         """
         mw = getattr(self, "_mainwindow", None)
         if not mw:
             return
-        # Wir delegieren die Logik vollständig ans MainWindow, weil dort
-        # die Slot-Daten liegen und das Umschalten + UI-Selektieren passiert.
         mw.jump_to_nearest_point_in_other_slot()
 
+    
+    
 
     # ----------------------------------------------------------
     # Methode zum Aktualisieren der Info-Zeile
@@ -999,7 +1083,7 @@ class GPXControlWidget(QWidget):
         self.label_slope_max.setText(f"Max%: {slope_max:.1f}%")
         self.label_slope_min.setText(f"Min%: {slope_min:.1f}%")
         self.label_zerospeed.setText(f"ZeroSpeed: {zero_speed_count}")
-        self.label_paused.setText(f"Paused: {paused_count}")    
+        self.label_paused.setText(f"TimeGaps: {paused_count}")    
         
         
     def set_markE_visibility(self, visible: bool):
@@ -1011,97 +1095,7 @@ class GPXControlWidget(QWidget):
         self.deselect_button.setVisible(visible) # auch deselect verstecken
         self.cut_button.setVisible(visible)  
         
-    """
-    def _process_delete_points(self,shift_next: bool = True):
-      
-        mw = self._mainwindow
-        gpx_data = mw.gpx_widget.gpx_list._gpx_data
-        
-        ##
-        try:
-            cur_shift = get_gpx_video_shift()
-        except Exception:
-            cur_shift = 0
-
-        auto_on = hasattr(mw, "action_auto_sync_video") and mw.action_auto_sync_video.isChecked()
-
-        hit_grey = False
-        if (not auto_on) and (cur_shift < 0):
-            data = mw.gpx_widget.gpx_list._gpx_data
-            b = mw.gpx_widget.gpx_list._markB_idx
-            e = mw.gpx_widget.gpx_list._markE_idx
-            if data and b is not None and e is not None:
-                if b > e:
-                    b, e = e, b
-                positive_time = data[0]["time"] + timedelta(seconds=abs(cur_shift))
-                # Range berührt „grau“, wenn ihr Start vor positive_time liegt
-                hit_grey = data[b]["time"] < positive_time
-        ###        
-        
-        mw.register_gpx_undo_snapshot()
-        
-        mw.map_widget.view.page().runJavaScript("showLoading('Deleting GPX-Range...');")
-        mw.gpx_widget.gpx_list.delete_selected_range(shift_next)
-        mw._update_gpx_overview()
-        mw._gpx_data = mw.gpx_widget.gpx_list._gpx_data
-        route_geojson = mw._build_route_geojson_from_gpx(mw._gpx_data)
-        mw.map_widget.loadRoute(route_geojson, do_fit=False)
-        mw.chart.set_gpx_data(mw._gpx_data)
-        
-        if mw.mini_chart_widget and mw._gpx_data:
-            mw.mini_chart_widget.set_gpx_data(mw._gpx_data)
-        
-        mw.map_widget.view.page().runJavaScript("hideLoading();")
-        
-                # --- NEU: Falls manuell in grau geschnitten wurde -> Sync verwerfen + ggf. neu syncen ---
-        if hit_grey:
-            reply = QMessageBox.question(
-                self,
-                "Sync may be invalid",
-                "You manually cut inside the pre-video (grey) section.\n"
-                f"The current GPX–video shift ({cur_shift:+.1f}s) will be cleared.\n\n"
-                "Do you want to set a new sync now?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.Yes
-            )
-            # Shift verwerfen
-            set_gpx_video_shift(0)
-
-            # Route IMMER neu laden, damit Grau sofort verschwindet
-            route_geojson = mw._build_route_geojson_from_gpx(mw._gpx_data)
-            mw.map_widget.loadRoute(route_geojson, do_fit=False)
-
-            # UI auffrischen
-            mw.gpx_widget.gpx_list.set_gpx_data(mw._gpx_data)
-            mw.video_control.activate_controls()
-            if hasattr(mw.video_control, "update_set_sync_highlight"):
-                mw.video_control.update_set_sync_highlight()
-
-            # sofort neu syncen?
-            if reply == QMessageBox.Yes:
-                # Markierungen aufheben
-                mw.gpx_widget.gpx_list.clear_marked_range()
-                if hasattr(mw, "map_widget"):
-                    mw.map_widget.clear_marked_range()
-
-                # Sync-Button optisch hervorheben (rot), weil jetzt kein Shift gesetzt ist
-                if hasattr(mw.video_control, "update_set_sync_highlight"):
-                    mw.video_control.update_set_sync_highlight()
-
-                # Kurze Anleitung anzeigen
-                QMessageBox.information(
-                    mw,
-                    "Set a new sync",
-                    "Please select the matching GPX point and set the current video frame, "
-                    "then click 'Sync' (GSync) to create a new alignment."
-                )
-
-        
-            
-        if hasattr(mw, "_autoSyncVideoEnabled") and mw._autoSyncVideoEnabled:
-            mw.cut_manager.on_markClear_clicked()
-            
-    """
+    
     def _process_delete_points(self, shift_next: bool = True):
         """
         Delete-/Remove-Button:
@@ -1263,13 +1257,18 @@ class GPXControlWidget(QWidget):
                     mw.map_widget.clear_marked_range()
                 if hasattr(mw.video_control, "update_set_sync_highlight"):
                     mw.video_control.update_set_sync_highlight()
+                if hasattr(mw, "chart") and hasattr(mw.chart, "clear_sync_range"):
+                    mw.chart.clear_sync_range()    
                 QMessageBox.information(
                     mw,
                     "Set a new sync",
                     "Please select the matching GPX point and set the current video frame, "
                     "then click 'Sync' (GSync) to create a new alignment."
                 )
-
+            else:
+                if hasattr(mw, "chart") and hasattr(mw.chart, "clear_sync_range"):
+                    mw.chart.clear_sync_range() 
+                    
         if hasattr(mw, "_autoSyncVideoEnabled") and mw._autoSyncVideoEnabled:
             mw.cut_manager.on_markClear_clicked()
 
@@ -1278,26 +1277,6 @@ class GPXControlWidget(QWidget):
 
     def on_remove_range_clicked(self):
        self._process_delete_points(False)
-        
-        
-    def on_undo_range_clicked(self):
-        mw = self._mainwindow
-        """
-        Wird ausgelöst, wenn der Undo-Button 
-        im gpx_control_widget geklickt wurde.
-        => Leitet an die gpx_list weiter.
-        """
-        mw.map_widget.view.page().runJavaScript("showLoading('Undo GPX-Range...');")
-        mw.gpx_widget.gpx_list.undo_delete()
-        mw._update_gpx_overview()
-        mw._gpx_data = mw.gpx_widget.gpx_list._gpx_data
-        route_geojson = mw._build_route_geojson_from_gpx(mw._gpx_data)
-        mw.map_widget.loadRoute(route_geojson, do_fit=False)
-        mw.chart.set_gpx_data(mw._gpx_data)
-        if mw.mini_chart_widget:
-            mw.mini_chart_widget.set_gpx_data(mw._gpx_data)
-
-        mw.map_widget.view.page().runJavaScript("hideLoading();")    
         
         
     def _on_show_max_slope(self):
@@ -2274,10 +2253,7 @@ class GPXControlWidget(QWidget):
         and shifts subsequent points accordingly.
         All user-facing texts are in English.
         """
-        #from PySide6.QtWidgets import (
-        #    QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-        #    QDoubleSpinBox, QPushButton, QMessageBox
-        #)
+        
         
     
         gpx_data = mw.gpx_widget.gpx_list._gpx_data
@@ -3492,8 +3468,6 @@ class GPXControlWidget(QWidget):
     
         dlg.exec()    
         
-        
-        
     def _on_resample_to_1s_clicked(self):
         mw = self._mainwindow
         if not mw:
@@ -3504,36 +3478,128 @@ class GPXControlWidget(QWidget):
             QMessageBox.warning(self, "No GPX Data", "No or insufficient GPX data loaded.")
             return
 
+        # Prüfe, ob ein gültiger Bereich (B..E) markiert ist
+        b_idx = mw.gpx_widget.gpx_list._markB_idx
+        e_idx = mw.gpx_widget.gpx_list._markE_idx
+        has_range = False
+        if b_idx is not None and e_idx is not None:
+            if b_idx > e_idx:
+                b_idx, e_idx = e_idx, b_idx
+            if 0 <= b_idx < len(gpx_data) and 0 <= e_idx < len(gpx_data) and (e_idx - b_idx) >= 1:
+                has_range = True
+
+        if not has_range:
+            # === ALT: kompletter Track wie gehabt ===
+            reply = QMessageBox.question(
+                self,
+                "Resample to 1s",
+                "This function should be applied before syncing or editing!\n\n"
+                "Do you really want to resample the entire track to 1-second intervals?\n\n"
+                "This may slightly change the total distance and elevation.\n"
+                "If this GPX was already synchronized with the video, "
+                "you should re-check the alignment afterwards.",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            if reply != QMessageBox.Yes:
+                return
+
+            # Undo-Snapshot
+            self.register_gpx_undo_snapshot()
+
+            # Resample kompletter Track (nutzt deine MainWindow-Logik)
+            new_data = mw._resample_to_1s(gpx_data)  # :contentReference[oaicite:3]{index=3}
+
+            # Setzen + UI-Refresh (dein Muster)
+            mw._gpx_data = new_data
+            mw.gpx_widget.set_gpx_data(new_data)
+            mw._update_gpx_overview()
+            route_geojson = mw._build_route_geojson_from_gpx(new_data)
+            mw.map_widget.loadRoute(route_geojson, do_fit=False)
+            mw.chart.set_gpx_data(new_data)
+            if mw.mini_chart_widget:
+                mw.mini_chart_widget.set_gpx_data(new_data)
+
+            QMessageBox.information(self, "Done", "GPX track has been resampled to 1s intervals.")
+            return
+
+        # === NEU: nur markierten Bereich B..E resamplen ===
+        # Kurzer, bereichs-bezogener Hinweis
         reply = QMessageBox.question(
             self,
-            "Resample to 1s",
-            "Do you really want to resample the entire track to 1-second intervals?\n\n"
-            "This may slightly change the total distance and elevation.\n"
-            "If this GPX was already synchronized with the video, "
-            "you should re-check the alignment afterwards.",
+            "Resample range to 1s",
+            (f"You selected a range {b_idx}..{e_idx}.\n"
+             "Only this range will be resampled to 1-second intervals.\n\n"
+             "Note: Total duration of the range may slightly change;\n"
+             "subsequent points will be shifted by that difference.\n\n"
+             "Proceed?"),
             QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
+            QMessageBox.Yes
         )
         if reply != QMessageBox.Yes:
             return
 
-        # Undo-Snapshot
-        self.register_gpx_undo_snapshot()
+        # Undo-Snapshot (dein GPX-Undo)
+        self.register_gpx_undo_snapshot()  # :contentReference[oaicite:4]{index=4}
 
-        # Resample
-        new_data = mw._resample_to_1s(gpx_data)
+        # Originaldauer des Segments
+        t_start = gpx_data[b_idx]["time"]
+        t_end   = gpx_data[e_idx]["time"]
+        old_total_s = (t_end - t_start).total_seconds()
+        if old_total_s <= 0:
+            QMessageBox.warning(self, "Invalid Range", "Selected range has zero or negative duration.")
+            return
 
-        # Setzen
-        mw._gpx_data = new_data
-        mw.gpx_widget.set_gpx_data(new_data)
+        # Teilsegment kopieren und mit deiner MainWindow-Routine resamplen
+        segment = [pt.copy() for pt in gpx_data[b_idx:e_idx + 1]]
+        
+        new_segment = mw._resample_to_1s(segment)  # nutzt base_time = segment[0]['time']  :contentReference[oaicite:5]{index=5}
+        if not new_segment or len(new_segment) < 2:
+            QMessageBox.warning(self, "Resample failed", "Could not resample the selected range.")
+            return
+
+        new_total_s = (new_segment[-1]["time"] - new_segment[0]["time"]).total_seconds()
+        diff_s = new_total_s - old_total_s
+
+        # Segment austauschen (Anzahl Punkte kann sich ändern)
+        # Achtung: Wir arbeiten direkt auf gpx_data, danach recalc + Refresh wie überall.
+        gpx_data[b_idx:e_idx + 1] = new_segment
+
+        # Nachfolgende Punkte zeitlich verschieben (falls nötig)
+        if (abs(diff_s) > 1e-9) and (b_idx + len(new_segment) - 1 < len(gpx_data) - 1):
+            shift_from = b_idx + len(new_segment)  # erster Punkt NACH dem neuen Ende
+            for j in range(shift_from, len(gpx_data)):
+                gpx_data[j]["time"] = gpx_data[j]["time"] + timedelta(seconds=diff_s)
+        for pt in gpx_data:
+            if "abs_s" in pt:
+                del pt["abs_s"]
+        # Recalc + UI-Refresh – exakt dein Muster
+        recalc_gpx_data(gpx_data)
+        mw.gpx_widget.set_gpx_data(gpx_data)
+        mw._gpx_data = gpx_data
         mw._update_gpx_overview()
-        route_geojson = mw._build_route_geojson_from_gpx(new_data)
+        route_geojson = mw._build_route_geojson_from_gpx(gpx_data)
         mw.map_widget.loadRoute(route_geojson, do_fit=False)
-        mw.chart.set_gpx_data(new_data)
+        mw.chart.set_gpx_data(gpx_data)
         if mw.mini_chart_widget:
-            mw.mini_chart_widget.set_gpx_data(new_data)
+            mw.mini_chart_widget.set_gpx_data(gpx_data)
 
-        QMessageBox.information(self, "Done", "GPX track has been resampled to 1s intervals.")
+        # Range in UI leeren (Liste + Map) + ggf. Video-AutoSync-Range löschen – wie an anderer Stelle
+        mw.gpx_widget.gpx_list.clear_marked_range()
+        mw.map_widget.clear_marked_range()
+        if hasattr(mw, "_autoSyncVideoEnabled") and mw._autoSyncVideoEnabled:
+            mw.cut_manager.on_markClear_clicked()  # :contentReference[oaicite:6]{index=6}
+
+        # Info für den User
+        QMessageBox.information(
+            self, "Done",
+            (f"Range {b_idx}..{e_idx} resampled to 1s.\n"
+             f"Old duration: {old_total_s:.3f} s\n"
+             f"New duration: {new_total_s:.3f} s\n"
+             f"Shift applied to subsequent points: {diff_s:+.3f} s")
+        )
+    
+        
     
 
     def export_fit_immersion(self, threshold: float = 1.0):

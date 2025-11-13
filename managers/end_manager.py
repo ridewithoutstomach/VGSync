@@ -34,79 +34,7 @@ class EndManager(QObject):
         self.cut_manager = cut_manager           # <-- NEU
         self.mainwindow = mainwindow            # <-- NEU
         #print("[DEBUG] EndManager wurde erstellt.")
-    """
-    def go_to_end(self):
-        
-        print("[DEBUG] go_to_end() wurde aufgerufen")
-
-        if not self.video_editor.multi_durations:
-            print("[DEBUG] keine Videos geladen (multi_durations ist leer)")
-            return
-
-        global_s = self.video_editor.get_current_position_s()  # = Video-Zeit für Schnitt
-        total_duration = sum(self.video_editor.multi_durations)
-        if total_duration <= 0:
-            print("[DEBUG] Video hat keine positive Gesamtdauer.")
-            return
     
-        gpx_list = self.mainwindow.gpx_widget.gpx_list
-        map_widget = self.mainwindow.map_widget
-        timeline = self.mainwindow.timeline
-        
-
-        # GPX Sync (nur visuell) → final_s => GPX-Punkt suchen
-        final_s = self.mainwindow.get_final_time_for_global(global_s)
-        best_idx = self.mainwindow.gpx_widget.get_closest_index_for_time(final_s)
-        b_row = best_idx + 1
-        max_row = len(gpx_list._gpx_data) - 1
-        if b_row > max_row:
-            b_row = max_row
-        e_row = max_row
-    
-        # Markierung setzen (sichtbar in rot)
-        gpx_list.clear_marked_range()
-        gpx_list.set_markB_row(b_row)
-        gpx_list.set_markE_row(e_row)
-        map_widget.set_markB_point(b_row)
-        map_widget.set_markE_point(e_row)
-    
-        # Dialogtext
-        if self.mainwindow._autoSyncVideoEnabled:
-            text = (
-                "The End of the video is now marked (B..E).\n"
-                "Do you want to cut this section now?\n\n"
-                "This will affect both the video and the GPX track.\n\n"
-                "Note: Rendering the map take some time!"
-            )
-        else:
-            text = (
-                "The End of the video is now marked (B..E).\n"
-                "Do you want to cut this section now?"
-            )
-    
-        reply = QMessageBox.question(None, "Cut Now?", text, QMessageBox.Yes | QMessageBox.No)
-        
-        
-        if reply != QMessageBox.Yes:
-            print("[DEBUG] Abbruch: Deselektiere alles")
-            self.mainwindow.gpx_control.deselectClicked.emit()
-            self.cut_manager.markB_time_s = None
-            self.cut_manager.markE_time_s = None
-            timeline.set_markB_time(None)
-            timeline.set_markE_time(None)
-            return
-    
-        # Jetzt final: MarkE auf total_duration, MarkB auf global_s
-        self.cut_manager.markB_time_s = global_s
-        self.cut_manager.markE_time_s = total_duration
-        timeline.set_markB_time(global_s)
-        timeline.set_markE_time(total_duration)
-    
-        print(f"[DEBUG] CUT Bereich: Video {global_s:.3f}s → {total_duration:.3f}s | GPX {b_row} → {e_row}")
-        
-        self.mainwindow.on_cut_clicked_video()
-        
-    """
     
     def go_to_end(self):
         print("[DEBUG] go_to_end() wurde aufgerufen")
@@ -135,11 +63,49 @@ class EndManager(QObject):
         e_row = max_row
     
         # Markierung setzen (sichtbar in rot)
-        gpx_list.clear_marked_range()
-        gpx_list.set_markB_row(b_row)
-        gpx_list.set_markE_row(e_row)
-        map_widget.set_markB_point(b_row)
-        map_widget.set_markE_point(e_row)
+        #gpx_list.clear_marked_range()
+        #gpx_list.set_markB_row(b_row)
+        #gpx_list.set_markE_row(e_row)
+        #map_widget.set_markB_point(b_row)
+        #map_widget.set_markE_point(e_row)
+        """
+        if getattr(self.mainwindow, "_autoSyncVideoEnabled", False):
+            gpx_list.clear_marked_range()
+            gpx_list.set_markB_row(b_row)
+            gpx_list.set_markE_row(e_row)
+            map_widget.set_markB_point(b_row)
+            map_widget.set_markE_point(e_row)
+        else:
+            # Sicherstellen, dass keine ältere Markierung sichtbar bleibt
+            try:
+                gpx_list.clear_marked_range()
+            except Exception:
+                pass
+        """
+        
+        # --- Nur markieren, wenn AutoCut Video&GPX = ON ---
+        autocut_on = bool(getattr(self.mainwindow, "_autoSyncVideoEnabled", False)) or (
+            getattr(self.mainwindow, "action_auto_sync_video", None)
+            and self.mainwindow.action_auto_sync_video.isChecked()
+        )
+
+        have_gpx = bool(getattr(gpx_list, "_gpx_data", []))
+
+        if autocut_on and have_gpx:
+            gpx_list.clear_marked_range()
+            gpx_list.set_markB_row(b_row)
+            gpx_list.set_markE_row(e_row)
+            if hasattr(map_widget, "set_markB_point"):
+                map_widget.set_markB_point(b_row)
+            if hasattr(map_widget, "set_markE_point"):
+                map_widget.set_markE_point(e_row)
+        else:
+            # keine Markierung bei OFF (optional: alte Markierung wegräumen)
+            try:
+                gpx_list.clear_marked_range()
+            except Exception:
+                pass
+      
 
         # Dialogtext
         if self.mainwindow._autoSyncVideoEnabled:
@@ -227,24 +193,3 @@ class EndManager(QObject):
             self.video_editor.is_playing = False
 
         QTimer.singleShot(50, after_switch)
-
-    def _take_snapshot(self, out_file: str):
-        w = self.video_editor.video_frame.width()
-        h = self.video_editor.video_frame.height()
-        self.video_editor.media_player.video_take_snapshot(0, out_file, w, h)
-
-    def _show_snapshot_dialog(self, path_to_image: str):
-        dlg = QDialog()
-        dlg.setWindowTitle("Schnappschuss – letztes Frame")
-
-        vbox = QVBoxLayout(dlg)
-        lbl = QLabel()
-        pix = QPixmap(path_to_image)
-        lbl.setPixmap(pix)
-        vbox.addWidget(lbl)
-
-        btn = QPushButton("OK")
-        btn.clicked.connect(dlg.close)
-        vbox.addWidget(btn)
-
-        dlg.exec()

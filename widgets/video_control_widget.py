@@ -45,13 +45,14 @@ class VideoControlWidget(QWidget):
     markBClicked             = Signal()
     markEClicked             = Signal()
     cutClicked               = Signal()
-    #undoClicked              = Signal()
+    
     markClearClicked         = Signal()
-#safeClicked              = Signal()
+
     syncClicked              = Signal()
     set_beginClicked         = Signal()  
     overlayClicked        = Signal()
     setSyncClicked           = Signal()
+    gotoNextEditRequested   = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -65,14 +66,7 @@ class VideoControlWidget(QWidget):
         )
         self.play_pause_button.clicked.connect(self.play_pause_clicked.emit)
         layout.addWidget(self.play_pause_button)
-        """
-        self.stop_button = QPushButton()
-        self.stop_button.setIcon(
-            self.style().standardIcon(QStyle.SP_MediaStop)
-        )
-        self.stop_button.clicked.connect(self.stop_clicked.emit)
-        layout.addWidget(self.stop_button)
-        """
+        
         icon_size = self.style().pixelMetric(QStyle.PM_ToolBarIconSize)
         self.stop_button = QPushButton()
         self.stop_button.setIcon(QIcon("icon/go_to_start_icon_padded.png"))
@@ -92,6 +86,10 @@ class VideoControlWidget(QWidget):
         self.goto_end.setToolTip("Goto End (last frame)")
         self.goto_end.clicked.connect(self.goto_video_end_clicked.emit)
         layout.addWidget(self.goto_end)
+        
+        self.goto_end.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.goto_end.customContextMenuRequested.connect(lambda _pos: self.gotoNextEditRequested.emit())
+        
         
         self._step_values = ["s", "m", "k", "f"]  # <-- "f" ergänzt
         self._step_index = 0
@@ -403,56 +401,7 @@ class VideoControlWidget(QWidget):
         dlg.move(QCursor.pos())
         dlg.exec()    
     
-
-    def _show_time_popup_at_cursor(self, hh_str: str, mm_str: str, ss_str: str):
-
-
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Set time")
-
-        vbox = QVBoxLayout(dlg)
-        row = QHBoxLayout()
-        popup_h = QLineEdit(hh_str, dlg)
-        popup_h.setFixedWidth(25)
-        popup_h.setMaxLength(2)
-        popup_h.setValidator(QRegularExpressionValidator(QRegularExpression("^[0-9]{2}$"), popup_h))
-
-        popup_m = QLineEdit(mm_str, dlg)
-        popup_m.setFixedWidth(25)
-        popup_m.setMaxLength(2)
-        popup_m.setValidator(QRegularExpressionValidator(QRegularExpression("^[0-5]\\d$"), popup_m))
-
-        popup_s = QLineEdit(ss_str, dlg)
-        popup_s.setFixedWidth(25)
-        popup_s.setMaxLength(2)
-        popup_s.setValidator(QRegularExpressionValidator(QRegularExpression("^[0-5]\\d$"), popup_s))
-
-        row.addWidget(popup_h)
-        row.addWidget(QLabel(":", dlg))
-        row.addWidget(popup_m)
-        row.addWidget(QLabel(":", dlg))
-        row.addWidget(popup_s)
-
-        row_box = QHBoxLayout()
-        row_box.addStretch()
-        row_box.addLayout(row)
-        row_box.addStretch()
-        vbox.addLayout(row_box)
-
-        btn_box = QHBoxLayout()
-        btn_box.addStretch()
-        btn_set = QPushButton("Set", dlg)
-        btn_set.clicked.connect(
-            lambda: self._popup_accepted(dlg, popup_h, popup_m, popup_s)
-        )
-        btn_box.addWidget(btn_set)
-        btn_box.addStretch()
-        vbox.addLayout(btn_box)
-
-        dlg.setModal(True)
-        dlg.move(QCursor.pos())
-        dlg.exec()
-
+    
     def _popup_accepted(self, dlg, edit_h, edit_m, edit_s):
         txtH = edit_h.text().strip()
         txtM = edit_m.text().strip()

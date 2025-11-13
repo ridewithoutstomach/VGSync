@@ -203,14 +203,6 @@ def ensure_ffmpeg(parent_widget) -> bool:
         add_to_process_path(chosen)
         return True
         
-    def get_license_path():
-        """
-        Ermittelt license.lic neben app.py (bzw. dist/app).
-        """
-        base_dir = get_base_dir()
-        return os.path.join(base_dir, "license.lic")
-        
-        
 def is_valid_mpv_folder(folder: str) -> bool:
     """
     Prüft, ob in dem Ordner 'folder' eine libmpv-2.dll vorhanden ist 
@@ -230,12 +222,6 @@ def is_valid_mpv_folder(folder: str) -> bool:
     except Exception as e:
         print(f"[WARN] libmpv-2.dll in {folder} konnte nicht geladen werden: {e}")
         return False
-
-
-def ensure_mpv_library(parent_widget, base_dir: str) -> None:
-    
-    ensure_mpv(parent_widget)
-    
     
 ### mac:
 def is_valid_mpv_folder_mac(folder: str) -> bool:

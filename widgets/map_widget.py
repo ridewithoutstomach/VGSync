@@ -82,6 +82,7 @@ class MapWidget(QWidget):
         # map_page.html laden
         base_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
         html_path = os.path.join(base_dir, "map_page.html")
+        self._html_url = QUrl.fromLocalFile(html_path)
         self.view.load(QUrl.fromLocalFile(html_path))
 
         # Callback, wenn HTML fertig geladen ist
@@ -145,35 +146,8 @@ class MapWidget(QWidget):
         super().resizeEvent(e)
         if self._dnd_shield:
             self._dnd_shield.setGeometry(self.rect())
-
-    def dragEnterEvent(self, e):
-        ok = any(self._is_track(p) for p in self._extract_paths(e.mimeData()))
-        if ok:
-            self._dnd_shield.show()
-            self._dnd_shield.raise_()
-            e.acceptProposedAction()
-        else:
-            e.ignore()
-
-    def dragMoveEvent(self, e):
-        e.acceptProposedAction()
-
-    def dragLeaveEvent(self, e):
-        self._dnd_shield.hide()
-        e.accept()
-
-    def dropEvent(self, e):
-        self._dnd_shield.hide()
-        paths = [p for p in self._extract_paths(e.mimeData()) if self._is_track(p)]
-        if paths:
-            try:
-                self.tracksDropped.emit(paths)
-            except Exception:
-                pass
-            e.acceptProposedAction()
-        else:
-            e.ignore()
-
+    
+    
     @Slot(float, float, int)
     def _on_new_point_inserted(self, lat, lon, idx):
         """
@@ -206,18 +180,31 @@ class MapWidget(QWidget):
     def loadRoute(self, route_geojson: dict, do_fit: bool = True):
         """
         Ruft loadRoute(...) in JS auf, um ein GeoJSON in der Karte darzustellen.
+        Leer -> schneller Blank-Pfad (Reload), damit 'New Project' sofort ist.
         """
         if not route_geojson or not isinstance(route_geojson, dict):
             return
 
-        # Anzahl Points ermitteln
         features = route_geojson.get("features", [])
+        # --- FAST BLANK: Wenn keine Features -> Map schnell resetten (kein JS-Render) ---
+        if not features:
+            # internen State zurücksetzen
+            self._num_points = 0
+            self._blue_idx = None
+            self._yellow_idx = None
+            self._markB_idx = None
+            self._markE_idx = None
+            try:
+                # Seite neu laden = Startzustand, sehr schnell
+                self.view.load(self._html_url)
+            except Exception:
+                pass
+            return
+        # --- normaler Render-Pfad ---
         self._num_points = sum(
             1 for feat in features
             if feat.get("geometry", {}).get("type") == "Point"
         )
-
-        
         do_fit_str = "true" if do_fit else "false"
         js = f"loadRoute({json.dumps(route_geojson)}, {do_fit_str});"
         self.view.page().runJavaScript(js)
@@ -374,17 +361,7 @@ class MapWidget(QWidget):
     # ----------------------------------------------------------
     # Farblogik (rot bei MarkB..MarkE, sonst schwarz)
     # ----------------------------------------------------------
-    def is_in_marked_range(self, idx: int) -> bool:
-        if self._markB_idx is not None and self._markE_idx is not None:
-            b = min(self._markB_idx, self._markE_idx)
-            e = max(self._markB_idx, self._markE_idx)
-            return (b <= idx <= e)
-        elif self._markB_idx is not None:
-            return (idx == self._markB_idx)
-        elif self._markE_idx is not None:
-            return (idx == self._markE_idx)
-        else:
-            return False
+    
 
     def get_default_color_for_index(self, i: int) -> str:
         """
@@ -425,29 +402,7 @@ class MapWidget(QWidget):
             pass
 
         return "black"
-
-    def get_default_size_for_color(self, color: str) -> int:
-        s = QSettings("KVRouite", "KVRouite")
-
-        c = color.lower()
-        if c in ("#ff0000"):
-            color_key = "#FF0000"  # wir speichern dann in QSettings => mapSize/#FF0000
-        elif c in ("#0000ff"):
-            color_key = "#0000FF"
-        elif c in ("#ffff00"):
-            color_key = "#FFFF00"
-        else:
-            color_key = "#000000"
-
-        # Standardwert 6 bei gelb, sonst 4
-        if color_key == "#FFFF00":
-            default_val = 6
-        else:
-            default_val = 4
-
-        val = s.value(f"mapSize/{color_key}", default_val, type=int)
-        return val
-
+    
     def set_selected_point(self, idx: int):
         print(f"[DEBUG] MapWidget: selected_point set to idx={idx}")
         self._blue_idx = idx

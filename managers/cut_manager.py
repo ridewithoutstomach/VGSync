@@ -33,7 +33,7 @@ class VideoCutManager(QObject):
         self.markE_time_s = -1.0
         self._cut_intervals = []
         self._skip_timer = QTimer(self)
-        self._skip_timer.timeout.connect(self._check_cut_skip)
+        #self._skip_timer.timeout.connect(self._check_cut_skip)
         self._skip_timer.start(200)
 
         self.video_durations = []
@@ -103,15 +103,7 @@ class VideoCutManager(QObject):
         self.timeline.set_markE_time(-1)
         self._emit_cuts_changed()
         self.video_editor.set_cut_intervals(self._cut_intervals)
-
-    def on_undo_clicked(self):
-        if not self._cut_intervals:
-            return
-        self._cut_intervals.pop()
-        self.timeline.remove_last_cut_interval()
-        self._emit_cuts_changed()
-        self.video_editor.set_cut_intervals(self._cut_intervals)
-
+    
     def on_markClear_clicked(self):
         if self.markB_time_s >= 0 or self.markE_time_s >= 0:
             self.markB_time_s = -1.0
@@ -129,30 +121,7 @@ class VideoCutManager(QObject):
     def get_cut_intervals(self):
         return self._cut_intervals
     
-   
-    def _check_cut_skip(self):
-        # 1) Prüfen, ob mpv überhaupt ein File abspielt
-        if not self._has_active_file():
-            return  # => Kein Skip, da kein aktives Video
-
-        current_global_s = self._get_current_global_time()
-        skip_target = self._find_skip_target(current_global_s)
-        
-        if skip_target is not None:
-            if self._is_repeated_skip_target(skip_target):
-                return
-        
-            was_playing = self.video_editor.is_playing
-            self._set_global_time_s(skip_target)
-            self._last_skip_target = skip_target
-
-            # NUR wenn wir wirklich vorher gespielt haben, wieder abspielen
-            if was_playing:
-                self._play_after_skip()
-        else:
-            self._last_skip_target = None
-
-
+    
     def _has_active_file(self) -> bool:
         """Prüft, ob mpv noch eine gültige Datei (playlist/current_index) geladen hat."""
         # 1) Hat der VideoEditor eine Playlist?
@@ -230,21 +199,13 @@ class VideoCutManager(QObject):
 
 
         from PySide6.QtCore import QTimer
-        #QTimer.singleShot(50, self._really_force_play)
+        #QTimer.singleShot(50, )
         # 1) Normale Verzögerung für Sprünge innerhalb desselben Videos
         QTimer.singleShot(50, _ensure_playing)
 
         # 2) Falls ein Video-Wechsel stattfand, nochmals nachprüfen
         QTimer.singleShot(500, _ensure_playing)
-
-    def _really_force_play(self):
-        """
-        Analog zum alten Code: Startet MPV-Wiedergabe wirklich neu
-        (statt 'media_list_player.play()').
-        """
-        self.video_editor._player.pause = False
-        self.video_editor.is_playing = True
-
+    
     def _block_timeline_marker(self):
         if self._orig_marker_func is not None:
             return

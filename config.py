@@ -30,7 +30,8 @@ from PySide6.QtCore import QSettings
 # 1) Versions-Konfiguration & Modus
 ##############################################################################
 
-APP_VERSION = "4.26"
+APP_VERSION = "4.31" 
+# use 4.30_pre for a pre Version
 
 
 #SERVER_VERSION_CHECK_ONLY = False
@@ -64,14 +65,6 @@ def _get_app_base_dir() -> str:
             return os.path.dirname(sys.executable)
     else:
         return os.path.dirname(os.path.abspath(__file__))
-
-
-def _get_license_path() -> str:
-    """
-    Baut den Pfad zu 'license.lic' auf, basierend auf dem von _get_app_base_dir().
-    """
-    base_dir = _get_app_base_dir()
-    return os.path.join(base_dir, "license.lic")
 
 
 ##############################################################################
@@ -147,27 +140,6 @@ def is_edit_video_enabled() -> bool:
     val = s.value("video/editEnabled", False, type=bool)
     return val
 
-
-def set_edit_video_enabled(enabled: bool):
-    """
-    Schreibt in QSettings, ob 'video/editEnabled' True/False ist.
-    """
-    s = QSettings("KVRouite", "KVRouite")
-    s.setValue("video/editEnabled", enabled)
-
-"""
-def check_app_version_and_reset_if_necessary():
-   
-   
-    s = QSettings("KVRouite", "KVRouite")
-    stored_version = s.value("appVersion", "", type=str)
-    if stored_version != APP_VERSION:
-        s.clear()
-        s.setValue("appVersion", APP_VERSION)
-        return True
-    else:
-        return False
-"""    
     
 def check_app_version_and_reset_if_necessary():
     """
@@ -198,14 +170,6 @@ def clear_temp_directories():
                 print(f"[WARN] Konnte {tmp_dir} nicht löschen: {e}")
         os.makedirs(tmp_dir, exist_ok=True)  # Neu anlegen, falls nötig        
 
-def set_soft_opengl_enabled(enabled: bool):
-    s = QSettings("KVRouite", "KVRouite")
-    s.setValue("softOpenGLEnabled", enabled)
-
-#def is_soft_opengl_enabled() -> bool:
-#    s = QSettings("KVRouite", "KVRouite")
-#    val = s.value("softOpenGLEnabled", False, type=bool)
-#    return val
 
 def is_soft_opengl_enabled():
     s = QSettings("KVRouite", "KVRouite")

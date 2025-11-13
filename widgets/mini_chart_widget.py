@@ -47,12 +47,7 @@ class MiniChartWidget(QWidget):
         self._max_points = 30   # Standard: 30 Gpx-Punkte anzeigen
         self._marker_ratio_x = 0.7  # 70% vom Widget
         self._current_index = 0     # Welcher Punkt ist 'aktuell'?
-
-    def set_max_points(self, num: int):
-        """Erlaubt es dir, die max. Anzahl von GPX-Punkten (30) zu ändern."""
-        self._max_points = max(1, num)
-        self.update()
-
+    
     def set_gpx_data(self, data: list):
         """
         data: Liste von Dicts, z.B. [{'lat':..., 'lon':..., 'ele':..., 

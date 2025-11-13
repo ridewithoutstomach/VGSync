@@ -833,12 +833,7 @@ class GPXListWidget(QWidget):
     # ---------------------------------------------------
     # 6) Hilfsfunktionen (Zeilen-Markierung, Format, usw.)
     # ---------------------------------------------------
-    def _mark_row_bg(self, row_index, color):
-        for col in range(self.table.columnCount()):
-            it = self.table.item(row_index, col)
-            if it:
-                it.setBackground(color)
-
+    
     def _format_hhmmss_milli(self, secs: float) -> str:
         sign = '-' if secs < 0 else ''
         secs_abs = abs(secs)

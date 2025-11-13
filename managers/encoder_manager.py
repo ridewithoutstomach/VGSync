@@ -518,24 +518,6 @@ def map_preset_for_gpu(user_preset, hw_encode):
         return gpu_map_intel.get(up,"medium")
     return user_preset
     
-    
-def get_kf_le_with_margin(kf_list, time, margin):
-    """
-    Sucht in kf_list das Keyframe, das <= (time - margin) liegt.
-    Liegt (time - margin) < 0, dann wird 0 genommen.
-    Gibt das 'größte' Keyframe zurück, das immer noch <= diesem Wert ist.
-    """
-    target = time - margin
-    if target < 0:
-        target = 0
-    best = kf_list[0]
-    for k in kf_list:
-        if k <= target:
-            best = k
-        else:
-            break
-    return best
-    
 
 ###############################################################################
 # 3) DETERMINE ENCODER

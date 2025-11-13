@@ -42,20 +42,3 @@ class GPXWidget(QWidget):
     def set_video_playing(self, playing: bool):
         """ Delegiert an die Methode der gpx_list. """
         self.gpx_list.set_video_playing(playing)    
-
-    def set_flag(self, index: int, color: str, size: int, label_text: str):
-        """
-        Weist JavaScript an, ein Flag an Punkt 'index' zu setzen,
-        z.B. mit bestimmter Farbe und Label (B/E).
-        """
-        js_code = (
-            f"setFlag({index}, '{color}', {size}, '{label_text}')"
-        )
-        self.view.page().runJavaScript(js_code)
-        
-    def remove_all_flags(self):
-        """
-        Weist JavaScript an, alle Flag-Icons zu entfernen.
-        """
-        js_code = "removeAllFlags();"
-        self.view.page().runJavaScript(js_code)    

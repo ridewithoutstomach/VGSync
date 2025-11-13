@@ -199,3 +199,14 @@ Contact
 For questions, suggestions, or contributions, please open an issue or pull request on GitHub.
 
 -------------------------------------------------------------------------------
+
+## Legal / Contact
+
+Project: **KVRouite — Kinomap Video Route Suite** (officially supported by Kinomap)
+
+**Imprint (DE):** https://kvrouite.com/impressum.html  
+**Privacy:** https://kvrouite.com/privacy.html
+
+No cookies/trackers are set on the project website beyond what is technically necessary.  
+GitHub may process connection data per their Privacy Statement.  
+For contact, please use GitHub Issues or the email button on the imprint page.

@@ -25,7 +25,7 @@
 from PySide6.QtCore import QObject, Signal, QSettings
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QLabel, QComboBox, QDoubleSpinBox, QPushButton,
-    QSpinBox, QLineEdit, QFileDialog, QHBoxLayout, QDialogButtonBox
+    QSpinBox, QLineEdit, QFileDialog, QHBoxLayout, QDialogButtonBox, QMessageBox
 )
 import os
 import copy
@@ -61,20 +61,92 @@ class OverlayManager(QObject):
           "x":      "(W-w)/2",
           "y":      "(H-h)-10"
         }
-        => Speichern + timeline.add_overlay_interval(...)
+        => Vor dem Speichern: HARTE Validierung gegen Cuts + xfade-Ränder.
+        => Bei OK: speichern + timeline.add_overlay_interval(...)
         """
-        start_s = ovl_dict.get("start", 0.0)
-        end_s   = ovl_dict.get("end", 0.0)
+        start_s = float(ovl_dict.get("start", 0.0))
+        end_s   = float(ovl_dict.get("end", 0.0))
         if end_s <= start_s:
             print("[WARN] add_overlay => end <= start => ignoring.")
             return
-        
-        self._history_stack.append(copy.deepcopy(self._overlays))    
+
+        # --- Kontext besorgen (MainWindow & Settings) ---
+        mw = self.parent()  # OverlayManager wurde mit parent=MainWindow erzeugt
+        if mw is None:
+            print("[ERR] add_overlay => missing MainWindow parent; abort.")
+            return
+
+        # XFade ausschließlich aus dem Setup (NICHT aus Dialogen!)
+        s = QSettings("KVRouite", "KVRouite")
+        try:
+            xfade = float(s.value("encoder/xfade", 2, type=int))
+        except Exception:
+            xfade = 2.0
+        if xfade < 0:
+            xfade = 0.0
+
+        # --- Videolänge & Cuts ---
+        total = float(getattr(mw, "real_total_duration", 0.0))
+        if total <= 0.0:
+            QMessageBox.warning(mw, "Overlay not possible", "No video loaded.")
+            return
+
+        try:
+            cuts = list(mw.cut_manager.get_cut_intervals())  # [(start,end), ...]
+        except Exception:
+            cuts = []
+
+        # --- Keep-Segmente aus MainWindow nutzen (keine neuen defs!) ---
+        try:
+            keep_list = mw._compute_keep_intervals(cuts, total)  # [(ks,ke), ...]
+        except Exception as e:
+            print("[ERR] add_overlay => _compute_keep_intervals() failed:", e)
+            QMessageBox.warning(mw, "Overlay not possible",
+                                "Internal error while computing keep intervals.")
+            return
+
+        # --- 1) Komplette Überdeckung prüfen: [start,end] muss in EINEM Keep liegen ---
+        containing = None
+        for (ks, ke) in keep_list:
+            if start_s >= ks and end_s <= ke:
+                containing = (ks, ke)
+                break
+
+        if containing is None:
+            # Overlay würde Cut/Video-Grenzen überschreiten -> Abbruch
+            QMessageBox.warning(
+                mw,
+                "Overlay exceeds free segment",
+                (f"The overlay [{start_s:.2f}s … {end_s:.2f}s] crosses a cut or video boundary.\n"
+                 "Move it or shorten it.")
+            )
+            return
+
+        # --- 2) xfade-Rand an beiden Seiten einhalten ---
+        ks, ke = containing
+        allowed_start_min = ks + xfade
+        allowed_end_max   = ke - xfade
+
+        if start_s < allowed_start_min or end_s > allowed_end_max:
+            max_len_here = max(0.0, allowed_end_max - max(start_s, allowed_start_min))
+            QMessageBox.warning(
+                mw,
+                "Not enough space for crossfade",
+                (f"You must keep {xfade:.2f}s free before and after the overlay.\n\n"
+                 f"Allowed here: {allowed_start_min:.2f}s … {allowed_end_max:.2f}s\n"
+                 f"Your attempt: {start_s:.2f}s … {end_s:.2f}s (L={end_s-start_s:.2f}s)\n"
+                 f"Max. length at this position: {max_len_here:.2f}s.")
+            )
+            return
+
+        # --- Alles gut -> speichern + Timeline markieren ---
+        import copy
+        self._history_stack.append(copy.deepcopy(self._overlays))
         self._overlays.append(ovl_dict)
-        # => Timeline in Blau markieren
         self.timeline.add_overlay_interval(start_s, end_s)
         self.overlaysChanged.emit()
         print("[OverlayManager] => Overlay ADDED:", ovl_dict)
+
 
     def remove_last_overlay(self):
         if self._overlays:
