@@ -1685,62 +1685,81 @@ class GPXControlWidget(QWidget):
         
     def _apply_smoothing(self, gpx_data, box_size=10, flatten_val=2.0):
         """
-        wendet 2-stufiges Smoothing an:
-        1) Box slope smoothing
-        2) Flatten Value => wenn slope-Änderung > flatten_val => clamp
-        => hinterher reconstruct elevation
+        Two-stage slope smoothing with baseline correction.
+        Keeps start/end elevations, prevents downward drift below original baseline.
         """
         import math
-    
+
         n = len(gpx_data)
-        if n < 2:
+        if n < 3:
             return
 
-        # 1) Dist2D:
-        dist2d = [0.0]*n
+        # --- 1) Compute 2D distances (m) ---
+        dist_m = [0.0] * n
         for i in range(1, n):
             lat1, lon1 = gpx_data[i-1]["lat"], gpx_data[i-1]["lon"]
-            lat2, lon2 = gpx_data[i]["lat"],  gpx_data[i]["lon"]
-            dist2d[i] = self._haversine_m(lat1, lon1, lat2, lon2)
-
-        # 2) slope[i] = (ele[i]-ele[i-1]) / dist2d[i] * 100
-        slope = [0.0]*n
-        for i in range(1, n):
-            d2 = dist2d[i]
-            if d2 > 0.01:
-                slope[i] = ((gpx_data[i]["ele"] - gpx_data[i-1]["ele"]) / d2)*100
+            lat2, lon2 = gpx_data[i]["lat"],   gpx_data[i]["lon"]
+            d = self._haversine_m(lat1, lon1, lat2, lon2)
+            if d < 1000:
+                dist_m[i] = d
             else:
-                slope[i] = 0.0
+                dist_m[i] = d * 1000.0
 
-        # 3) Box smoothing => slope_smooth[i] = average of slope[i-box..i+box], clamp 0..n-1
-        slope_smooth = slope[:]  # copy
+        # --- 2) Compute raw slopes in % ---
+        slope = [0.0] * n
+        for i in range(1, n):
+            d = dist_m[i]
+            if d > 0.5:
+                slope[i] = ((gpx_data[i]["ele"] - gpx_data[i-1]["ele"]) / d) * 100.0
+            else:
+                slope[i] = slope[i-1]
+
+        # --- 3) Box smoothing ---
+        slope_smooth = slope[:]
         for i in range(n):
-            start_i = max(0, i-box_size)
-            end_i   = min(n-1, i+box_size)
-            count   = (end_i - start_i + 1)
-            if count < 1:
-                continue
-            ssum = 0.0
-            for j in range(start_i, end_i+1):
-                ssum += slope[j]
-            slope_smooth[i] = ssum / count
+            start = max(0, i - box_size)
+            end   = min(n - 1, i + box_size)
+            vals = slope[start:end+1]
+            slope_smooth[i] = sum(vals) / len(vals)
 
-        # 4) Flatten => wir gehen i=1..n-1, check delta to slope_smooth[i-1]
+        # --- 4) Flatten abrupt slope jumps ---
         for i in range(1, n):
-            delta_slope = slope_smooth[i] - slope_smooth[i-1]
-            if abs(delta_slope) > flatten_val:
-                # clamp => slope_smooth[i] = slope_smooth[i-1] + sign(delta)*flatten_val
-                sign_ = 1.0 if delta_slope>0 else -1.0
-                slope_smooth[i] = slope_smooth[i-1] + sign_*flatten_val
-    
-        # 5) Nun reconstruct elevation => 
-        #    ele[0] bleibt wie es war
-        #    ele[i] = ele[i-1] + dist2d[i] * (slope_smooth[i]/100)
-        new_ele = gpx_data[0]["ele"]
+            delta = slope_smooth[i] - slope_smooth[i-1]
+            if abs(delta) > flatten_val:
+                slope_smooth[i] = slope_smooth[i-1] + flatten_val * (1 if delta > 0 else -1)
+
+        # --- 5) Reconstruct elevation profile ---
+        new_ele = [0.0] * n
+        new_ele[0] = gpx_data[0]["ele"]
         for i in range(1, n):
-            old_ele = gpx_data[i]["ele"]  # nur debug
-            new_ele = gpx_data[i-1]["ele"] + (dist2d[i]*(slope_smooth[i]/100))
-            gpx_data[i]["ele"] = new_ele
+            new_ele[i] = new_ele[i-1] + dist_m[i] * (slope_smooth[i] / 100.0)
+
+        # --- 6) Linear drift correction (keep start & end) ---
+        orig_start = gpx_data[0]["ele"]
+        orig_end   = gpx_data[-1]["ele"]
+        new_end    = new_ele[-1]
+        drift = new_end - orig_end
+
+        if abs(drift) > 1e-6:
+            for i in range(n):
+                t = i / (n - 1)
+                new_ele[i] -= drift * t
+
+        # --- 7) Baseline correction: lift so min(new_ele) ≈ min(original) ---
+        orig_min = min(p["ele"] for p in gpx_data)
+        new_min = min(new_ele)
+        offset = orig_min - new_min
+
+        # Apply offset so the lowest point matches baseline
+        if abs(offset) > 1e-3:
+            new_ele = [e + offset for e in new_ele]
+
+        # --- 8) Write back ---
+        for i in range(n):
+            gpx_data[i]["ele"] = new_ele[i]
+
+
+
         
     # ===========  NEU am Ende von mainwindow.py ============    
     

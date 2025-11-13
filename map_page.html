@@ -1323,11 +1323,7 @@
       if(do_center){
         let c= f.getGeometry().getCoordinates();
         map.getView().animate({center:c,duration:600});
-      } else {
-        if(videoIsPlaying){
-          checkAndCenterIfNeeded(index,50);
-        }
-      }
+      } 
     }
     
 	
