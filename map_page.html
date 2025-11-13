@@ -1346,7 +1346,8 @@
     }
     function checkAndCenterIfNeeded(index, marginPx=50){
       let f= featuresMapIndex[index];
-      if(!f) return;
+      const isLast = index === featuresMapIndex.length - 1;
+      if(!f || isLast) return;
       let coords= f.getGeometry().getCoordinates();
       let pixel= map.getPixelFromCoordinate(coords);
       let size= map.getSize();
