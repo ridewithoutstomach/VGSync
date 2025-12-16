@@ -1681,9 +1681,25 @@ class GPXControlWidget(QWidget):
         start = 0
         for i in range(1, n):
             if dist_m[i] > CUT_DIST_M:
+                print(f"[DEBUG] Segment cut at index {i} (dist={dist_m[i]:.1f}m)")
                 segments.append((start, i-1))
                 start = i
         segments.append((start, n-1))
+
+        # --- Vertical realignment at cuts ---
+        for seg_idx in range(1, len(segments)):
+            prev_start, prev_end = segments[seg_idx - 1]
+            cur_start, cur_end   = segments[seg_idx]
+
+            # trusted elevation before cut
+            anchor_ele = gpx_data[prev_end]["ele"]
+
+            # elevation jump at segment start
+            delta = anchor_ele - gpx_data[cur_start]["ele"]
+
+            # shift entire segment
+            for i in range(cur_start, cur_end + 1):
+                gpx_data[i]["ele"] += delta
 
         # --- 3) Process each segment independently ---
         for seg_start, seg_end in segments:
@@ -1742,6 +1758,19 @@ class GPXControlWidget(QWidget):
             # --- write back only segment ---
             for j in range(length):
                 gpx_data[seg_start + j]["ele"] = new_ele[j]
+
+            # --- Post-smoothing realignment ---
+            for seg_idx in range(1, len(segments)):
+                prev_start, prev_end = segments[seg_idx - 1]
+                cur_start, cur_end   = segments[seg_idx]
+
+                anchor_ele = gpx_data[prev_end]["ele"]
+                delta = anchor_ele - gpx_data[cur_start]["ele"]
+
+                # optional safety threshold
+                if abs(delta) < 30.0:
+                    for i in range(cur_start, cur_end + 1):
+                        gpx_data[i]["ele"] += delta
 
 
 
