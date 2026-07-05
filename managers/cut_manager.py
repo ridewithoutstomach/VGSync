@@ -33,7 +33,7 @@ class VideoCutManager(QObject):
         self.markE_time_s = -1.0
         self._cut_intervals = []
         self._skip_timer = QTimer(self)
-        #self._skip_timer.timeout.connect(self._check_cut_skip)
+        self._skip_timer.timeout.connect(self._check_cut_skip)
         self._skip_timer.start(200)
 
         self.video_durations = []
@@ -120,8 +120,47 @@ class VideoCutManager(QObject):
 
     def get_cut_intervals(self):
         return self._cut_intervals
-    
-    
+
+    def _check_cut_skip(self):
+        """
+        Wird periodisch (200ms-Timer) waehrend der Wiedergabe aufgerufen und
+        laesst den Player ueber geschnittene (schwarze) Bereiche hinwegspringen,
+        damit der User nur das Ergebnis seines Schnitts sieht.
+
+        WICHTIG: Der End-Cut (ein Schnitt, der bis ans Timeline-Ende reicht)
+        wird hier bewusst NICHT behandelt. Das uebernimmt ausschliesslich
+        check_and_handle_video_end() im MainWindow (Sprung ans Ende des letzten
+        Keep-Segments). So gibt es am Videoende keine Konkurrenz zwischen beiden
+        Mechanismen.
+        """
+        # 1) Prüfen, ob mpv überhaupt ein File abspielt
+        if not self._has_active_file():
+            return  # => Kein Skip, da kein aktives Video
+
+        current_global_s = self._get_current_global_time()
+        skip_target = self._find_skip_target(current_global_s)
+
+        # 2) End-Cut aussparen: liegt das Sprungziel praktisch am Timeline-Ende,
+        #    ueberlassen wir das dem End-Handler und springen hier nicht.
+        if skip_target is not None:
+            video_total = sum(self.video_durations) if self.video_durations else 0.0
+            if video_total > 0.0 and skip_target >= video_total - 0.05:
+                skip_target = None
+
+        if skip_target is not None:
+            if self._is_repeated_skip_target(skip_target):
+                return
+
+            was_playing = self.video_editor.is_playing
+            self._set_global_time_s(skip_target)
+            self._last_skip_target = skip_target
+
+            # NUR wenn wir wirklich vorher gespielt haben, wieder abspielen
+            if was_playing:
+                self._play_after_skip()
+        else:
+            self._last_skip_target = None
+
     def _has_active_file(self) -> bool:
         """Prüft, ob mpv noch eine gültige Datei (playlist/current_index) geladen hat."""
         # 1) Hat der VideoEditor eine Playlist?

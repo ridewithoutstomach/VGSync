@@ -6408,6 +6408,28 @@ class MainWindow(QMainWindow):
         if not out_path:
             return
 
+        # --- 2b) Sonderfall: GPX ohne Video ---
+        # Ist kein Video geladen, gibt es keine Videolänge/keinen Video-Sync, auf
+        # den die GPX gekürzt werden müsste. Die Truncation-Logik unten würde in
+        # diesem Fall auf die Videolänge 0 kürzen und faelschlich
+        # "no meaningful GPX remains" melden. Deshalb speichern wir hier die GPX
+        # unveraendert und sind fertig. Mit geladenem Video bleibt alles wie bisher.
+        if not getattr(self, "playlist", None):
+            self._save_gpx_to_file(gpx_data, out_path)
+
+            ret = self._increment_counter_on_server("gpx")
+            if ret is not None:
+                vcount, gcount = ret
+                print(f"[INFO] Server-Counter nun: Video={vcount}, GPX={gcount}")
+            else:
+                print("[WARN] Konnte GPX-Zähler nicht hochsetzen.")
+
+            QMessageBox.information(
+                self, "Done",
+                f"No video loaded – GPX saved unchanged (no cut to video length) as '{out_path}'."
+            )
+            return
+
         # --- 3) Nullpunkt (Video-Start) bestimmen ---
         try:
             shift = get_gpx_video_shift()
