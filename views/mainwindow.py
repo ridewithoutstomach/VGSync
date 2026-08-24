@@ -2593,12 +2593,23 @@ class MainWindow(QMainWindow):
                 print("[DEBUG] Cut-Bereich zu klein, Abbruch. Start:", start_global, "Ende:", end_global)
                 return
 
-            # final times (vor dem Anlegen des Cuts!!) -> damit das Mapping korrekt ist
-            final_start = self.get_final_time_for_global(start_global)
-            final_end = self.get_final_time_for_global(end_global)
-            
-            # 🔥 END-CUT ERKENNUNG
+            # 🔥 END-CUT ERKENNUNG (muss VOR dem Mapping stehen, siehe unten)
             is_end_cut = abs(end_global - total_dur) < 0.1  # Toleranz 0.1 Sekunden
+
+            # Ein neuer End-Schnitt ersetzt den alten. Fuer die Umrechnung
+            # muessen wir den alten End-Schnitt deshalb schon ausblenden -
+            # sonst laege start_global bei einem nach hinten verschobenen Ende
+            # innerhalb des alten Cuts und wuerde falsch abgebildet.
+            mapping_cuts = self.cut_manager._cut_intervals
+            if is_end_cut:
+                mapping_cuts = [
+                    iv for iv in self.cut_manager._cut_intervals
+                    if not self.cut_manager.is_end_cut(iv[1])
+                ]
+
+            # final times (vor dem Anlegen des Cuts!!) -> damit das Mapping korrekt ist
+            final_start = self.get_final_time_for_global(start_global, mapping_cuts)
+            final_end = self.get_final_time_for_global(end_global, mapping_cuts)
             print(f"[DEBUG] on_cut_clicked_video => captured marks: global [{start_global:.3f}..{end_global:.3f}] -> final [{final_start:.3f}..{final_end:.3f}], is_end_cut={is_end_cut}")
         
             # Undo-Snapshots (GPX + Video)
@@ -4642,34 +4653,6 @@ class MainWindow(QMainWindow):
    
         
 
-    def _compute_keep_intervals(self, cut_intervals, total_duration):
-        if not cut_intervals:
-            return [(0.0, total_duration)]
-
-        sorted_cuts = sorted(cut_intervals, key=lambda x: x[0])
-        merged = []
-        current_start, current_end = sorted_cuts[0]
-        for i in range(1, len(sorted_cuts)):
-            (st, en) = sorted_cuts[i]
-            if st <= current_end:
-                if en > current_end:
-                    current_end = en
-            else:
-                merged.append((current_start, current_end))
-                current_start, current_end = st, en
-        merged.append((current_start, current_end))
-
-        keep_list = []
-        pos = 0.0
-        for (cst, cen) in merged:
-            if cst > pos:
-                keep_list.append((pos, cst))
-            pos = cen
-        if pos < total_duration:
-            keep_list.append((pos, total_duration))
-
-        return keep_list
-
     def _resolve_partial_intervals(self, global_start, global_end):
         results = []
         if global_end <= global_start:
@@ -4729,13 +4712,19 @@ class MainWindow(QMainWindow):
         else:
             super(MainWindow, self).keyPressEvent(event)
 
-    def get_final_time_for_global(self, global_s: float) -> float:
+    def get_final_time_for_global(self, global_s: float, cut_intervals=None) -> float:
         """
         Konvertiert 'global_s' (Rohvideo-Zeit) => 'final_s' (geschnittenes Video).
         Liegen wir exakt auf dem Start eines Cuts, springen wir an den Endpunkt
         des vorherigen Keep-Segments.
+
+        cut_intervals: normalerweise None => die aktuellen Schnitte. Beim
+        Ersetzen eines End-Schnitts muss der alte End-Schnitt hier aber schon
+        ausgeblendet sein, sonst laege der neue Startpunkt "im Cut" und wuerde
+        auf das Ende des davorliegenden Keep-Segments abgebildet.
         """
-        cut_intervals = self.cut_manager._cut_intervals
+        if cut_intervals is None:
+            cut_intervals = self.cut_manager._cut_intervals
         total_dur = self.real_total_duration
         if not cut_intervals:
             return min(global_s, total_dur)
@@ -6326,9 +6315,11 @@ class MainWindow(QMainWindow):
         if not self.video_durations:
             return 0.0
         original_total = sum(self.video_durations)
-        cut_total = original_total
-        for start, end in self.cut_manager._cut_intervals:
-            cut_total -= (end - start)
+        # get_total_cuts() fasst ueberlappende Schnitte zusammen. Wuerde man
+        # hier stur jedes Intervall abziehen, kaeme bei zwei ueberlappenden
+        # End-Schnitten 0.0 heraus - und on_save_gpx_clicked() wuerde dann
+        # jeden GPX-Punkt verwerfen ("no meaningful GPX remains").
+        cut_total = original_total - self.cut_manager.get_total_cuts()
         return max(0.0, cut_total)
 
     def save_recent_file(self, path: str):
@@ -6407,6 +6398,16 @@ class MainWindow(QMainWindow):
         )
         if not out_path:
             return
+
+        # Gibt der User nur "Test" ein, wuerde ohne Endung gespeichert.
+        # Gleiches Verhalten wie beim Video-Export und beim Projekt-Speichern.
+        if not out_path.lower().endswith('.gpx'):
+            out_path += '.gpx'
+            QMessageBox.information(
+                self,
+                "File Extension Added!",
+                f"Added '.gpx' extension to filename:\n{os.path.basename(out_path)}"
+            )
 
         # --- 2b) Sonderfall: GPX ohne Video ---
         # Ist kein Video geladen, gibt es keine Videolänge/keinen Video-Sync, auf

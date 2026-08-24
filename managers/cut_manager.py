@@ -94,6 +94,12 @@ class VideoCutManager(QObject):
         if (end_s - start_s) < 0.01:
             print("[DEBUG] Cut-Bereich zu klein, Abbruch. Start:", start_s, "Ende:", end_s)
             return
+        # Ein neuer End-Schnitt ERSETZT einen vorhandenen End-Schnitt,
+        # er kommt nicht zusaetzlich dazu. Sonst waere der ueberlappende
+        # Bereich doppelt gezaehlt und ein spaeteres Ende nicht einstellbar.
+        if self.is_end_cut(end_s):
+            self.remove_end_cut_intervals()
+
         print(f"[DEBUG] CUT hinzugefügt: ({start_s:.3f}, {end_s:.3f})")
         self._cut_intervals.append((start_s, end_s))
         self.timeline.add_cut_interval(start_s, end_s)
@@ -111,15 +117,70 @@ class VideoCutManager(QObject):
             self.timeline.set_markB_time(-1)
             self.timeline.set_markE_time(-1)
 
+    def get_merged_cut_intervals(self):
+        """
+        Gibt die Schnitte zurueck, wobei ueberlappende bzw. aneinander
+        stossende Bereiche zu einem zusammengefasst werden.
+
+        Ohne dieses Zusammenfassen wuerde ein doppelt geschnittener Bereich
+        auch doppelt gezaehlt - die Restlaenge waere dann zu klein oder sogar
+        negativ. Dieselbe Logik nutzt _compute_keep_intervals() im MainWindow.
+        """
+        if not self._cut_intervals:
+            return []
+
+        sorted_cuts = sorted(self._cut_intervals, key=lambda x: x[0])
+        merged = []
+        cur_start, cur_end = sorted_cuts[0]
+        for (st, en) in sorted_cuts[1:]:
+            if st <= cur_end:
+                if en > cur_end:
+                    cur_end = en
+            else:
+                merged.append((cur_start, cur_end))
+                cur_start, cur_end = st, en
+        merged.append((cur_start, cur_end))
+        return merged
+
     def get_total_cuts(self) -> float:
         total_cut = 0.0
-        for (start_s, end_s) in self._cut_intervals:
+        for (start_s, end_s) in self.get_merged_cut_intervals():
             total_cut += (end_s - start_s)
         print(f"[DEBUG] get_total_cuts => {total_cut:.3f}")
         return total_cut
 
     def get_cut_intervals(self):
         return self._cut_intervals
+
+    def is_end_cut(self, end_s: float, eps: float = 0.1) -> bool:
+        """True, wenn end_s bis ans Ende des Gesamtvideos reicht."""
+        video_total = sum(self.video_durations)
+        return abs(end_s - video_total) < eps
+
+    def remove_end_cut_intervals(self, eps: float = 0.1) -> list:
+        """
+        Entfernt vorhandene End-Schnitte (Schnitte, die bis ans Videoende
+        reichen) und aktualisiert die Timeline.
+
+        Gegenstueck zu on_set_begin_clicked() im MainWindow, das denselben
+        Austausch fuer den Anfangsschnitt macht. Ohne das wuerde ein zweiter
+        End-Schnitt zusaetzlich angelegt statt den ersten zu ersetzen - und
+        ein spaeteres Videoende liesse sich gar nicht mehr einstellen.
+
+        Gibt die entfernten Intervalle zurueck.
+        """
+        removed = [iv for iv in self._cut_intervals if self.is_end_cut(iv[1], eps)]
+        if not removed:
+            return []
+
+        for iv in removed:
+            self._cut_intervals.remove(iv)
+        print(f"[DEBUG] vorhandene End-Cuts ersetzt: {removed}")
+
+        self.timeline.clear_all_cuts()
+        for (a, b) in self._cut_intervals:
+            self.timeline.add_cut_interval(a, b)
+        return removed
 
     def _check_cut_skip(self):
         """

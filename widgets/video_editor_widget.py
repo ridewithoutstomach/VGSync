@@ -507,7 +507,10 @@ class VideoEditorWidget(QWidget):
         self._player.command("frame-step")
 
     def frame_step_backward(self):
-        self._player.command("frame-step", -1)
+        # mpv hat fuer den Rueckwaertsschritt einen EIGENEN Befehl.
+        # "frame-step" nimmt kein Argument -> "frame-step", -1 wurde von mpv
+        # mit MPV_ERROR_INVALID_PARAMETER (-4) abgelehnt, es passierte nichts.
+        self._player.command("frame-back-step")
 
     # -----------------------------------------
     # Playlist-Funktionen
