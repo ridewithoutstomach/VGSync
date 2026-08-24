@@ -30,7 +30,7 @@ from PySide6.QtCore import QSettings
 # 1) Versions-Konfiguration & Modus
 ##############################################################################
 
-APP_VERSION = "4.34"
+APP_VERSION = "4.35"
 # use 4.30_pre for a pre Version
 
 

@@ -1,5 +1,13 @@
 altgraph==0.17.4
 fitparse==1.2.0
+# TODO: gpxpy noch entfernen - wird nirgends gebraucht.
+# Geprueft: kein Vorkommen im gesamten Quellcode, keine dynamischen Importe,
+# hiddenimports=[] in allen .spec-Dateien, kein Paket verlangt es.
+# GPX wird von core/gpx_parser.py mit xml.etree.ElementTree selbst geparst.
+# Herkunft: das geloeschte Experiment core/gpmf_parser.py (GoPro-Metadaten)
+# benutzte gpxpy; nur dessen .pyc liegt noch in core/__pycache__/.
+# Ohne gpxpy getestet: App startet, Encoder liefert bitgleiches Ergebnis.
+# Vor dem Entfernen noch unter Windows gegenpruefen (EXE-Build).
 gpxpy==1.6.2
 packaging==24.2
 pefile==2023.2.7
