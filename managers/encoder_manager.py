@@ -505,6 +505,21 @@ gpu_map_intel = {
     "veryslow":  "slower"
 }
 
+# VAAPI kennt kein -preset, sondern -quality als Ganzzahl:
+# hoeherer Wert = schneller (siehe "ffmpeg -h encoder=h264_vaapi").
+# Wir spiegeln damit dieselbe Skala wie bei den anderen Encodern.
+gpu_map_vaapi = {
+    "ultrafast": "7",
+    "superfast": "7",
+    "veryfast":  "6",
+    "faster":    "5",
+    "fast":      "4",
+    "medium":    "4",
+    "slow":      "3",
+    "slower":    "2",
+    "veryslow":  "1"
+}
+
 def map_preset_for_gpu(user_preset, hw_encode):
     if not user_preset:
         return None
@@ -516,6 +531,8 @@ def map_preset_for_gpu(user_preset, hw_encode):
         return gpu_map_amd.get(up,"balanced")
     elif hw_lc.startswith("intel_"):
         return gpu_map_intel.get(up,"medium")
+    elif hw_lc.startswith("vaapi_"):
+        return gpu_map_vaapi.get(up,"4")
     return user_preset
     
 
@@ -535,7 +552,9 @@ def determine_encoder(cpu_encoder="libx265", hw_encode=None):
         "amd_h264":"h264_amf",
         "amd_hevc":"hevc_amf",
         "intel_h264":"h264_qsv",
-        "intel_hevc":"hevc_qsv"
+        "intel_hevc":"hevc_qsv",
+        "vaapi_h264":"h264_vaapi",
+        "vaapi_hevc":"hevc_vaapi"
     }
     val= hw_map.get(hw_encode.lower(),"")
     if not val:
@@ -564,6 +583,148 @@ def clamp_crf(crf_val):
     if crf_val<0: crf_val=0
     if crf_val>51: crf_val=51
     return crf_val
+
+###############################################################################
+# 5b) VAAPI-Hilfen (Linux: Intel-iGPU und AMD)
+###############################################################################
+
+_cached_vaapi_device = "unset"
+
+def is_vaapi(hw_encode):
+    return (hw_encode or "").lower().startswith("vaapi_")
+
+def find_vaapi_device():
+    """
+    Sucht den ersten VAAPI-Renderknoten (/dev/dri/renderD128, ...).
+    Gibt den Pfad zurueck oder None. Ergebnis wird gecacht.
+    """
+    global _cached_vaapi_device
+    if _cached_vaapi_device != "unset":
+        return _cached_vaapi_device
+    dev = None
+    try:
+        import glob as _glob
+        nodes = sorted(_glob.glob("/dev/dri/renderD*"))
+        if nodes:
+            dev = nodes[0]
+    except Exception as e:
+        print("[WARN] find_vaapi_device failed:", e)
+    _cached_vaapi_device = dev
+    return dev
+
+def vaapi_input_args(hw_encode):
+    """
+    Globale Argumente, die VOR dem Input stehen muessen.
+    Nur fuer VAAPI belegt, sonst leer -> andere Encoder bleiben unveraendert.
+    """
+    if not is_vaapi(hw_encode):
+        return []
+    dev = find_vaapi_device()
+    if not dev:
+        print("[WARN] VAAPI selected but no /dev/dri/renderD* found")
+        return []
+    return ["-vaapi_device", dev]
+
+# VAAPI-Encoder nehmen keine Software-Frames entgegen: die Filterkette
+# muss auf format=nv12,hwupload enden.
+VAAPI_FILTER_SUFFIX = "format=nv12,hwupload"
+
+def vaapi_vf(hw_encode, filter_str):
+    """
+    Haengt den hwupload-Schritt an einen -vf Ausdruck an (oder erzeugt ihn).
+    Fuer Nicht-VAAPI wird filter_str unveraendert zurueckgegeben.
+    """
+    if not is_vaapi(hw_encode):
+        return filter_str
+    if filter_str:
+        return f"{filter_str},{VAAPI_FILTER_SUFFIX}"
+    return VAAPI_FILTER_SUFFIX
+
+def vaapi_pixfmt_args(hw_encode):
+    """
+    "-pix_fmt yuv420p" ist mit VAAPI-Hardwareframes unvereinbar.
+    Liefert die bisherigen Argumente fuer alle anderen Encoder.
+    """
+    if is_vaapi(hw_encode):
+        return []
+    return ["-pix_fmt", "yuv420p"]
+
+###############################################################################
+# 5c) GPU-Encode-Parameter je Encoder-Familie
+###############################################################################
+
+def get_gpu_encode_params(hw_encode, crf, preset, bitrate_mbps, rc_flag="-rc"):
+    """
+    Uebersetzt die generischen Einstellungen (CRF, Preset, Bitrate) in die
+    Optionen, die der jeweilige Hardware-Encoder tatsaechlich kennt.
+
+    NVENC  : -rc vbr_hq -cq N   -preset <hp/hq/...>   (unveraendert wie bisher)
+    QSV    : -global_quality N  -preset <veryfast/...>
+    AMF    : -rc cqp -qp_i/-qp_p/-qp_b N   -quality <speed/balanced/quality>
+    VAAPI  : -rc_mode CQP -qp N -quality <1..7>
+
+    Die CRF-Zahl wird bei allen als Qualitaetswert durchgereicht, damit
+    dieselbe Einstellung ueberall dieselbe Bildqualitaet meint.
+
+    rc_flag existiert nur, um die bisherige Schreibweise der Aufrufstellen
+    exakt beizubehalten ("-rc:v" in encode_closedgop, "-rc" in den anderen).
+    """
+    hw = (hw_encode or "").lower()
+    qv = clamp_crf(crf)
+    real_preset = map_preset_for_gpu(preset, hw_encode)
+    p_extra = get_gpu_closedgop_params(hw_encode)
+
+    br_args = []
+    if bitrate_mbps:
+        br = f"{bitrate_mbps}M"
+        br_args = ["-b:v", br, "-maxrate", br, "-bufsize", f"{bitrate_mbps * 2}M"]
+
+    if hw.startswith("nvidia_"):
+        args = [rc_flag, "vbr_hq", "-cq", str(qv)]
+        if real_preset:
+            args += ["-preset", real_preset]
+        args += p_extra + br_args
+        print(f"[DEBUG] GPU(NVENC) => vbr_hq + -cq={qv}")
+        return args
+
+    if hw.startswith("intel_"):
+        # QSV kennt weder -rc noch -cq; Qualitaet laeuft ueber -global_quality
+        args = ["-global_quality", str(qv)]
+        if real_preset:
+            args += ["-preset", real_preset]
+        args += p_extra
+        print(f"[DEBUG] GPU(QSV) => -global_quality={qv}")
+        return args
+
+    if hw.startswith("amd_"):
+        # AMF kennt weder vbr_hq noch -cq; konstante Qualitaet = cqp
+        args = ["-rc", "cqp",
+                "-qp_i", str(qv), "-qp_p", str(qv), "-qp_b", str(qv)]
+        if real_preset:
+            args += ["-quality", real_preset]
+        args += p_extra
+        print(f"[DEBUG] GPU(AMF) => cqp + -qp={qv}")
+        return args
+
+    if hw.startswith("vaapi_"):
+        # VAAPI kennt weder -rc/-cq noch -preset.
+        # Achtung: -quality gibt es nur bei h264_vaapi, NICHT bei hevc_vaapi
+        # (geprueft mit "ffmpeg -h encoder=hevc_vaapi"). Ein -quality wuerde
+        # dort zum Abbruch fuehren, deshalb nur fuer H.264 setzen.
+        args = ["-rc_mode", "CQP", "-qp", str(qv)]
+        if real_preset and hw == "vaapi_h264":
+            args += ["-quality", str(real_preset)]
+        args += p_extra
+        print(f"[DEBUG] GPU(VAAPI) => CQP + -qp={qv}")
+        return args
+
+    # Unbekannte GPU-Kennung: wie bisher NVENC-Schreibweise verwenden
+    args = [rc_flag, "vbr_hq", "-cq", str(qv)]
+    if real_preset:
+        args += ["-preset", real_preset]
+    args += p_extra + br_args
+    print(f"[DEBUG] GPU(?) => vbr_hq + -cq={qv}")
+    return args
 
 ###############################################################################
 # 6) SCALE-FILTER
@@ -597,7 +758,8 @@ def encode_closedgop(
     filter_str= build_scale_filter(width)
 
     cmd=[
-        "ffmpeg","-hide_banner","-y",
+        "ffmpeg","-hide_banner","-y"
+    ] + vaapi_input_args(hw_encode) + [
         "-f","concat","-safe","0",
         "-i", concat_file,
         "-an"
@@ -622,24 +784,14 @@ def encode_closedgop(
         
 
     else:
-        # => GPU => pseudo CRF => vbr_hq + -cq
-        # clamp 0..51
-        qv= clamp_crf(crf)
-        p_extra= get_gpu_closedgop_params(hw_encode)
-        cmd+=["-c:v", enc_name,
-              "-rc:v","vbr_hq",
-              "-cq", str(qv)]
-        if real_preset:
-            cmd+= ["-preset", real_preset]
-        cmd+= p_extra
-        if bitrate_mbps:
-            br = f"{bitrate_mbps}M"
-            cmd += ["-b:v", br, "-maxrate", br, "-bufsize", f"{bitrate_mbps * 2}M"]
-        print(f"[DEBUG] GPU => vbr_hq + -cq={qv}")
-        
+        # => GPU => Parameter je Encoder-Familie (NVENC unveraendert wie bisher)
+        cmd+= ["-c:v", enc_name]
+        cmd+= get_gpu_encode_params(hw_encode, crf, preset, bitrate_mbps,
+                                    rc_flag="-rc:v")
 
     if fps:
         cmd+= ["-r", str(fps)]
+    filter_str= vaapi_vf(hw_encode, filter_str)
     if filter_str:
         cmd+= ["-vf", filter_str]
 
@@ -758,11 +910,15 @@ def crossfade_2(
     else:
         filter_complex.append("[0:v]format=yuv420p[v0]")
         filter_complex.append("[1:v]format=yuv420p[v1]")
-    filter_complex.append(f"[v0][v1]xfade=transition=fade:duration={overlap}:offset=0[vout]")
+    xfade_chain= f"xfade=transition=fade:duration={overlap}:offset=0"
+    if is_vaapi(hw_encode):
+        xfade_chain= f"{xfade_chain},{VAAPI_FILTER_SUFFIX}"
+    filter_complex.append(f"[v0][v1]{xfade_chain}[vout]")
     flt=";".join(filter_complex)
 
     cmd=[
-        "ffmpeg","-hide_banner","-y",
+        "ffmpeg","-hide_banner","-y"
+    ] + vaapi_input_args(hw_encode) + [
         "-i",inA,
         "-i",inB,
         "-filter_complex",flt,
@@ -781,21 +937,13 @@ def crossfade_2(
             cmd += ["-b:v", br, "-maxrate", br, "-bufsize", f"{bitrate_mbps * 2}M"]
         print(f"[DEBUG] CROSSFADE => CPU => CRF={crf}")
     else:
-        # GPU => pseudo CRF => vbr_hq -cq crf
-        qv= clamp_crf(crf)
-        p_extra= get_gpu_closedgop_params(hw_encode)
-        cmd+= ["-c:v", enc_name, "-rc","vbr_hq", "-cq", str(qv)]
-        if real_preset:
-            cmd+= ["-preset", real_preset]
-        cmd+= p_extra
-        if bitrate_mbps:
-            br = f"{bitrate_mbps}M"
-            cmd += ["-b:v", br, "-maxrate", br, "-bufsize", f"{bitrate_mbps * 2}M"]
-        print(f"[DEBUG] CROSSFADE => GPU => -cq={qv}")
+        # GPU => Parameter je Encoder-Familie (NVENC unveraendert wie bisher)
+        cmd+= ["-c:v", enc_name]
+        cmd+= get_gpu_encode_params(hw_encode, crf, preset, bitrate_mbps)
 
     if fps:
         cmd+=["-r",str(fps)]
-    cmd+=["-pix_fmt","yuv420p","-an", outname]
+    cmd+= vaapi_pixfmt_args(hw_encode) + ["-an", outname]
     print("CROSSFADE_2:", " ".join(cmd))
     #subprocess.run(cmd,check=True)
     run_command_gui(cmd, log_func=print)
@@ -882,14 +1030,18 @@ def overlay_segment_encode(
         filter_complex.append("[0:v]format=yuv420p[vbase]")
     x_str= str(x)
     y_str= str(y)
-    overlay_str= f"{base_in}[ov1]overlay=x={x_str}:y={y_str}:format=auto[vout]"
+    overlay_chain= f"overlay=x={x_str}:y={y_str}:format=auto"
+    if is_vaapi(hw_encode):
+        overlay_chain= f"{overlay_chain},{VAAPI_FILTER_SUFFIX}"
+    overlay_str= f"{base_in}[ov1]{overlay_chain}[vout]"
     filter_complex.append(overlay_str)
 
     fc_str= ";".join(filter_complex)
 
     overlay_input_args= _build_overlay_input_args(overlay_image)
     cmd=[
-        "ffmpeg","-hide_banner","-y",
+        "ffmpeg","-hide_banner","-y"
+    ]+ vaapi_input_args(hw_encode) + [
         "-i", in_segment
     ]+ overlay_input_args + [
         "-filter_complex", fc_str,
@@ -913,21 +1065,13 @@ def overlay_segment_encode(
             cmd += ["-b:v", br, "-maxrate", br, "-bufsize", f"{bitrate_mbps * 2}M"]
         print(f"[DEBUG] overlay => CPU => CRF={crf}")
     else:
-        # GPU => pseudo CRF => vbr_hq -cq
-        qv= clamp_crf(crf)
-        p_extra= get_gpu_closedgop_params(hw_encode)
-        cmd+= ["-c:v", enc_name, "-rc","vbr_hq","-cq", str(qv)]
-        if real_preset:
-            cmd+= ["-preset", real_preset]
-        cmd+= p_extra
-        if bitrate_mbps:
-            br = f"{bitrate_mbps}M"
-            cmd += ["-b:v", br, "-maxrate", br, "-bufsize", f"{bitrate_mbps * 2}M"]
-        print(f"[DEBUG] overlay => GPU => -cq={qv}")
+        # GPU => Parameter je Encoder-Familie (NVENC unveraendert wie bisher)
+        cmd+= ["-c:v", enc_name]
+        cmd+= get_gpu_encode_params(hw_encode, crf, preset, bitrate_mbps)
 
     if fps:
         cmd+=["-r",str(fps)]
-    cmd+=["-pix_fmt","yuv420p","-an", out_segment]
+    cmd+= vaapi_pixfmt_args(hw_encode) + ["-an", out_segment]
 
     print("OVERLAY_SEGMENT_ENCODE:", " ".join(cmd))
     #subprocess.run(cmd,check=True)

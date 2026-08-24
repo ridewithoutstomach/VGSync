@@ -21,6 +21,8 @@
 
 # core/hardware_detect.py
 import subprocess
+import platform
+import glob
 
 _cached_encoders = None  # Global Cache
 _cached_already_printed_debug = False
@@ -65,6 +67,16 @@ def detect_available_hw_encoders(ffmpeg_path="ffmpeg"):
         encoders_found.add("intel_h264")
     if "hevc_qsv" in output:
         encoders_found.add("intel_hevc")
+
+    # VAAPI: unter Linux der uebliche Weg fuer Intel-iGPUs UND AMD-Karten.
+    # Jeder Linux-ffmpeg listet VAAPI, auch ohne passende Hardware. Deshalb
+    # zusaetzlich pruefen, ob ueberhaupt ein Render-Knoten existiert.
+    # (Der echte Beweis bleibt der "Detect HW"-Knopf, der real encodiert.)
+    if platform.system() == "Linux" and glob.glob("/dev/dri/renderD*"):
+        if "h264_vaapi" in output:
+            encoders_found.add("vaapi_h264")
+        if "hevc_vaapi" in output:
+            encoders_found.add("vaapi_hevc")
 
     print("[DEBUG] => GPU encoders found:", encoders_found)
     _cached_encoders = encoders_found

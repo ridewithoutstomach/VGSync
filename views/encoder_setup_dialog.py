@@ -56,15 +56,35 @@ def can_encode_with(ffmpeg_enc_name, ffmpeg_path="ffmpeg", test_duration=0.5):
         pass
 
     try:
-        cmd = [
-            ffmpeg_path, "-hide_banner", "-y",
-            "-f", "lavfi",
-            "-i", "color=black:r=24:size=320x240",
-            "-t", str(test_duration),
-            "-c:v", ffmpeg_enc_name,
-            "-an",
-            out_path
-        ]
+        if ffmpeg_enc_name.endswith("_vaapi"):
+            # VAAPI-Encoder nehmen keine Software-Frames entgegen. Ohne
+            # -vaapi_device und hwupload scheitert der Test IMMER, auch auf
+            # funktionierender Hardware. Deshalb hier der passende Aufbau.
+            import glob as _glob
+            nodes = sorted(_glob.glob("/dev/dri/renderD*"))
+            if not nodes:
+                return False
+            cmd = [
+                ffmpeg_path, "-hide_banner", "-y",
+                "-vaapi_device", nodes[0],
+                "-f", "lavfi",
+                "-i", "color=black:r=24:size=320x240",
+                "-t", str(test_duration),
+                "-vf", "format=nv12,hwupload",
+                "-c:v", ffmpeg_enc_name,
+                "-an",
+                out_path
+            ]
+        else:
+            cmd = [
+                ffmpeg_path, "-hide_banner", "-y",
+                "-f", "lavfi",
+                "-i", "color=black:r=24:size=320x240",
+                "-t", str(test_duration),
+                "-c:v", ffmpeg_enc_name,
+                "-an",
+                out_path
+            ]
         subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         return True
     except Exception:
@@ -296,9 +316,9 @@ class EncoderSetupDialog(QDialog):
 
         # Filtern je Container
         if container == "x264":
-            allowed = {"CPU", "nvidia_h264", "amd_h264", "intel_h264"}
+            allowed = {"CPU", "nvidia_h264", "amd_h264", "intel_h264", "vaapi_h264"}
         else:
-            allowed = {"CPU", "nvidia_hevc", "amd_hevc", "intel_hevc"}
+            allowed = {"CPU", "nvidia_hevc", "amd_hevc", "intel_hevc", "vaapi_hevc"}
 
         final_hw = all_hw_encoders.intersection(allowed)
         if not final_hw:
@@ -344,6 +364,8 @@ class EncoderSetupDialog(QDialog):
             "amd_hevc":    "hevc_amf",
             "intel_h264":  "h264_qsv",
             "intel_hevc":  "hevc_qsv",
+            "vaapi_h264":  "h264_vaapi",
+            "vaapi_hevc":  "hevc_vaapi",
         }
 
         working = {"CPU"}  # CPU immer
