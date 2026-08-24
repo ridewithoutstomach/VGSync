@@ -43,3 +43,6 @@ mpv/*
 !mpv/
 !mpv/VGSync_mpv.txt
 config.js
+
+# interne Notizen, nicht ausliefern
+IDEE_concat_inpoint_outpoint.md

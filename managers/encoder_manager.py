@@ -411,6 +411,72 @@ def pre_trim_input_videos(videos, keep_segments, temp_dir):
     return result_files, timeline_map
     
     
+def measure_real_duration(path):
+    """
+    Liefert die TATSAECHLICHE Inhaltsdauer einer Datei (Frames x Framedauer).
+
+    Warum nicht die Container-Angabe?
+    Wird eine Datei mit "-ss" auf eine Position geschnitten, die kein Keyframe
+    ist, schleppt sie die Vorlauf-Pakete ab dem letzten Keyframe mit. Container
+    und nb_frames zaehlen diese mit, obwohl sie beim Abspielen uebersprungen
+    werden. Gemessen an GX010089.MP4, Schnitt bei 2018.884 s:
+
+        tatsaechlich dekodierbar : 2853 Frames = 95.195 s
+        format=duration          : 96.096 s   (0.901 s zu viel)
+        stream=nb_frames         : 2880       (27 Frames zu viel)
+
+    Der Concat-Demuxer glaubt der Container-Angabe und setzt die naechste Datei
+    dadurch fast eine Sekunde zu spaet an. Beim anschliessenden Neukodieren
+    wird die Luecke mit einem stehenden Bild gefuellt -> sichtbarer Ruckler an
+    der Nahtstelle zwischen zwei Videos.
+
+    Gemessen wird ueber den Zeitstempel des LETZTEN Frames plus eine
+    Framedauer. Alle Frames zu zaehlen ("-count_frames") liefert dasselbe
+    Ergebnis, dauert bei einer 4K-Datei dieses Umfangs aber ueber anderthalb
+    Minuten statt gut drei Sekunden.
+
+    Gibt None zurueck, wenn die Messung nicht moeglich ist; der Aufrufer
+    verhaelt sich dann wie bisher.
+    """
+    try:
+        # 1) Bildrate und Container-Dauer aus dem Header - kostet nichts
+        head = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=avg_frame_rate", "-show_entries",
+             "format=duration", "-of", "json", path],
+            capture_output=True, text=True, check=True)
+        info = json.loads(head.stdout)
+        st = (info.get("streams") or [{}])[0]
+        num, _, den = (st.get("avg_frame_rate") or "0/0").partition("/")
+        num, den = float(num or 0), float(den or 0)
+        container_dur = float((info.get("format") or {}).get("duration") or 0)
+        if num <= 0 or den <= 0 or container_dur <= 0:
+            return None
+        frame_dur = den / num
+
+        # 2) nur die letzten Sekunden lesen und den letzten Zeitstempel nehmen
+        start = max(0.0, container_dur - 5.0)
+        tail = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-read_intervals", f"{start:.3f}%",
+             "-show_entries", "frame=pts_time", "-of", "csv=p=0", path],
+            capture_output=True, text=True, check=True)
+        last = None
+        for line in tail.stdout.splitlines():
+            line = line.strip().rstrip(",")
+            if line:
+                try:
+                    last = float(line)
+                except ValueError:
+                    pass
+        if last is None:
+            return None
+        return last + frame_dur
+    except Exception as e:
+        print(f"[WARN] measure_real_duration({path}) failed: {e}")
+        return None
+
+
 def run_command_gui(cmd, log_func=print):
     """
     Führt einen externen Befehl aus und streamt stdout + stderr live in die GUI (z. B. QTextEdit).
@@ -1254,7 +1320,10 @@ def build_segments_with_skip_and_overlay(
     # 3) Letztes Segment (falls was übrig)
     if current_pos < total_duration:
         seg_start = get_kf_le(kf_list, current_pos)
-        seg_end   = get_kf_le(kf_list, total_duration)
+        # Beim "-c copy" muss nur der ANFANG auf einem Keyframe liegen, das Ende
+        # nicht. Ein get_kf_le() hier wuerde auf den letzten Keyframe abrunden
+        # und dadurch bis zu 5 Frames (bei -g 5) am Dateiende verwerfen.
+        seg_end   = total_duration
         if seg_end > seg_start:
             final_out = os.path.join(
                 temp_dir, f"final_{out_count:02d}_{int(seg_start)}_{int(seg_end)}.mp4"
@@ -1326,10 +1395,31 @@ def xfade_main(cfg_path):
     trimmed_parts, timeline_map = pre_trim_input_videos(videos, keep_segments, temp_dir)
     print("[INFO] Timeline map:", timeline_map)
 
+    # Jede Datei bekommt ihre gemessene Inhaltsdauer mit. Ohne diese Angabe
+    # verlaesst sich der Concat-Demuxer auf die Container-Dauer, die bei
+    # geseekten Trim-Dateien zu gross ist -> stehendes Bild an der Nahtstelle.
+    # Siehe measure_real_duration().
     concat_txt = os.path.join(temp_dir, "concat_input.txt")
+    total_parts = len(trimmed_parts)
+    print(f"\n[INFO] Checking length of {total_parts} part(s) - "
+          f"a few seconds per file ...")
     with open(concat_txt, "w", encoding="utf-8") as f:
-        for path in trimmed_parts:
-            f.write(f"file '{os.path.abspath(path)}'\n")
+        for i, path in enumerate(trimmed_parts, 1):
+            abs_path = os.path.abspath(path)
+            name = os.path.basename(abs_path)
+            # Ausgabe VOR der Messung: xfade_main laeuft im GUI-Thread, und das
+            # Fenster wird nur beim Schreiben neu gezeichnet. Ohne diese Zeile
+            # steht die Oberflaeche waehrend der Messung scheinbar still.
+            print(f"[{i}/{total_parts}] measuring {name} ...")
+            f.write(f"file '{abs_path}'\n")
+            real_dur = measure_real_duration(abs_path)
+            if real_dur:
+                f.write(f"duration {real_dur:.6f}\n")
+                print(f"[{i}/{total_parts}] {name}: {real_dur:.3f}s")
+            else:
+                print(f"[{i}/{total_parts}] {name}: length not measurable, "
+                      f"using container value")
+    print("[INFO] Length check done, merging ...\n")
 
     merged_path = os.path.join(temp_dir, merged_out)
     encode_closedgop(
