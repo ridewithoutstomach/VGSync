@@ -19,6 +19,7 @@
 #
 # config.py
 
+import atexit
 import os
 import sys
 import platform
@@ -30,7 +31,7 @@ from PySide6.QtCore import QSettings
 # 1) Versions-Konfiguration & Modus
 ##############################################################################
 
-APP_VERSION = "4.36"
+APP_VERSION = "5.0"
 # use 4.30_pre for a pre Version
 
 
@@ -74,26 +75,215 @@ def _get_app_base_dir() -> str:
 # Ob wir einen Lizenz-Fingerprint abgleichen sollen (alter Mechanismus).
 
 # Temp-Ordner
-base_temp = tempfile.gettempdir()
-TMP_KEYFRAME_DIR = os.path.join(base_temp, "my_KVRouite_keyframes")
+#
+# Aufbau (siehe auch prepare_instance_temp_dir):
+#
+#   <Basis>/my_KVRouite_cut_segments/      <- Behaelter, wird NIE geloescht
+#       run_<pid>_<zufall>/                <- gehoert genau einer laufenden App
+#           instance.lock                  <- solange offen, lebt der Besitzer
+#           segments/                      <- MY_GLOBAL_TMP_DIR
+#           keyframes/                     <- TMP_KEYFRAME_DIR
+#
+# Frueher teilten sich alle Instanzen einen Ordner. Startete man eine zweite
+# App, loeschte deren Start den Ordner der ersten - ein laufender Render brach
+# ab. Ausserdem lief "shutil.rmtree" auf den in den Einstellungen gesetzten
+# Pfad selbst; ein eigener Ordner wie /home/x/Videos/temp waere dabei
+# komplett geloescht worden. Beides ist mit dem Aufbau oben erledigt: geloescht
+# wird nur der eigene run-Ordner, und der Behaelter liegt immer eine Ebene
+# unter dem, was der Benutzer eingestellt hat.
 
-def get_temp_segments_dir() -> str:
+base_temp = tempfile.gettempdir()
+
+
+def get_temp_segments_container() -> str:
     """
-    Gibt den konfigurierten Temp-Ordner zurück, falls gesetzt,
-    sonst ein systemweites Standard-Temp-Verzeichnis mit Unterordner.
+    Der Ordner, in dem die Instanz-Ordner liegen.
+
+    Ist in den Einstellungen ein eigener Pfad hinterlegt, legen wir darin einen
+    Unterordner an, statt den Pfad selbst zu benutzen - so bleibt alles, was
+    sonst noch darin liegt, unberuehrt.
     """
     s = QSettings("KVRouite", "KVRouite")
     custom_path = s.value("tempSegmentsDir", "", str)
+    base = custom_path if (custom_path and os.path.isdir(custom_path)) else base_temp
+    return os.path.join(base, "my_KVRouite_cut_segments")
 
-    if custom_path and os.path.isdir(custom_path):
-        return custom_path
 
-    # OS-standard Temp-Verzeichnis + Unterordner
-    return os.path.join(tempfile.gettempdir(), "my_KVRouite_cut_segments")
+TEMP_SEGMENTS_CONTAINER = get_temp_segments_container()
 
-#MY_GLOBAL_TMP_DIR = os.path.join(base_temp, "my_KVRouite_cut_segments")
+_INSTANCE_DIR = os.path.join(
+    TEMP_SEGMENTS_CONTAINER,
+    "run_%d_%s" % (os.getpid(), os.urandom(4).hex())
+)
+_INSTANCE_LOCK_PATH = os.path.join(_INSTANCE_DIR, "instance.lock")
+_instance_lock_file = None   # bleibt offen, solange die App laeuft
 
-MY_GLOBAL_TMP_DIR = get_temp_segments_dir()
+MY_GLOBAL_TMP_DIR = os.path.join(_INSTANCE_DIR, "segments")
+TMP_KEYFRAME_DIR = os.path.join(_INSTANCE_DIR, "keyframes")
+
+
+def _lock_exclusive(fh) -> bool:
+    """Versucht, die Datei exklusiv zu sperren, ohne zu warten."""
+    try:
+        if os.name == "nt":
+            import msvcrt
+            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except OSError:
+        return False
+
+
+def _is_dir_in_use(lock_path: str) -> bool:
+    """
+    True, wenn eine andere laufende App diesen Ordner besitzt.
+
+    Der Test laeuft ueber die Sperre und nicht ueber eine PID: eine PID kann
+    nach einem Absturz laengst einem anderen Programm gehoeren. Die Sperre gibt
+    das Betriebssystem beim Prozessende immer frei, auch bei kill -9.
+    Im Zweifel (Datei nicht lesbar, unbekannter Fehler) sagen wir "in Benutzung"
+    und fassen den Ordner nicht an.
+    """
+    if not os.path.exists(lock_path):
+        return False
+    try:
+        fh = open(lock_path, "a+")
+    except OSError:
+        return True
+    try:
+        if not _lock_exclusive(fh):
+            return True
+        try:
+            if os.name == "nt":
+                import msvcrt
+                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+        except OSError:
+            pass
+        return False
+    finally:
+        fh.close()
+
+
+def prepare_instance_temp_dir():
+    """
+    Legt den eigenen Instanz-Ordner an und haelt die Sperre.
+
+    Wird beim Start aufgerufen. Schlaegt das Sperren fehl, laeuft die App
+    trotzdem weiter - dann wird dieser Ordner spaeter eben nicht automatisch
+    aufgeraeumt, was harmloser ist als ein Abbruch beim Start.
+    """
+    global _instance_lock_file
+    os.makedirs(MY_GLOBAL_TMP_DIR, exist_ok=True)
+    os.makedirs(TMP_KEYFRAME_DIR, exist_ok=True)
+    if _instance_lock_file is not None:
+        return
+    try:
+        fh = open(_INSTANCE_LOCK_PATH, "a+")
+        if _lock_exclusive(fh):
+            _instance_lock_file = fh
+        else:
+            fh.close()
+            print("[WARN] Could not lock the temp folder of this instance.")
+    except OSError as e:
+        print(f"[WARN] Could not create the lock file: {e}")
+    # Greift auch bei jedem sys.exit() - etwa wenn die App wegen einer fehlenden
+    # Abhaengigkeit oder abgelehntem Disclaimer abbricht. Nur ein Absturz oder
+    # kill -9 kommt daran vorbei, und dafuer gibt es cleanup_orphaned_temp_dirs().
+    atexit.register(release_instance_temp_dir)
+
+
+def _dir_size(path: str) -> int:
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                total += os.path.getsize(os.path.join(root, name))
+            except OSError:
+                pass
+    return total
+
+
+def cleanup_orphaned_temp_dirs():
+    """
+    Entfernt Instanz-Ordner, deren App nicht mehr laeuft.
+
+    Damit beantwortet sich der Absturzfall von selbst: stuerzen zwei Instanzen
+    ab, findet der naechste Start beide Ordner ohne gehaltene Sperre und raeumt
+    sie weg. Ordner einer noch laufenden Instanz bleiben unangetastet.
+
+    Zusaetzlich fliegen lose Dateien direkt im Behaelter raus - die stammen aus
+    aelteren Versionen, die noch keinen Instanz-Ordner kannten. Der Behaelter
+    selbst gehoert immer uns (bei einem eigenen Pfad liegt er als Unterordner
+    darin), deshalb ist das gefahrlos.
+    """
+    removed_dirs = 0
+    freed = 0
+    try:
+        os.makedirs(TEMP_SEGMENTS_CONTAINER, exist_ok=True)
+        entries = os.listdir(TEMP_SEGMENTS_CONTAINER)
+    except OSError as e:
+        print(f"[WARN] Temp folder not accessible: {e}")
+        return
+
+    for name in entries:
+        full = os.path.join(TEMP_SEGMENTS_CONTAINER, name)
+        if full == _INSTANCE_DIR:
+            continue
+        try:
+            if os.path.isdir(full):
+                if not name.startswith("run_"):
+                    continue
+                if _is_dir_in_use(os.path.join(full, "instance.lock")):
+                    continue
+                size = _dir_size(full)
+                shutil.rmtree(full)
+                removed_dirs += 1
+                freed += size
+            else:
+                size = os.path.getsize(full)
+                os.remove(full)
+                freed += size
+        except OSError as e:
+            print(f"[WARN] Could not remove {full}: {e}")
+
+    # Der Keyframe-Ordner lag frueher als eigener Ordner im System-Temp. Seit
+    # er im Instanz-Ordner liegt, schreibt niemand mehr dorthin - er bliebe
+    # sonst fuer immer liegen. Er enthaelt ausschliesslich unsere CSV-Dateien
+    # und wurde von der alten Version bei jedem Start ohnehin geleert.
+    legacy_keyframes = os.path.join(base_temp, "my_KVRouite_keyframes")
+    if os.path.isdir(legacy_keyframes):
+        try:
+            freed += _dir_size(legacy_keyframes)
+            shutil.rmtree(legacy_keyframes)
+            print("[INFO] Removed the old keyframe folder "
+                  f"{legacy_keyframes}.")
+        except OSError as e:
+            print(f"[WARN] Could not remove {legacy_keyframes}: {e}")
+
+    if removed_dirs or freed:
+        print("[INFO] Removed %d leftover temp folder(s) (%.1f GB freed)."
+              % (removed_dirs, freed / (1024 ** 3)))
+
+
+def release_instance_temp_dir():
+    """Beim sauberen Beenden: Sperre freigeben und den eigenen Ordner loeschen."""
+    global _instance_lock_file
+    if _instance_lock_file is not None:
+        try:
+            _instance_lock_file.close()
+        except OSError:
+            pass
+        _instance_lock_file = None
+    try:
+        if os.path.isdir(_INSTANCE_DIR):
+            shutil.rmtree(_INSTANCE_DIR)
+    except OSError as e:
+        print(f"[WARN] Could not remove the temp folder of this instance: {e}")
 
 
 
@@ -160,7 +350,13 @@ def check_app_version_and_reset_if_necessary():
         
         
 def clear_temp_directories():
-    """Löscht alle Inhalte in den temporären Verzeichnissen."""
+    """
+    Leert die Arbeitsordner DIESER Instanz.
+
+    Beide Pfade liegen im eigenen run-Ordner, andere laufende Instanzen sind
+    davon nicht betroffen. Die Sperrdatei liegt eine Ebene darueber und bleibt
+    erhalten.
+    """
     for tmp_dir in [TMP_KEYFRAME_DIR, MY_GLOBAL_TMP_DIR]:
         if os.path.exists(tmp_dir):
             try:

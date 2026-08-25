@@ -282,6 +282,12 @@ def main():
         trayIcon = QSystemTrayIcon(QIcon(icon_file), parent=None)
         trayIcon.show()
 
+    # Eigenen Instanz-Ordner anlegen und sperren, dann die Ordner
+    # abgestuerzter Vorlaeufer aufraeumen. Erst danach darf irgendetwas in die
+    # Temp-Ordner schreiben.
+    config.prepare_instance_temp_dir()
+    config.cleanup_orphaned_temp_dirs()
+
     # Temp-Verzeichnisse leeren
     config.clear_temp_directories()
 
@@ -354,7 +360,10 @@ def main():
     window.raise_()
     window.activateWindow()
 
-    sys.exit(app.exec())
+    exit_code = app.exec()
+    # Beim sauberen Beenden den eigenen Temp-Ordner mitnehmen.
+    config.release_instance_temp_dir()
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":

@@ -24,6 +24,15 @@ Requirements
 - mpv binary (must be placed in "mpv/" folder)
 - ffmpeg binary (must be placed in "ffmpeg/" folder)
 
+Python packages are split into two files:
+
+- "requirements.txt" - everything the application needs to run.
+  The same list on Linux and Windows.
+- "requirements-build.txt" - additional packages needed only to build the
+  Windows executable (PyInstaller and its dependencies).
+
+If you just want to run KVRouite, "requirements.txt" is all you need.
+
 Note:
 Binaries are NOT included in the Git repository due to size limitations.
 You must manually download and extract them from the GitHub Releases page.
@@ -135,8 +144,11 @@ you can use the pre-built Windows binary:
 Building the Windows Executable Manually
 ----------------------------------------
 
-To create your own Windows executable:
+To create your own Windows executable, install the build packages on top of
+the runtime ones:
 
+    pip install -r requirements.txt
+    pip install -r requirements-build.txt
     python build_with_pyinstaller.py
 
 The resulting executable will be located at:

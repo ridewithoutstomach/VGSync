@@ -1,25 +1,15 @@
-altgraph==0.17.4
+# KVRouite - packages needed to RUN the application.
+# Identical for Linux and Windows: every entry here is imported by the code
+# (PySide6, python-mpv, python-dateutil, pillow, fitparse); "six" comes with
+# python-dateutil.
+#
+# To build the Windows executable you additionally need requirements-build.txt.
 fitparse==1.2.0
-# TODO: gpxpy noch entfernen - wird nirgends gebraucht.
-# Geprueft: kein Vorkommen im gesamten Quellcode, keine dynamischen Importe,
-# hiddenimports=[] in allen .spec-Dateien, kein Paket verlangt es.
-# GPX wird von core/gpx_parser.py mit xml.etree.ElementTree selbst geparst.
-# Herkunft: das geloeschte Experiment core/gpmf_parser.py (GoPro-Metadaten)
-# benutzte gpxpy; nur dessen .pyc liegt noch in core/__pycache__/.
-# Ohne gpxpy getestet: App startet, Encoder liefert bitgleiches Ergebnis.
-# Vor dem Entfernen noch unter Windows gegenpruefen (EXE-Build).
-gpxpy==1.6.2
-packaging==24.2
-pefile==2023.2.7
 pillow==12.3.0
-pyinstaller==6.12.0
-pyinstaller-hooks-contrib==2025.2
 PySide6==6.8.2.1
 PySide6_Addons==6.8.2.1
 PySide6_Essentials==6.8.2.1
 python-dateutil==2.9.0.post0
 python-mpv==1.0.7
-pywin32-ctypes==0.2.3
-setuptools==80.8.0
 shiboken6==6.8.2.1
 six==1.17.0

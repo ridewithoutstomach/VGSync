@@ -937,7 +937,55 @@ def encode_closedgop(
 import re
 
 def get_keyframes(src):
-    print(f"\nIndexing Keyframes in [may take a while - stay tuned ] {src} ...")
+    """
+    Liefert die Keyframe-Zeitpunkte von src.
+
+    Zuerst ueber die PAKETE (Flag "K"), das kommt ohne Dekodierung aus.
+    Gemessen an einer 60-s-Datei (1080p hevc, -g 5): 0,08 s statt 8,3 s
+    ueber "-skip_frame nokey -show_frames" - hochgerechnet auf ein Projekt
+    von 1989 s sind das rund 3 s statt gut viereinhalb Minuten. Die Liste ist
+    dabei nicht nur aehnlich, sondern identisch (360 von 360 Werten gleich).
+
+    Aufgerufen wird die Funktion nur mit merged.mp4, also einer Datei, die
+    wir selbst mit "-bf 0" erzeugt haben. Trotzdem wird sortiert, damit die
+    Reihenfolge auch bei B-Frames stimmt (Pakete kommen in Dekodier-, nicht
+    in Anzeigereihenfolge).
+
+    Liefert der Paket-Weg nichts, greift der alte Weg ueber die dekodierten
+    Frames.
+    """
+    times = _get_keyframes_from_packets(src)
+    if times:
+        print(f"Total Keyframes found: {len(times)}\n")
+        return times
+    print("[WARN] No keyframes found in packets - falling back to frame scan.")
+    return _get_keyframes_by_decoding(src)
+
+
+def _get_keyframes_from_packets(src):
+    print(f"\nIndexing Keyframes in {src} ...")
+    try:
+        r = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "packet=pts_time,flags", "-of", "csv=p=0", src],
+            capture_output=True, encoding="utf-8", errors="replace", check=True)
+    except Exception as e:
+        print(f"[WARN] Keyframe scan via packets failed: {e}")
+        return []
+    times = []
+    for line in r.stdout.splitlines():
+        parts = line.strip().split(",")
+        if len(parts) < 2 or "K" not in parts[1]:
+            continue
+        try:
+            times.append(float(parts[0]))
+        except ValueError:
+            pass
+    times.sort()
+    return times
+
+
+def _get_keyframes_by_decoding(src):
     pattern= re.compile(r'"best_effort_timestamp_time"\s*:\s*"')
     cmd=[
         "ffprobe","-hide_banner",
