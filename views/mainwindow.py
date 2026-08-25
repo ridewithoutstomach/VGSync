@@ -1765,6 +1765,26 @@ class MainWindow(QMainWindow):
         js_code = f"setDirectionsEnabled({js_bool});"
         self.map_widget.view.page().runJavaScript(js_code)
 
+        self._map_page_loaded = True
+        pending = getattr(self, "_pending_open_file", None)
+        if pending:
+            self._pending_open_file = None
+            QTimer.singleShot(0, lambda: self.open_recent(pending))
+
+    def open_file_when_map_ready(self, path: str):
+        """Datei aus der Kommandozeile oeffnen, sobald die Karte bereit ist.
+
+        Beim Doppelklick auf ein Projekt oder eine GPX im Explorer wurde die
+        Route bisher sofort nach dem Anzeigen des Fensters gepusht - also
+        bevor map_page.html geladen war und die JS-Funktionen ueberhaupt
+        existierten. Die Karte blieb dadurch leer. Deshalb wird der Aufruf
+        aufgeschoben, bis _on_map_page_loaded gelaufen ist.
+        """
+        if getattr(self, "_map_page_loaded", False):
+            QTimer.singleShot(0, lambda: self.open_recent(path))
+        else:
+            self._pending_open_file = path
+
     def _apply_map_sizes_from_settings(self):
         """
         Liest aus QSettings *nur noch* "black", "red", "blue", "yellow"
@@ -3638,8 +3658,10 @@ class MainWindow(QMainWindow):
         if not self._video_area_floating_dialog:
             return
 
-        # 1) Dialog schließen
-        self._video_area_floating_dialog.close()
+        # 1) Referenz loeschen, aber noch NICHT schliessen. close() loest ueber
+        #    closeEvent das Signal requestReattach aus und landet sonst ein
+        #    zweites Mal in dieser Methode.
+        dlg = self._video_area_floating_dialog
         self._video_area_floating_dialog = None
     
         # 2) Platzhalter entfernen
@@ -3653,6 +3675,14 @@ class MainWindow(QMainWindow):
         # 3) Video wieder einfügen (am selben Index)
         #    Falls du es wieder ganz oben haben willst, kannst du idx=0 nehmen
         self.left_v_layout.insertWidget(0, self.video_area_widget, 1)
+
+        # 4) Erst jetzt den leeren Dialog schliessen. Die Reihenfolge ist
+        #    wichtig: mpv rendert in die native Fenster-ID von video_frame.
+        #    Wird der Dialog geschlossen, solange das Video noch darin haengt,
+        #    zerstoert Qt dieses Fenster und legt beim Umhaengen ein neues an -
+        #    mpv verliert seine ID und beendet sich ("libmpv core has been
+        #    shutdown", schwarzes bzw. verschwundenes Video).
+        dlg.close()
 
        
 
@@ -6015,7 +6045,10 @@ class MainWindow(QMainWindow):
         if not self._map_floating_dialog:
             return
     
-        self._map_floating_dialog.close()
+        # Referenz loeschen, aber noch NICHT schliessen. close() loest ueber
+        # closeEvent das Signal requestReattach aus und landet sonst ein
+        # zweites Mal in dieser Methode.
+        dlg = self._map_floating_dialog
         self._map_floating_dialog = None
     
         if self._map_placeholder:
@@ -6027,6 +6060,10 @@ class MainWindow(QMainWindow):
     
         # Map wieder unten einfügen (z.B. am Ende des Layouts)
         self.left_v_layout.addWidget(self.map_widget, 1)
+
+        # Erst jetzt den leeren Dialog schliessen - dieselbe Reihenfolge wie
+        # beim Video, damit das Widget umgehaengt und nicht neu erzeugt wird.
+        dlg.close()
     
     
     def _on_request_reattach_map(self):

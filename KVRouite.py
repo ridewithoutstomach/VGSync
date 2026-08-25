@@ -167,9 +167,40 @@ import path_manager  # zweites Mal import ist okay
 
 # Qt-Sachen
 from PySide6.QtWidgets import QApplication, QDialog, QMessageBox, QWidget, QSystemTrayIcon
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, qInstallMessageHandler
+
 from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtWebEngineWidgets import QWebEngineView #apparently we need to import it before the app starts
+
+
+def _qt_message_handler(mode, context, message):
+    """Qt-Meldungen filtern.
+
+    Beim Detach der Karte wandert die QWebEngineView in ein zweites
+    Top-Level-Fenster. Jedes Fenster hat seine eigene QRhi, Chromium haengt
+    seine Kompositor-Textur aber an die QWebEnginePage - die Textur des
+    alten Fensters wird also im neuen weiterbenutzt. Qt meldet das bei
+    jedem Bildaufbau, es sind pro Detach schnell hunderte Zeilen.
+
+    Gemessen: die Karte wird dabei korrekt dargestellt, es ist eine Warnung
+    und kein Defekt. Weder AA_ShareOpenGLContexts noch das RHI-Backend noch
+    ein Neuaufbau der View aendern etwas daran; nur ein Neuaufbau samt Page
+    haette geholfen, der kostet aber je Detach einen Renderer-Prozess.
+    Deshalb wird die Meldung im Normalbetrieb geschluckt und ist mit -v
+    weiterhin vollstaendig zu sehen. Alle anderen Qt-Meldungen bleiben
+    unangetastet - QT_LOGGING_RULES greift hier nicht, weil Qt die Zeile
+    ohne Logging-Kategorie ausgibt.
+    """
+    if not DEBUG and "belongs to QRhi" in message:
+        return
+    try:
+        REAL_STDERR.write(message + "\n")
+        REAL_STDERR.flush()
+    except Exception:
+        pass
+
+
+qInstallMessageHandler(_qt_message_handler)
 
 # Dein eigenes Zeug:
 from config import (
@@ -387,7 +418,7 @@ def main():
     # ausfuehren, damit Fehlermeldungen ein fertiges Fenster als Eltern haben.
     cli_file = _file_arg_from_cli(sys.argv)
     if cli_file:
-        QTimer.singleShot(0, lambda: window.open_recent(cli_file))
+        window.open_file_when_map_ready(cli_file)
 
     exit_code = app.exec()
     # Beim sauberen Beenden den eigenen Temp-Ordner mitnehmen.
