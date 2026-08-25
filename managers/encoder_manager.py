@@ -477,6 +477,60 @@ def measure_real_duration(path):
         return None
 
 
+def measure_real_duration_fast(path):
+    """
+    Wie measure_real_duration(), aber ueber die PAKETE statt ueber dekodierte
+    Frames - deshalb ohne Dekodierung und rund 35x schneller (0,16 s statt
+    5,6 s bei einer 4K-Datei).
+
+    Ein mit "-c copy" geschnittener Abschnitt beginnt immer beim Keyframe VOR
+    der gewuenschten Position. Die Pakete dieses Vorlaufs bekommen negative
+    Zeitstempel und werden im MP4 per Edit-List ausgeblendet - sichtbarer
+    Inhalt sind genau die Pakete ab Zeitstempel 0. Deren Anzahl mal Framedauer
+    ist die tatsaechliche Inhaltsdauer.
+
+    Gemessen an segment_000.mp4 (Schnitt bei 2018.884 s):
+        Pakete gesamt : 2880   (davon 27 Vorlauf)
+        sichtbar      : 2853 = 95.195100 s
+    - identisch zum Wert aus measure_real_duration().
+
+    Faellt auf measure_real_duration() zurueck, wenn die Pakete keine
+    brauchbaren Zeitstempel liefern (z. B. variable Framerate).
+    """
+    try:
+        head = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=avg_frame_rate", "-of", "json", path],
+            capture_output=True, text=True, check=True)
+        st = (json.loads(head.stdout).get("streams") or [{}])[0]
+        num, _, den = (st.get("avg_frame_rate") or "0/0").partition("/")
+        num, den = float(num or 0), float(den or 0)
+        if num <= 0 or den <= 0:
+            return measure_real_duration(path)
+        frame_dur = den / num
+
+        pk = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "packet=pts_time", "-of", "csv=p=0", path],
+            capture_output=True, text=True, check=True)
+        visible = 0
+        for line in pk.stdout.splitlines():
+            line = line.strip().rstrip(",")
+            if not line or line == "N/A":
+                continue
+            try:
+                if float(line) >= -1e-9:
+                    visible += 1
+            except ValueError:
+                pass
+        if visible <= 0:
+            return measure_real_duration(path)
+        return visible * frame_dur
+    except Exception as e:
+        print(f"[WARN] measure_real_duration_fast({path}) failed: {e}")
+        return measure_real_duration(path)
+
+
 def run_command_gui(cmd, log_func=print):
     """
     Führt einen externen Befehl aus und streamt stdout + stderr live in die GUI (z. B. QTextEdit).
@@ -487,8 +541,17 @@ def run_command_gui(cmd, log_func=print):
         cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,  # Hier kommt auch das ffmpeg-Encoding rein!
+        # ffmpeg liest sonst die Tastatureingabe des Elternprozesses mit. Faellt
+        # dabei ein 'c' an, oeffnet es seine Kommandozeile ("Enter command: ...")
+        # und schreibt die restlichen Bytes roh zurueck - ein 'q' wuerde den Lauf
+        # sogar abbrechen. DEVNULL schaltet das ab.
+        stdin=subprocess.DEVNULL,
         bufsize=1,
-        universal_newlines=True,
+        # errors="replace" statt strengem UTF-8: ein einzelnes fremdes Byte in
+        # der ffmpeg-Ausgabe (gesehen: 0xb2) hat sonst den kompletten
+        # Encodier-Lauf mit einem UnicodeDecodeError beendet.
+        encoding="utf-8",
+        errors="replace",
     )
 
     for line in process.stdout:
@@ -885,7 +948,9 @@ def get_keyframes(src):
         "-print_format","json",
         "-i", src
     ]
-    p= subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+    p= subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
+                        stdin=subprocess.DEVNULL,
+                        encoding="utf-8",errors="replace")
     lines=[]
     count=0
     spinner = ['|', '/', '-', '\\']
@@ -944,8 +1009,18 @@ def copy_cut(src,start,end,outfile):
         raise ValueError("invalid cut dur => start={start},end={end}")
     cmd=[
         "ffmpeg","-hide_banner","-y",
-        "-ss",f"{start:.3f}",
+        # 6 Nachkommastellen, NICHT 3: start ist ein Keyframe-Zeitpunkt aus
+        # get_kf_le(). Auf 3 Stellen gerundet liegt er knapp VOR dem Keyframe
+        # (5.833 statt 5.833333), und ffmpeg beginnt beim Keyframe davor - eine
+        # ganze GOP (5 Frames) Vorlauf, die spaeter im Concat auf 0.3 ms
+        # zusammengedraengt wird und als Ruckler sichtbar ist.
+        # Gemessen an merged.mp4: -ss 5.833 -> 45 Frames, erstes Paket
+        # -0.166667; -ss 5.833333 -> 40 Frames, erstes Paket 0.000000.
+        "-ss",f"{start:.6f}",
         "-i",src,
+        # -t bleibt bei 3 Stellen: dur ist der Abstand zweier Keyframes, und
+        # das Abrunden haelt genau den Frame draussen, mit dem das naechste
+        # Teilstueck beginnt. Mehr Stellen wuerden ihn doppelt liefern.
         "-t",f"{dur:.3f}",
         "-map","0:v:0",
         "-c","copy",
@@ -1018,11 +1093,41 @@ def crossfade_2(
 ###############################################################################
 
 def final_concat_copy(parts,outfile):
+    """
+    Fuegt die fertigen Teilstuecke zusammen.
+
+    Jede Datei bekommt ihre gemessene Inhaltsdauer mit. Ohne diese Angabe
+    nimmt der Concat-Demuxer die Container-Dauer, und die stimmt bei einem
+    "-c copy" geschnittenen Teilstueck nicht zwingend auf den Frame genau -
+    das naechste Teilstueck sitzt dann zu spaet (stehendes Bild) oder zu
+    frueh (zusammengedraengte Frames).
+
+    Seit copy_cut() exakt auf dem Keyframe ansetzt, sind die Container-Dauern
+    in allen nachgemessenen Faellen bereits richtig; die Angabe hier aendert
+    dann nichts (nachgemessen: Ausgabe mit und ohne Dauerangabe frameweise
+    gleich). Sie bleibt als Absicherung stehen, weil sie im Copy-Mode
+    nachweislich einen 934-ms-Ruckler behebt und hier nichts kostet
+    (~0,16 s je Teilstueck).
+
+    Es aendert sich ausschliesslich der Zeitstempel; kein Paket wird
+    hinzugefuegt oder verworfen. Siehe measure_real_duration_fast().
+    """
     tmp_list= os.path.splitext(outfile)[0]+"_concat.txt"
+    total_parts = len(parts)
+    print(f"\n[INFO] Checking length of {total_parts} part(s) ...")
     with open(tmp_list,"w",encoding="utf-8") as f:
-        for p in parts:
+        for i, p in enumerate(parts, 1):
             abspath= os.path.abspath(p)
+            name = os.path.basename(abspath)
             f.write(f"file '{abspath}'\n")
+            real_dur = measure_real_duration_fast(abspath)
+            if real_dur:
+                f.write(f"duration {real_dur:.6f}\n")
+                print(f"[{i}/{total_parts}] {name}: {real_dur:.3f}s")
+            else:
+                print(f"[{i}/{total_parts}] {name}: length not measurable, "
+                      f"using container value")
+    print("[INFO] Length check done, joining ...\n")
 
     cmd=[
         "ffmpeg","-hide_banner","-y",

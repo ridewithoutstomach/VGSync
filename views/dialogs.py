@@ -24,7 +24,7 @@ import os
 import shutil
 
 from PySide6.QtWidgets import QDialog, QLabel, QVBoxLayout, QPushButton, QProgressBar, \
-    QHBoxLayout, QMessageBox, QTextEdit
+    QHBoxLayout, QMessageBox, QTextEdit, QApplication
     
 from PySide6.QtCore import QTimer, QProcess, Signal, Qt
 from PySide6.QtCore import QEvent
@@ -201,12 +201,18 @@ class _SafeExportDialog(QDialog):
         self._current_index = 0
         self._concat_cmd = None
         self._out_file = None
+        self._concat_file = None
+        self._segment_files = []
         self._cancel_requested = False
 
-    def set_commands(self, commands_list: list, concat_cmd: list, out_file: str):
+    def set_commands(self, commands_list: list, concat_cmd: list, out_file: str,
+                     concat_file: str = None, segment_files: list = None):
         self._commands = commands_list
         self._concat_cmd = concat_cmd
         self._out_file = out_file
+        # Fuer die Laengenmessung vor dem Zusammenfuegen (siehe _write_concat_list).
+        self._concat_file = concat_file
+        self._segment_files = segment_files or []
 
     def start_export(self):
         if not self._commands:
@@ -245,12 +251,57 @@ class _SafeExportDialog(QDialog):
         if not self._concat_cmd:
             self._finish_up()
             return
+        self._write_concat_list()
+        if self._cancel_requested:
+            return
         self._append_text("All segments done! Now concatenating…")
         self._process.setProgram(self._concat_cmd[0])
         self._process.setArguments(self._concat_cmd[1:])
         self._process.finished.disconnect(self._on_process_finished)
         self._process.finished.connect(self._on_concat_finished)
         self._process.start()
+
+    def _write_concat_list(self):
+        """
+        Schreibt die Concat-Liste neu und haengt an jede Datei ihre TATSAECHLICHE
+        Inhaltsdauer.
+
+        Ohne diese Angabe nimmt der Concat-Demuxer die Container-Dauer des
+        Segments. Die ist bei einem "-c copy"-Schnitt zu gross, weil ffmpeg beim
+        Keyframe VOR der Schnittstelle beginnt und der Vorlauf mitzaehlt
+        (gemessen: 96.096 s statt 95.195 s). Die naechste Datei wird dadurch um
+        diese Differenz zu spaet angesetzt - im fertigen Video steht das Bild an
+        der Naht 934 ms still. Genau der Ruckler beim Zusammenfuegen.
+
+        Die Bilder selbst sind in beiden Faellen identisch, es geht
+        ausschliesslich um die Zeitstempel.
+        """
+        if not self._concat_file or not self._segment_files:
+            return
+        from managers.encoder_manager import measure_real_duration_fast
+
+        total = len(self._segment_files)
+        self._append_text(f"Checking length of {total} segment(s)…")
+        lines = []
+        for i, seg in enumerate(self._segment_files, 1):
+            if self._cancel_requested:
+                return
+            name = os.path.basename(seg)
+            lines.append(f"file '{seg}'")
+            real_dur = measure_real_duration_fast(seg)
+            if real_dur:
+                lines.append(f"duration {real_dur:.6f}")
+                self._append_text(f"[{i}/{total}] {name}: {real_dur:.3f}s")
+            else:
+                self._append_text(f"[{i}/{total}] {name}: length not measurable, "
+                                  f"using container value")
+            QApplication.processEvents()
+        try:
+            with open(self._concat_file, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines) + "\n")
+        except Exception as err:
+            # Die Liste vom Aufrufer steht noch - dann eben ohne Dauerangaben.
+            self._append_text(f"Could not update concat list: {err}")
 
     def _on_concat_finished(self, exit_code, exit_status):
         if exit_code != 0:

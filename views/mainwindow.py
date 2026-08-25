@@ -4632,7 +4632,11 @@ class MainWindow(QMainWindow):
 
         # 4) Nun unser asynchroner Dialog
         dlg = _SafeExportDialog(self)
-        dlg.set_commands(segment_commands, final_cmd, out_file)
+        # concat_file und segment_files werden mitgegeben, damit der Dialog die
+        # Liste NACH dem Schneiden noch einmal schreiben kann - erst dann
+        # existieren die Segmente und ihre echte Laenge ist messbar.
+        dlg.set_commands(segment_commands, final_cmd, out_file,
+                         concat_file=concat_file, segment_files=segment_files)
         dlg.start_export()  # startet direkt den ersten ffmpeg-Aufruf
         dlg.exec()
 
