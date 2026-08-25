@@ -6,21 +6,14 @@
 #     python build_with_pyinstaller.py
 #
 # Nothing in here is imported by the application itself.
-altgraph==0.17.4
-packaging==24.2
-pefile==2023.2.7
-pyinstaller==6.12.0
-pyinstaller-hooks-contrib==2025.2
+#
+# All versions are the current releases. Verified by actually building 5.0 with
+# them: PyInstaller run, KVRouite.exe and the Inno Setup installer produced and
+# started.
+altgraph==0.17.5
+packaging==26.3
+pefile==2024.8.26
+pyinstaller==6.22.2
+pyinstaller-hooks-contrib==2026.7
 pywin32-ctypes==0.2.3
-setuptools==80.8.0
-
-# TODO: gpxpy noch entfernen - wird nirgends gebraucht.
-# Geprueft: kein Vorkommen im gesamten Quellcode, keine dynamischen Importe,
-# hiddenimports=[] in allen .spec-Dateien, kein Paket verlangt es.
-# GPX wird von core/gpx_parser.py mit xml.etree.ElementTree selbst geparst.
-# Herkunft: das geloeschte Experiment core/gpmf_parser.py (GoPro-Metadaten)
-# benutzte gpxpy; nur dessen .pyc liegt noch in core/__pycache__/.
-# Ohne gpxpy getestet: App startet, Encoder liefert bitgleiches Ergebnis.
-# Steht bis zur Windows-Gegenprobe (EXE-Build) hier und nicht in
-# requirements.txt, damit es nicht in jede Laufzeit-Umgebung mitkommt.
-gpxpy==1.6.2
+setuptools==84.0.0

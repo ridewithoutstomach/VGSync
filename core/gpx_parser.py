@@ -24,7 +24,6 @@ import math
 import uuid
 import xml.etree.ElementTree as ET
 from datetime import datetime
-from dateutil.parser import parse as dateutil_parse
 
 
 gpx_video_shift = None #in seconds, can be negative (first gpx are before video) or positive (missing gpx at start)
@@ -67,7 +66,7 @@ def parse_gpx(gpx_file_path):
         if time_el is not None:
             time_str = time_el.text
             try:
-                dt = dateutil_parse(time_str)
+                dt = datetime.fromisoformat((time_str or "").replace("Z", "+00:00"))
             except ValueError:
                 dt = None
         else:

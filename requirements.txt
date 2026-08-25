@@ -1,15 +1,25 @@
 # KVRouite - packages needed to RUN the application.
 # Identical for Linux and Windows: every entry here is imported by the code
-# (PySide6, python-mpv, python-dateutil, pillow, fitparse); "six" comes with
-# python-dateutil.
+# (PySide6, python-mpv, pillow, fitparse). All versions are the current
+# releases; tested on Linux (Python 3.12.3) and Windows (Python 3.12.0).
+#
+# Qt 6.11 notes:
+#   - python-dateutil and six were removed. shiboken6 6.11 inspects every
+#     imported module, which crashes on six's synthetic "six.moves" modules
+#     (AttributeError: '_SixMetaPathImporter' object has no attribute '_path').
+#     dateutil was used in one place only (core/gpx_parser.py) and is replaced
+#     by datetime.fromisoformat; six only came in as a dateutil dependency.
+#   - KVRouite.py sets Qt.AA_ShareOpenGLContexts before QApplication, otherwise
+#     the detached map window stays black next to the mpv video surface.
+#
+# python-mpv is the Python binding only. The bundled libmpv-2.dll in mpv/ is a
+# separate component and is not managed by pip.
 #
 # To build the Windows executable you additionally need requirements-build.txt.
 fitparse==1.2.0
 pillow==12.3.0
-PySide6==6.8.2.1
-PySide6_Addons==6.8.2.1
-PySide6_Essentials==6.8.2.1
-python-dateutil==2.9.0.post0
-python-mpv==1.0.7
-shiboken6==6.8.2.1
-six==1.17.0
+PySide6==6.11.2
+PySide6_Addons==6.11.2
+PySide6_Essentials==6.11.2
+python-mpv==1.0.8
+shiboken6==6.11.2

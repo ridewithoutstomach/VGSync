@@ -74,8 +74,11 @@ Name: "{group}\KVRouite"; Filename: "{app}\KVRouite.exe"
 Name: "{commondesktop}\KVRouite"; Filename: "{app}\KVRouite.exe"; Tasks: desktopicon
 
 [Registry]
-; Dateizuordnung .kvrproj → KVRouite
-Root: HKCR; Subkey: ".kvrproj"; ValueType: string; ValueData: "KVRouite.Project"; Flags: uninsdeletevalue
+; Dateizuordnung .KVRouiteproj → KVRouite
+; ACHTUNG: Die Endung muss zu views/mainwindow.py passen (Save Project schreibt
+; ".KVRouiteproj"). Bis 4.34 stand hier ".kvrproj" - eine Endung, die die
+; Anwendung nie erzeugt hat, weshalb die Zuordnung ins Leere lief.
+Root: HKCR; Subkey: ".KVRouiteproj"; ValueType: string; ValueData: "KVRouite.Project"; Flags: uninsdeletevalue
 Root: HKCR; Subkey: "KVRouite.Project"; ValueType: string; ValueData: "KVRouite Project File"; Flags: uninsdeletekey
 Root: HKCR; Subkey: "KVRouite.Project\DefaultIcon"; ValueType: string; ValueData: "{app}\KVRouite.exe,0"
 Root: HKCR; Subkey: "KVRouite.Project\shell\open\command"; ValueType: string; ValueData: """{app}\KVRouite.exe"" ""%1"""

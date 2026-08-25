@@ -167,7 +167,7 @@ import path_manager  # zweites Mal import ist okay
 
 # Qt-Sachen
 from PySide6.QtWidgets import QApplication, QDialog, QMessageBox, QWidget, QSystemTrayIcon
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtWebEngineWidgets import QWebEngineView #apparently we need to import it before the app starts
 
@@ -222,15 +222,36 @@ def check_ffmpeg_and_vlc_or_exit():
     return True, ""
 
 
+def _file_arg_from_cli(argv):
+    """Erste uebergebene existierende Datei aus der Kommandozeile.
+
+    Wird von der Windows-Dateizuordnung benutzt: der Installer traegt
+    "KVRouite.exe" "%1" als Open-Befehl fuer .KVRouiteproj ein, Windows
+    haengt beim Doppelklick den Pfad an. Optionen wie -v werden ignoriert.
+    """
+    for arg in argv[1:]:
+        if arg.startswith("-"):
+            continue
+        if os.path.isfile(arg):
+            return os.path.abspath(arg)
+    return None
+
+
 def main():
     # Workaround bei manchen Grafikkarten
     
     
     if config.is_soft_opengl_enabled():
         QGuiApplication.setAttribute(Qt.AA_UseSoftwareOpenGL)
-    
-    
-        
+
+    # QtWebEngine (Karte) und mpv (Video) leben im selben Prozess und nutzen
+    # beide OpenGL. Ohne geteilten Kontext verliert die Karte ab Qt 6.11 ihren
+    # Inhalt, sobald sie ueber "Map (detach)" in ein eigenes Fenster wandert -
+    # das Fenster bleibt dann schwarz. Muss VOR QApplication(...) gesetzt
+    # werden, sonst wirkt es nicht. Unter Qt 6.8 aendert es nichts, es ist also
+    # ein Codepfad fuer beide Versionen.
+    QGuiApplication.setAttribute(Qt.AA_ShareOpenGLContexts, True)
+
     app = QApplication(sys.argv)
     
     
@@ -359,6 +380,14 @@ def main():
     center_mainwindow(window)
     window.raise_()
     window.activateWindow()
+
+    # Datei aus der Kommandozeile oeffnen (Doppelklick auf ein Projekt im
+    # Explorer). open_recent() verzweigt bereits nach Endung und ruft fuer
+    # .KVRouiteproj das process_open_project() auf. Erst nach dem Anzeigen
+    # ausfuehren, damit Fehlermeldungen ein fertiges Fenster als Eltern haben.
+    cli_file = _file_arg_from_cli(sys.argv)
+    if cli_file:
+        QTimer.singleShot(0, lambda: window.open_recent(cli_file))
 
     exit_code = app.exec()
     # Beim sauberen Beenden den eigenen Temp-Ordner mitnehmen.
