@@ -930,6 +930,16 @@ class MainWindow(QMainWindow):
         
         
         
+        self.action_lock_width = QAction("Lock Window Width", self, checkable=True)
+        self.action_lock_width.setStatusTip(
+            "Keep the window from resizing itself when buttons appear. "
+            "The window can still be resized by hand, but not below the width "
+            "the toolbars need.")
+        self.action_lock_width.setChecked(
+            QSettings("KVRouite", "KVRouite").value("ui/freeze_width", False, type=bool))
+        self.action_lock_width.toggled.connect(self._on_lock_width_toggled)
+        setup_menu.addAction(self.action_lock_width)
+
         reset_config_action = QAction("Reset Config", self)
         reset_config_action.setStatusTip("Reset your configuration like map-keys etc.")
         reset_config_action.triggered.connect(self._on_reset_config_triggered)
@@ -992,6 +1002,9 @@ class MainWindow(QMainWindow):
 
 
         self._load_player_settings()
+
+        # Breiten-Sperre erst anwenden, wenn das Layout fertig aufgebaut ist.
+        QTimer.singleShot(0, self._apply_width_lock)
 
         
         # ========================= Zentrales Layout =========================
@@ -2550,6 +2563,127 @@ class MainWindow(QMainWindow):
 
             
     
+    # Laengste Texte, die update_info_line() je erzeugen kann (siehe die
+    # Formatstrings dort). Nur zum Messen - die Labels behalten ihr normales
+    # Verhalten, hier wird nichts dauerhaft reserviert.
+    _INFO_SAMPLES = (
+        ("label_video",     "Video: 00:00:00.000"),
+        ("label_length",    "Length(GPX): 999.99 km"),
+        ("label_duration",  "Duration(GPX): 00:00:00.000"),
+        ("label_elev",      "Elevation Gain: 99999 m"),
+        ("label_slope_max", "Max%: -99.9%"),
+        ("label_slope_min", "Min%: -99.9%"),
+        ("label_zerospeed", "ZeroSpeed: 99999"),
+        ("label_paused",    "TimeGaps: 99999"),
+    )
+
+    def _measure_max_needed_width(self):
+        """Breite messen, die das Fenster im Vollausbau braucht.
+
+        Vollausbau heisst: alle Buttons eingeblendet, die je eingeblendet werden
+        koennen, und die laengsten Texte in der Info-Zeile. Genau dieser Zustand
+        laesst Qt heute das Fenster groesser ziehen. Wird er einmal gemessen und
+        als Minimum gesetzt, aendert sich das Minimum spaeter nicht mehr - und
+        damit springt nichts.
+
+        Gemessen wird mit abgeschalteten Updates, es ist also nichts davon zu
+        sehen. Der Ausgangszustand wird vollstaendig wiederhergestellt.
+        """
+        vc = getattr(self, "video_control", None)
+        gc = getattr(self, "gpx_control", None)
+        central = self.centralWidget()
+        if vc is None or gc is None or central is None or central.layout() is None:
+            return 0
+
+        optional = [getattr(vc, n, None) for n in (
+            "hour_edit", "min_edit", "sec_edit", "markB_button", "markE_button",
+            "clear_button", "cut_button", "cut_begin_button", "cut_end_button",
+            "ovl_button", "autocut_button")]
+        optional += [getattr(gc, n, None) for n in (
+            "markB_button", "markE_button", "deselect_button", "cut_button",
+            "slot_sync_button")]
+        was_hidden = [x for x in optional if x is not None and x.isHidden()]
+
+        saved_text = []
+        for attr, sample in self._INFO_SAMPLES:
+            lbl = getattr(gc, attr, None)
+            if lbl is not None:
+                saved_text.append((lbl, lbl.text()))
+
+        def relayout():
+            # Es reicht NICHT, nur die beiden Leisten und das zentrale Layout zu
+            # invalidieren: dazwischen liegen Spalten-Widgets und der Splitter,
+            # die sonst ihre alten Minima behalten. Dann meldet das zentrale
+            # Layout den Ist- statt den Vollausbau-Wert. Also die komplette
+            # Kette von der jeweiligen Leiste bis zum Fenster hoch.
+            for start in (vc, gc):
+                widget = start
+                while widget is not None:
+                    lay = widget.layout()
+                    if lay is not None:
+                        lay.invalidate()
+                    widget.updateGeometry()
+                    if widget is self:
+                        break
+                    widget = widget.parentWidget()
+            lay = central.layout()
+            if lay is not None:
+                lay.activate()
+
+        # Kein setUpdatesEnabled(False): das blockiert die Layout-Neuberechnung,
+        # dann misst man den Ist- statt den Vollausbau-Zustand. Sichtbar wird
+        # trotzdem nichts, weil hier kein processEvents() laeuft und damit bis
+        # zum Zuruecksetzen kein Neuzeichnen stattfindet.
+        try:
+            for x in was_hidden:
+                x.setVisible(True)
+            for attr, sample in self._INFO_SAMPLES:
+                lbl = getattr(gc, attr, None)
+                if lbl is not None:
+                    lbl.setText(sample)
+            relayout()
+            needed = central.layout().totalMinimumSize().width()
+        finally:
+            for x in was_hidden:
+                x.setVisible(False)
+            for lbl, text in saved_text:
+                lbl.setText(text)
+            relayout()
+
+        # Rahmen/Raender des Fensters kommen zur Layoutbreite noch dazu.
+        return needed + (self.width() - central.width())
+
+    def _apply_width_lock(self):
+        """Breiten-Sperre an- oder abschalten (Config > Lock Window Width)."""
+        on = QSettings("KVRouite", "KVRouite").value(
+            "ui/freeze_width", False, type=bool)
+        if not on:
+            # setMinimumSize(0, 0) statt setMinimumWidth(0): Qt merkt sich in
+            # explicitMinSize, dass hier von Hand ein Minimum gesetzt wurde,
+            # und rechnet dann nie wieder selbst nach. setMinimumWidth() VERODERT
+            # dieses Flag nur (expl | (w ? Horizontal : 0)) - eine 0 loescht es
+            # also nicht, das Flag vom Einschalten bliebe stehen und das Fenster
+            # liesse sich auf 0 px ziehen. setMinimumSize() setzt das Flag
+            # dagegen direkt und raeumt es damit weg.
+            self.setMinimumSize(0, 0)
+            central = self.centralWidget()
+            if central is not None and central.layout() is not None:
+                central.layout().invalidate()
+                central.layout().activate()
+            # Das Fenster-Minimum setzt QMainWindowLayout, nicht das zentrale
+            # Layout - also auch das anstossen.
+            if self.layout() is not None:
+                self.layout().invalidate()
+                self.layout().activate()
+            return
+        needed = self._measure_max_needed_width()
+        if needed > 0:
+            self.setMinimumWidth(needed)
+
+    def _on_lock_width_toggled(self, on: bool):
+        QSettings("KVRouite", "KVRouite").setValue("ui/freeze_width", bool(on))
+        self._apply_width_lock()
+
     def _on_reset_config_triggered(self):
        
     

@@ -368,13 +368,59 @@ class GPXControlWidget(QWidget):
         # Beim Resizen Breite = Höhe * Aspect halten (damit volle Control-Höhe genutzt wird)
         self._kinomap_big.installEventFilter(self)
 
-    
+        # Verhindert, dass show()/hide() des Logos sich ueber resizeEvent selbst
+        # wieder aufruft.
+        self._logo_toggle_busy = False
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_logo_visibility()
+
+    def _update_logo_visibility(self):
+        """Logo ausblenden, wenn die Leiste sonst nicht mehr auf den Schirm passt.
+
+        Das Logo belegt rund 130 px feste Breite. Auf breiten Fenstern stoert das
+        nicht, auf einem 1920er Monitor sind es genau die Pixel, die am Ende
+        fehlen. Deshalb: sichtbar solange Platz da ist, sonst weg. Die Schwelle
+        wird aus dem tatsaechlichen Bedarf der beiden Zeilen berechnet, nicht
+        geraten, damit sie bei anderer Schrift oder Sprache mitwandert.
+
+        Die Hysterese (EIN erst 60 px ueber AUS) verhindert Flackern, wenn der
+        Nutzer genau auf der Schwelle am Fensterrand zieht.
+        """
+        logo = getattr(self, "_kinomap_big", None)
+        if logo is None or self._logo_toggle_busy:
+            return
+
+        need = max(self._buttons_layout.minimumSize().width(),
+                   self._info_layout.minimumSize().width())
+        margins = self._main_hbox.contentsMargins()
+        need += margins.left() + margins.right()
+        logo_cost = getattr(self, "_logo_full_width", 130) + self._main_hbox.spacing()
+        avail = self.width()
+
+        self._logo_toggle_busy = True
+        try:
+            if logo.isHidden():
+                if avail >= need + logo_cost + 60:
+                    logo.show()
+            elif avail < need + logo_cost:
+                logo.hide()
+        finally:
+            self._logo_toggle_busy = False
+
     def eventFilter(self, obj, event):
         if obj is getattr(self, "_kinomap_big", None) and event.type() == QEvent.Resize:
             h = min(self._kinomap_big.height(), MAX_LOGO_H)
             if h > 0 and getattr(self, "_kinomap_aspect", None):
                 w = int(h * self._kinomap_aspect)
-                self._kinomap_big.setFixedWidth(max(60, w))
+                # NICHT setFixedWidth: eine feste Breite wuerde in die
+                # Mindestbreite der ganzen Leiste eingehen. Dann kann das
+                # Fenster nie klein genug werden, damit das Ausblenden in
+                # _update_logo_visibility() ueberhaupt greift.
+                self._logo_full_width = max(60, w)
+                self._kinomap_big.setMinimumWidth(1)
+                self._kinomap_big.setMaximumWidth(self._logo_full_width)
         return super().eventFilter(obj, event)
 
     def on_setHeight_B2E_clicked(self):
