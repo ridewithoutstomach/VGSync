@@ -22,8 +22,9 @@
 import math
 
 from PySide6.QtWidgets import QWidget
-from PySide6.QtCore import Qt, QPoint, Signal
-from PySide6.QtGui import QPainter, QPen, QBrush, QColor, QPolygon, QWheelEvent
+from PySide6.QtCore import Qt, QPoint, QRectF, Signal
+from PySide6.QtGui import (QPainter, QPen, QBrush, QColor, QPolygon,
+                          QLinearGradient, QWheelEvent)
 
 def _nice_number(value: float) -> float:
     
@@ -44,6 +45,8 @@ def _nice_number(value: float) -> float:
 class VideoTimelineWidget(QWidget):
     markerMoved = Signal(float)
     overlayRemoveRequested = Signal(float, float)
+    # Rechtsklick auf einen schwarzen Block: Blende <-> harte Kante
+    cutHardToggleRequested = Signal(float, float)
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -53,6 +56,9 @@ class VideoTimelineWidget(QWidget):
         self.markB_time_s = -1.0
         self.markE_time_s = -1.0
         self._cut_intervals = []
+        # Schluessel der Schnitte, die ohne Blende ausgefuehrt werden.
+        # Wird vom VideoCutManager gesetzt, siehe set_hard_cut_keys().
+        self._hard_cut_keys = set()
         self._dragging_marker = False
         self._dragging_timeline = False
         self._timeline_drag_start_x = 0
@@ -72,7 +78,21 @@ class VideoTimelineWidget(QWidget):
         Entfernt alle Cut-Intervalle aus der Timeline.
         """
         self._cut_intervals = []
+        self._hard_cut_keys = set()
         self.update()
+
+    def set_hard_cut_keys(self, keys):
+        """Schnitte markieren, die ohne Blende ausgefuehrt werden.
+
+        keys enthaelt (start, end)-Paare, gerundet auf 3 Nachkommastellen
+        (VideoCutManager._cut_key).
+        """
+        self._hard_cut_keys = set(keys or ())
+        self.update()
+
+    @staticmethod
+    def _cut_key(start_s, end_s):
+        return (round(float(start_s), 3), round(float(end_s), 3))
     
         
     def add_overlay_interval(self, start_s: float, end_s: float):
@@ -374,6 +394,7 @@ class VideoTimelineWidget(QWidget):
 
         brush_black = QBrush(QColor(0, 0, 0, 150))
         pen_black = QPen(QColor("black"), 1)
+        pen_hard = QPen(QColor("#FF8A3D"), 1)
         painter.setPen(pen_black)
         for (start_s, end_s) in self._cut_intervals:
             if start_s < 0 or end_s <= 0 or self.total_duration <= 0:
@@ -389,7 +410,33 @@ class VideoTimelineWidget(QWidget):
             rect_width = x_end - x_start
             if rect_width < 1:
                 rect_width = 1
-            painter.fillRect(x_start, 0, rect_width, h, brush_black)
+
+            if self._cut_key(start_s, end_s) in self._hard_cut_keys:
+                # Harte Kante: Block bleibt schwarz, die Schnittkanten werden
+                # orange markiert. Bei sehr schmalen Bloecken wuerden zwei
+                # Linien ineinanderlaufen, deshalb dort nur eine.
+                painter.fillRect(QRectF(x_start, 0, rect_width, h), brush_black)
+                painter.setPen(pen_hard)
+                painter.drawLine(x_start, 0, x_start, h)
+                if rect_width >= 4:
+                    painter.drawLine(x_start + rect_width, 0,
+                                     x_start + rect_width, h)
+                painter.setPen(pen_black)
+            elif rect_width < 4:
+                # Zu schmal fuer einen Verlauf - der Block waere sonst kaum
+                # noch zu sehen.
+                painter.fillRect(QRectF(x_start, 0, rect_width, h), brush_black)
+            else:
+                # Blende: der Block laeuft an beiden Raendern weich aus.
+                # Der Verlauf ist rund 6 px breit, unabhaengig vom Zoom.
+                edge = min(0.35, 6.0 / rect_width)
+                grad = QLinearGradient(x_start, 0.0, x_start + rect_width, 0.0)
+                grad.setColorAt(0.0, QColor(0, 0, 0, 0))
+                grad.setColorAt(edge, QColor(0, 0, 0, 150))
+                grad.setColorAt(1.0 - edge, QColor(0, 0, 0, 150))
+                grad.setColorAt(1.0, QColor(0, 0, 0, 0))
+                painter.fillRect(QRectF(x_start, 0, rect_width, h),
+                                 QBrush(grad))
 
         # Zeichnen der Overlay-Intervalle (blau)
         if self.total_duration > 0 and self._overlay_intervals:
@@ -446,6 +493,14 @@ class VideoTimelineWidget(QWidget):
                 if reply == QMessageBox.Yes:
                     self.overlayRemoveRequested.emit(start_s, end_s)
                 break
+        # 3) Sonst pruefen, ob der Klick in einem Schnitt liegt
+        if not found_any:
+            for (start_s, end_s) in self._cut_intervals:
+                if start_s <= time_clicked <= end_s:
+                    found_any = True
+                    self.cutHardToggleRequested.emit(start_s, end_s)
+                    break
+
         if not found_any:
             event.ignore()
         else:

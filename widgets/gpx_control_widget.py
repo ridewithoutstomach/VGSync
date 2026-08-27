@@ -301,28 +301,41 @@ class GPXControlWidget(QWidget):
         self._info_layout.setSpacing(10)  # Zwischenraum zwischen Labels
         self.main_vbox.addLayout(self._info_layout)
         
-        self.label_video = QLabel("Video: 00:00:00", self)
+        # Kurze Beschriftungen, die Erklaerung steckt im Tooltip. Die Info-Zeile
+        # bestimmt die Mindestbreite der rechten Splitter-Spalte - jedes
+        # gesparte Pixel haelt die 50/50-Teilung laenger.
+        self.label_video = QLabel("V: 00:00:00", self)
+        self.label_video.setToolTip(
+            "Total length of all videos, cuts already deducted")
         self._info_layout.addWidget(self.label_video)
 
-        self.label_length = QLabel("Length(GPX): 0.00 km", self)
-        self._info_layout.addWidget(self.label_length)
+        # Laenge und Dauer in einem Label: "GPX: 8.94km/00:04:25"
+        self.label_gpx = QLabel("GPX: 0.00km/00:00:00", self)
+        self.label_gpx.setToolTip(
+            "GPX track: total length / total duration")
+        self._info_layout.addWidget(self.label_gpx)
 
-        self.label_duration = QLabel("Duration(GPX): 00:00:00", self)
-        self._info_layout.addWidget(self.label_duration)
-
-        self.label_elev = QLabel("Elevation Gain: 0 m", self)
+        self.label_elev = QLabel("Ele: 0m", self)
+        self.label_elev.setToolTip(
+            "Elevation gain: sum of all climbs in the GPX track")
         self._info_layout.addWidget(self.label_elev)
         
         self.label_slope_max = QLabel("Max%: 0.0%", self)
+        self.label_slope_max.setToolTip(
+            "Steepest climb: highest gradient in the GPX track")
         self._info_layout.addWidget(self.label_slope_max)
         
         self.label_slope_min = QLabel("Min%: 0.0%", self)
+        self.label_slope_min.setToolTip(
+            "Steepest descent: lowest gradient in the GPX track")
         self._info_layout.addWidget(self.label_slope_min)
 
-        self.label_zerospeed = QLabel("ZeroSpeed: 0", self)
+        self.label_zerospeed = QLabel("Zero: 0", self)
+        self.label_zerospeed.setToolTip(
+            "Zero speed: GPX points below the zero-speed threshold")
         self._info_layout.addWidget(self.label_zerospeed)
         
-        self.label_paused = QLabel("TimeGaps: 0", self)
+        self.label_paused = QLabel("Gaps: 0", self)
         self._info_layout.addWidget(self.label_paused)
         self.label_paused.setToolTip("Time gaps: consecutive GPX points with Δt above threshold")
         
@@ -1116,20 +1129,24 @@ class GPXControlWidget(QWidget):
                      zero_speed_count: int = 0,
                      paused_count: int = 0):                         
         """
-        Aktualisiert die 4 Labels in der Infozeile:
-        - Video
-        - Length(GPX)
-        - Duration(GPX)
-        - Elevation Gain
+        Aktualisiert die Labels in der Infozeile:
+        - V     (Videoposition)
+        - GPX   (Laenge/Dauer, ein Label)
+        - Ele   (Hoehengewinn)
+        - Max%/Min%, Zero, Gaps
         """
-        self.label_video.setText(f"Video: {video_time_str}")
-        self.label_length.setText(f"Length(GPX): {length_km:.2f} km")
-        self.label_duration.setText(f"Duration(GPX): {duration_str}")
-        self.label_elev.setText(f"Elevation Gain: {int(elev_gain)} m")
+        # Rohwerte merken - die GPX-Summary braucht sie und soll sie nicht aus
+        # dem Anzeigetext zurueckrechnen muessen.
+        self._elev_gain = float(elev_gain)
+        self._length_km = float(length_km)
+
+        self.label_video.setText(f"V: {video_time_str}")
+        self.label_gpx.setText(f"GPX: {length_km:.2f}km/{duration_str}")
+        self.label_elev.setText(f"Ele: {int(elev_gain)}m")
         self.label_slope_max.setText(f"Max%: {slope_max:.1f}%")
         self.label_slope_min.setText(f"Min%: {slope_min:.1f}%")
-        self.label_zerospeed.setText(f"ZeroSpeed: {zero_speed_count}")
-        self.label_paused.setText(f"TimeGaps: {paused_count}")    
+        self.label_zerospeed.setText(f"Zero: {zero_speed_count}")
+        self.label_paused.setText(f"Gaps: {paused_count}")    
         
         
     def set_markE_visibility(self, visible: bool):
@@ -3431,21 +3448,18 @@ class GPXControlWidget(QWidget):
             for i in range(n_points - 1)
         )
         
-        # Distanz aus dem Label lesen (wie bisher)
-        label_text = self.label_length.text()  # z.B. "Length(GPX): 66.12 km"
-        try:
-            dist_km = float(label_text.split(":")[1].replace("km", "").strip())
-        except Exception:
-            dist_km = 0.0
+        # Distanz NICHT aus dem Anzeigetext zurueckrechnen: sobald sich die
+        # Beschriftung aendert (zusaetzlicher Doppelpunkt, Komma statt Punkt),
+        # scheitert das Parsen still und die Summary zeigt 0.00 km.
+        # Genommen wird derselbe Wert, den die Info-Zeile anzeigt - sonst
+        # stuenden in Leiste und Summary zwei verschiedene Kilometerzahlen.
+        dist_km = float(getattr(self, "_length_km", dist_m / 1000.0))
     
         # Höhendaten
         ele_start = gpx_data[0].get("ele", 0.0)
         ele_end   = gpx_data[-1].get("ele", 0.0)
-        elev_text = self.label_elev.text()
-        try:
-            elev_gain = float(elev_text.split(":")[1].replace("m", "").strip())
-        except Exception:
-            elev_gain = 0.0
+        # Wie oben: der Wert kommt aus update_info_line(), nicht aus dem Text.
+        elev_gain = float(getattr(self, "_elev_gain", 0.0))
     
         # Geschwindigkeiten
         speeds = [pt.get("speed_kmh", 0.0) for pt in gpx_data if "speed_kmh" in pt]

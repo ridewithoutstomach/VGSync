@@ -32,6 +32,10 @@ class VideoCutManager(QObject):
         self.markB_time_s = -1.0
         self.markE_time_s = -1.0
         self._cut_intervals = []
+        # Schnitte, die OHNE Blende ausgefuehrt werden sollen (harte Kante).
+        # Gespeichert als gerundete (start, end)-Schluessel, damit
+        # _cut_intervals selbst unveraendert bleibt.
+        self._hard_cuts = set()
         self._skip_timer = QTimer(self)
         self._skip_timer.timeout.connect(self._check_cut_skip)
         self._skip_timer.start(200)
@@ -101,6 +105,7 @@ class VideoCutManager(QObject):
             self.remove_end_cut_intervals()
 
         print(f"[DEBUG] CUT hinzugefügt: ({start_s:.3f}, {end_s:.3f})")
+        self.prune_hard_cuts()
         self._cut_intervals.append((start_s, end_s))
         self.timeline.add_cut_interval(start_s, end_s)
         self.markB_time_s = -1
@@ -152,6 +157,61 @@ class VideoCutManager(QObject):
     def get_cut_intervals(self):
         return self._cut_intervals
 
+    # ------------------------------------------------------------------
+    # Harte Schnitte (kein Crossfade)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _cut_key(start_s, end_s):
+        return (round(float(start_s), 3), round(float(end_s), 3))
+
+    def is_hard_cut(self, start_s, end_s) -> bool:
+        return self._cut_key(start_s, end_s) in self._hard_cuts
+
+    def set_hard_cut(self, start_s, end_s, hard: bool = True):
+        key = self._cut_key(start_s, end_s)
+        if hard:
+            self._hard_cuts.add(key)
+        else:
+            self._hard_cuts.discard(key)
+        self._sync_timeline_hard_cuts()
+
+    def toggle_hard_cut(self, start_s, end_s) -> bool:
+        """Schaltet um und liefert den neuen Zustand (True = harte Kante)."""
+        new_state = not self.is_hard_cut(start_s, end_s)
+        self.set_hard_cut(start_s, end_s, new_state)
+        return new_state
+
+    def get_hard_cuts(self) -> list:
+        """Fuer die Projektdatei: Liste [[start, end], ...]."""
+        self.prune_hard_cuts()
+        return [[a, b] for (a, b) in sorted(self._hard_cuts)]
+
+    def set_hard_cuts(self, pairs):
+        self._hard_cuts = set()
+        for item in (pairs or []):
+            try:
+                self._hard_cuts.add(self._cut_key(item[0], item[1]))
+            except (TypeError, IndexError, ValueError):
+                continue
+        self.prune_hard_cuts()
+        self._sync_timeline_hard_cuts()
+
+    def prune_hard_cuts(self):
+        """Markierungen wegwerfen, zu denen es keinen Schnitt mehr gibt.
+
+        Sonst wuerde ein spaeter an genau derselben Stelle gesetzter Schnitt
+        die alte Markierung erben.
+        """
+        alive = {self._cut_key(a, b) for (a, b) in self._cut_intervals}
+        self._hard_cuts &= alive
+        self._sync_timeline_hard_cuts()
+
+    def _sync_timeline_hard_cuts(self):
+        try:
+            self.timeline.set_hard_cut_keys(self._hard_cuts)
+        except AttributeError:
+            pass
+
     def is_end_cut(self, end_s: float, eps: float = 0.1) -> bool:
         """True, wenn end_s bis ans Ende des Gesamtvideos reicht."""
         video_total = sum(self.video_durations)
@@ -177,9 +237,11 @@ class VideoCutManager(QObject):
             self._cut_intervals.remove(iv)
         print(f"[DEBUG] vorhandene End-Cuts ersetzt: {removed}")
 
+        self.prune_hard_cuts()
         self.timeline.clear_all_cuts()
         for (a, b) in self._cut_intervals:
             self.timeline.add_cut_interval(a, b)
+        self._sync_timeline_hard_cuts()
         return removed
 
     def _check_cut_skip(self):

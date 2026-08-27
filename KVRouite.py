@@ -405,10 +405,17 @@ def main():
         new_height = int(new_width / target_ratio)
 
     window.resize(new_width, new_height)
+
+    # Hat der Nutzer beim letzten Mal eine eigene Fenstergroesse/-position
+    # hinterlassen, gilt die. Sonst bleibt es exakt beim bisherigen Start:
+    # Standardgroesse oben, danach mittig setzen.
+    restored = window.apply_saved_window_geometry()
+
     window.show()
 
     app.processEvents()
-    center_mainwindow(window)
+    if not restored:
+        center_mainwindow(window)
     window.raise_()
     window.activateWindow()
 

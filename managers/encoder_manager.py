@@ -877,7 +877,8 @@ def encode_closedgop(
     crf=None,       # read from config; no default 12
     width=None,
     preset=None,
-    bitrate_mbps=None
+    bitrate_mbps=None,
+    force_kf=None
 ):
     enc_name, mode = determine_encoder(encoder, hw_encode)
     real_preset = preset
@@ -925,6 +926,19 @@ def encode_closedgop(
         cmd+= ["-vf", filter_str]
 
     cmd+= [outname]
+    # An jeder Schnittkante einen Keyframe erzwingen.
+    #
+    # Die Teilstuecke werden spaeter mit "-c copy" aus merged.mp4 geholt und
+    # koennen deshalb nur an Keyframes beginnen. Ohne diese Zeile liegt die
+    # naechste Kante bis zu eine GOP daneben (bei -g 5 rund 0,17 s), und der
+    # Fehler summiert sich ueber alle Schnitte - gemessen -0,167 s pro
+    # Schnitt, bei harter Kante wie bei Blende gleichermassen. Mit einem
+    # Keyframe genau auf der Kante ist der Schnitt bildgenau. Kostet nichts:
+    # merged.mp4 wird hier ohnehin komplett neu encodiert.
+    if force_kf:
+        times = ",".join(f"{float(t):.6f}" for t in force_kf)
+        cmd = cmd[:-1] + ["-force_key_frames", times] + [cmd[-1]]
+
     print("ENCODE_CLOSEDGOP:", " ".join(cmd))
     #subprocess.run(cmd, check=True)
     run_command_gui(cmd, log_func=print)  # oder deine GUI-Logfunktion
@@ -1028,12 +1042,20 @@ def _get_keyframes_by_decoding(src):
     #for i, t in enumerate(times, start=1):
     #    print(f" - Keyframe {i} bei {t:.3f}s")
     return times        
+# Toleranz fuer die Keyframe-Suche: 1 ms. Zwei Bilder liegen mindestens 16 ms
+# auseinander, ein Keyframe kann also nie versehentlich der falsche sein.
+# Noetig, weil die Schnittzeiten durch die Umrechnung auf die Zeitachse nach
+# dem Vorschnitt minimal danebenliegen koennen: 18.1 - 3.1 ergibt in Python
+# 15.000000000000002, der erzwungene Keyframe steht aber bei 15.000000 - ohne
+# Toleranz wird er uebersehen und der Schnitt springt eine GOP zu weit.
+KF_EPS = 0.001
+
 def get_kf_le(kf_list,t):
     if not kf_list:
         return 0.0
     best=kf_list[0]
     for k in kf_list:
-        if k<=t:
+        if k<=t+KF_EPS:
             best=k
         else:
             break
@@ -1043,7 +1065,7 @@ def get_kf_ge(kf_list,t):
     if not kf_list:
         return t
     for k in kf_list:
-        if k>=t:
+        if k>=t-KF_EPS:
             return k
     return kf_list[-1]
 
@@ -1353,7 +1375,15 @@ def build_segments_with_skip_and_overlay(
         # 1) Normal-Part: [current_pos..t1]
         if t1 > current_pos:
             seg_start = get_kf_le(kf_list, current_pos)
-            seg_end   = get_kf_le(kf_list, t1)
+            if ev["type"] == "skip" and float(ev["overlap"]) <= 0:
+                # Harte Kante: hier folgt kein A-Segment, das an einem
+                # Keyframe beginnen muesste. Ein "-c copy"-Stueck darf mitten
+                # in der GOP ENDEN, nur der Anfang braucht einen Keyframe.
+                # Damit sitzt die Kante auch dann exakt, wenn der Keyframe
+                # oben nicht erzwungen werden konnte.
+                seg_end = t1
+            else:
+                seg_end   = get_kf_le(kf_list, t1)
             if seg_end > seg_start:
                 part_out = os.path.join(
                     temp_dir, f"part_{out_count:02d}_{int(seg_start)}_{int(seg_end)}.mp4"
@@ -1373,6 +1403,29 @@ def build_segments_with_skip_and_overlay(
         # 2) Schauen, ob wir SKIP oder OVERLAY haben
         if ev["type"] == "skip":
             overlap = ev["overlap"]
+
+            # Harter Schnitt: overlap = 0 bedeutet "keine Blende".
+            # Ohne diesen Zweig laeuft copy_cut() in eine Exception, denn
+            # A_end = get_kf_le(t1 + 0) ist derselbe Keyframe wie A_start,
+            # das A-Segment haette also Dauer 0.
+            #
+            # current_pos wird bewusst auf den Keyframe NACH t2 gesetzt und
+            # nicht auf t2 selbst: das naechste Normalstueck startet mit
+            # get_kf_le(current_pos) und wuerde sonst rueckwaerts in den
+            # weggeschnittenen Bereich runden (bis zu eine GOP, bei -g 5 also
+            # rund 0,17 s). Liegt current_pos schon auf einem Keyframe, ist
+            # das spaetere get_kf_le() wirkungslos und die Schnittkante bleibt
+            # genau dort, wo der Benutzer sie gesetzt hat.
+            if overlap <= 0:
+                current_pos = max(
+                    current_pos,
+                    get_kf_ge(kf_list, min(t2, total_duration))
+                )
+                debug_logs.append(
+                    f"[SKIP] JSON-Bereich: {t1:.2f}..{t2:.2f}, harter Schnitt "
+                    f"=> kein Crossfade, weiter ab {current_pos:.2f}"
+                )
+                continue
             #if t2 > total_duration:
             #    t2 = total_duration
             #if t1 >= total_duration:
@@ -1542,6 +1595,26 @@ def xfade_main(cfg_path):
         out = subprocess.run(cmd, capture_output=True, text=True, check=True)
         total_duration += float(out.stdout.strip())
 
+    # Was mit jedem Schnitt passiert. Steht einmal oben im Encoder-Fenster
+    # und am Ende noch einmal unter "DONE" - dort bleibt es stehen, waehrend
+    # der obere Teil beim Rendern durchlaeuft.
+    def _cut_summary():
+        lines = []
+        for (c_s, c_e, c_v) in skip_list:
+            if c_v == -2:
+                what = "trimmed away (video start)"
+            elif c_v == -1:
+                what = "trimmed away (video end)"
+            elif float(c_v) <= 0:
+                what = "hard cut (no crossfade)"
+            else:
+                what = f"crossfade {float(c_v):.1f}s"
+            lines.append(f"Cut {float(c_s):.2f}s - {float(c_e):.2f}s: {what}")
+        return lines
+
+    for line in _cut_summary():
+        print("[INFO] " + line)
+
     keep_segments = compute_keep_segments(skip_list, total_duration)
     print("[INFO] Keep segments:", keep_segments)
 
@@ -1575,7 +1648,17 @@ def xfade_main(cfg_path):
     print("[INFO] Length check done, merging ...\n")
 
     merged_path = os.path.join(temp_dir, merged_out)
+
+    # Die Schnitte auf die Zeitachse NACH dem Vorschnitt umrechnen. Das
+    # Ergebnis wird zweimal gebraucht: hier fuer die erzwungenen Keyframes
+    # und weiter unten fuer die Segmente.
+    remapped_skips, remapped_overlays = remap_instructions(
+        skip_list, overlay_list, timeline_map)
+    cut_edges = sorted({t for (c_s, c_e, _v) in remapped_skips
+                        for t in (c_s, c_e)})
+
     encode_closedgop(
+        force_kf=cut_edges,
         concat_file=concat_txt,
         outname=merged_path,
         encoder=encoder,
@@ -1601,7 +1684,6 @@ def xfade_main(cfg_path):
     print("[INFO] Merged duration:", new_duration)
 
     kf = get_keyframes(merged_path)
-    remapped_skips, remapped_overlays = remap_instructions(skip_list, overlay_list, timeline_map)
 
     parts = build_segments_with_skip_and_overlay(
         merged_file=merged_path,
@@ -1621,6 +1703,8 @@ def xfade_main(cfg_path):
 
     final_concat_copy(parts, final_out)
     print("\n== DONE == Final video:", final_out)
+    for line in _cut_summary():
+        print("   " + line)
 
 if __name__ == "__main__":
     main()

@@ -49,6 +49,7 @@ import gc
 from PySide6.QtCore import QUrl
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtCore import QSettings
+from PySide6.QtCore import QByteArray
 
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtGui import QGuiApplication
@@ -940,6 +941,13 @@ class MainWindow(QMainWindow):
         self.action_lock_width.toggled.connect(self._on_lock_width_toggled)
         setup_menu.addAction(self.action_lock_width)
 
+        action_reset_layout = QAction("Reset Window Layout", self)
+        action_reset_layout.setStatusTip(
+            "Forget the stored window size, position and splitter position "
+            "and go back to the default layout.")
+        action_reset_layout.triggered.connect(self._on_reset_window_layout)
+        setup_menu.addAction(action_reset_layout)
+
         reset_config_action = QAction("Reset Config", self)
         reset_config_action.setStatusTip("Reset your configuration like map-keys etc.")
         reset_config_action.triggered.connect(self._on_reset_config_triggered)
@@ -1053,6 +1061,7 @@ class MainWindow(QMainWindow):
         self.timeline = VideoTimelineWidget()
         self.video_control = VideoControlWidget()
         self.timeline.overlayRemoveRequested.connect(self._on_timeline_overlay_remove)
+        self.timeline.cutHardToggleRequested.connect(self._on_cut_hard_toggle)
 
         
         left_timeline_control_layout.addWidget(self.timeline)
@@ -1162,6 +1171,8 @@ class MainWindow(QMainWindow):
         # Optional: Startverhältnis (z.B. Pixel oder Stretch)
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 1)
+        # Fuer Speichern/Wiederherstellen und "Reset Window Layout".
+        self._main_splitter = splitter
         
         #
         # ============== Splitter ins Haupt-Layout ==============
@@ -2566,15 +2577,135 @@ class MainWindow(QMainWindow):
     # Laengste Texte, die update_info_line() je erzeugen kann (siehe die
     # Formatstrings dort). Nur zum Messen - die Labels behalten ihr normales
     # Verhalten, hier wird nichts dauerhaft reserviert.
+    # ------------------------------------------------------------------
+    # Fenster-Layout merken (Groesse, Position, Splitter-Teilung)
+    # ------------------------------------------------------------------
+    # Ohne das muss sich jeder Nutzer die Aufteilung bei jedem Start neu
+    # zurechtziehen. Gespeichert wird beim Schliessen, geladen beim Start.
+    # "Reset Window Layout" im Config-Menue stellt den Auslieferungszustand
+    # wieder her: Standardgroesse, zentriert, Splitter 50/50.
+
+    _GEOMETRY_KEY = "ui/window_geometry"
+    _SPLITTER_KEY = "ui/splitter_state"
+
+    def _default_window_size(self):
+        """Standardgroesse wie beim allerersten Start: 16:9, 90% des Schirms.
+
+        Dieselbe Rechnung wie in KVRouite.main(), damit "Reset Window Layout"
+        wirklich dorthin zurueckfuehrt und nicht auf einen zweiten Wert.
+        """
+        screen = QGuiApplication.primaryScreen()
+        if screen is None:
+            return QSize(1280, 720)
+        geo = screen.availableGeometry()
+        target_ratio = 16 / 9
+        if geo.height() > 0 and (geo.width() / geo.height()) >= target_ratio:
+            h = int(geo.height() * 0.9)
+            w = int(h * target_ratio)
+        else:
+            w = int(geo.width() * 0.9)
+            h = int(w / target_ratio)
+        return QSize(w, h)
+
+    def apply_saved_window_geometry(self) -> bool:
+        """Gespeicherte Fenstergroesse/-position setzen.
+
+        Rueckgabe True, wenn etwas geladen wurde. Nur dann darf der Aufrufer
+        das Zentrieren ueberspringen - sonst bliebe das alte Startverhalten
+        (Standardgroesse, mittig) nicht erhalten.
+        """
+        data = QSettings("KVRouite", "KVRouite").value(
+            self._GEOMETRY_KEY, None, type=QByteArray)
+        if data is None or data.isEmpty():
+            return False
+        return bool(self.restoreGeometry(data))
+
+    def _split_5050(self):
+        """Splitter exakt halbieren.
+
+        Die Griffbreite muss raus, bevor geteilt wird. Sonst ist die Summe der
+        beiden Wunschbreiten groesser als der Splitter und Qt kuerzt selbst -
+        das Ergebnis ist dann um ein paar Pixel schief.
+        """
+        sp = getattr(self, "_main_splitter", None)
+        if sp is None:
+            return
+        avail = sp.width() - sp.handleWidth() * (sp.count() - 1)
+        if avail < 2:
+            return
+        half = avail // 2
+        sp.setSizes([half, avail - half])
+
+    def _restore_or_balance_splitter(self):
+        """Splitter-Teilung laden - oder, wenn nichts gespeichert ist, halbieren.
+
+        50/50 ist der gewuenschte Auslieferungszustand. Qt wuerde sonst nach
+        den sizeHints der beiden Spalten aufteilen, und weil die rechte Spalte
+        (Info-Zeile der GPX-Leiste) einen groesseren Hint hat als die linke,
+        bekaeme rechts dauerhaft ein paar hundert Pixel mehr.
+
+        Unter die Mindestbreite einer Spalte kommt auch 50/50 nicht - Qt
+        korrigiert das dann selbst nach oben.
+        """
+        sp = getattr(self, "_main_splitter", None)
+        if sp is None:
+            return
+        data = QSettings("KVRouite", "KVRouite").value(
+            self._SPLITTER_KEY, None, type=QByteArray)
+        if data is not None and not data.isEmpty() and sp.restoreState(data):
+            return
+        self._split_5050()
+
+    def _save_window_layout(self):
+        s = QSettings("KVRouite", "KVRouite")
+        # Im Vollbild/maximiert speichert saveGeometry() zusaetzlich die
+        # normale Groesse mit - deshalb reicht der eine Aufruf.
+        s.setValue(self._GEOMETRY_KEY, self.saveGeometry())
+        sp = getattr(self, "_main_splitter", None)
+        if sp is not None:
+            s.setValue(self._SPLITTER_KEY, sp.saveState())
+
+    def _on_reset_window_layout(self):
+        s = QSettings("KVRouite", "KVRouite")
+        s.remove(self._GEOMETRY_KEY)
+        s.remove(self._SPLITTER_KEY)
+
+        if self.isMaximized() or self.isFullScreen():
+            self.showNormal()
+        size = self._default_window_size()
+        self.resize(size)
+
+        screen = QGuiApplication.primaryScreen()
+        if screen is not None:
+            geo = screen.availableGeometry()
+            self.move(geo.center().x() - self.width() // 2,
+                      geo.center().y() - self.height() // 2)
+
+        self._split_5050()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not getattr(self, "_layout_restored", False):
+            self._layout_restored = True
+            # Erst wenn das Fenster seine endgueltige Breite hat, sonst wird
+            # die Haelfte von einer Zwischengroesse berechnet.
+            QTimer.singleShot(0, self._restore_or_balance_splitter)
+
+    def closeEvent(self, event):
+        try:
+            self._save_window_layout()
+        except Exception as e:
+            print("[WARN] window layout not saved:", e)
+        super().closeEvent(event)
+
     _INFO_SAMPLES = (
-        ("label_video",     "Video: 00:00:00.000"),
-        ("label_length",    "Length(GPX): 999.99 km"),
-        ("label_duration",  "Duration(GPX): 00:00:00.000"),
-        ("label_elev",      "Elevation Gain: 99999 m"),
+        ("label_video",     "V: 00:00:00.000"),
+        ("label_gpx",       "GPX: 999.99km/00:00:00.000"),
+        ("label_elev",      "Ele: 99999m"),
         ("label_slope_max", "Max%: -99.9%"),
         ("label_slope_min", "Min%: -99.9%"),
-        ("label_zerospeed", "ZeroSpeed: 99999"),
-        ("label_paused",    "TimeGaps: 99999"),
+        ("label_zerospeed", "Zero: 99999"),
+        ("label_paused",    "Gaps: 99999"),
     )
 
     def _measure_max_needed_width(self):
@@ -4608,6 +4739,44 @@ class MainWindow(QMainWindow):
     def _on_timeline_overlay_remove(self, start_s, end_s):
         self._overlay_manager.remove_overlay_interval(start_s, end_s)    
 
+    def _on_cut_hard_toggle(self, start_s: float, end_s: float):
+        """Rechtsklick auf einen schwarzen Block: Blende <-> harte Kante.
+
+        Start- und Endschnitt bleiben aussen vor: die werden schon vor dem
+        Zusammenfuegen weggetrimmt (Werte -2 bzw. -1 in den
+        skip_instructions) und haben deshalb noch nie eine Blende gehabt.
+        """
+        total_dur = getattr(self, "real_total_duration", 0.0) or 0.0
+        is_start_cut = abs(start_s - 0.0) < 0.1
+        is_end_cut = total_dur > 0 and abs(end_s - total_dur) < 0.1
+        if is_start_cut or is_end_cut:
+            QMessageBox.information(
+                self,
+                "No crossfade here",
+                "The first and the last cut are trimmed away before "
+                "encoding, so they never had a crossfade."
+            )
+            return
+
+        hard_now = self.cut_manager.is_hard_cut(start_s, end_s)
+        if hard_now:
+            question = (f"Cut {start_s:.2f}s - {end_s:.2f}s is a hard cut.\n"
+                        "Use a crossfade again?")
+        else:
+            question = (f"Cut {start_s:.2f}s - {end_s:.2f}s uses a crossfade.\n"
+                        "Make it a hard cut instead?")
+
+        reply = QMessageBox.question(
+            self, "Cut mode", question,
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply != QMessageBox.Yes:
+            return
+
+        new_state = self.cut_manager.toggle_hard_cut(start_s, end_s)
+        print(f"[DEBUG] cut {start_s:.3f}-{end_s:.3f} => "
+              f"{'hard cut' if new_state else 'crossfade'}")
+        self.timeline.update()
+
     def on_time_hms_set_clicked(self, hh: int, mm: int, ss: int, ms=0):
         """
         Empfängt das Signal vom VideoControlWidget (SetTime-Button).
@@ -4693,7 +4862,14 @@ class MainWindow(QMainWindow):
                 elif abs(cend - total_dur) < 0.1:
                     skip_array.append([cstart, cend, -1])  # Endcut
                 else:
-                    skip_array.append([cstart, cend, xfade_val])
+                    # Der dritte Wert ist die Blendendauer DIESES Schnitts.
+                    # 0 bedeutet harte Kante: der Encoder baut dann weder
+                    # A-/B-Segment noch Crossfade, die Schnittkante und die
+                    # Gesamtlaenge bleiben unveraendert.
+                    if self.cut_manager.is_hard_cut(cstart, cend):
+                        skip_array.append([cstart, cend, 0])
+                    else:
+                        skip_array.append([cstart, cend, xfade_val])
         
             # Debug-Ausgabe, damit du siehst, was wirklich passiert:
             print("DEBUG skip_array:", skip_array)
@@ -5797,6 +5973,7 @@ class MainWindow(QMainWindow):
         # --- 3) Timeline & Cuts vollständig zurücksetzen ---
         try:
             self.cut_manager._cut_intervals.clear()
+            self.cut_manager.prune_hard_cuts()
             self.cut_manager.markB_time_s = -1.0
             self.cut_manager.markE_time_s = -1.0
 
@@ -6286,12 +6463,18 @@ class MainWindow(QMainWindow):
 
     def register_video_undo_snapshot(self,appendToLast: bool = False):
         snapshot = copy.deepcopy(self.cut_manager._cut_intervals)
+        # Die Markierungen 'harte Kante' gehoeren zum selben Zustand wie die
+        # Schnitte selbst und muessen mit zurueckgeholt werden.
+        hard_snapshot = set(self.cut_manager._hard_cuts)
 
         def undo():
             self.cut_manager._cut_intervals = copy.deepcopy(snapshot)
             self.timeline.clear_all_cuts()
             for (start, end) in snapshot:
                 self.timeline.add_cut_interval(start, end)
+            self.cut_manager._hard_cuts = set(hard_snapshot)
+            self.cut_manager.prune_hard_cuts()
+            self.cut_manager._sync_timeline_hard_cuts()
 
             self.cut_manager.video_editor.set_cut_intervals(snapshot)
             self.timeline.update()
@@ -6331,6 +6514,7 @@ class MainWindow(QMainWindow):
             "global_keyframes": self.global_keyframes,
             "gpx_data": self.gpx_widget.gpx_list._gpx_data,
             "cut_intervals": self.cut_manager._cut_intervals,
+            "hard_cuts": self.cut_manager.get_hard_cuts(),
             "gpx_markers": {
                 "markB_idx": self.gpx_widget.gpx_list._markB_idx,
                 "markE_idx": self.gpx_widget.gpx_list._markE_idx
@@ -6428,6 +6612,9 @@ class MainWindow(QMainWindow):
 
             # 3. Cuts laden
             self.cut_manager._cut_intervals = project_data.get("cut_intervals", [])
+            # Aeltere Projektdateien kennen "hard_cuts" nicht -> alle
+            # Schnitte behalten ihre Blende, wie bisher.
+            self.cut_manager.set_hard_cuts(project_data.get("hard_cuts", []))
             if self.video_durations:
                 total_duration = sum(self.video_durations)
                 self.timeline.set_total_duration(total_duration)
@@ -6503,6 +6690,7 @@ class MainWindow(QMainWindow):
             self.timeline.clear_all_cuts()
             for start_s, end_s in self.cut_manager._cut_intervals:
                 self.timeline.add_cut_interval(start_s, end_s)
+            self.cut_manager._sync_timeline_hard_cuts()
 
             self.timeline.update()
             self._rebuild_playlist_menu()
