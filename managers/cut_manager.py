@@ -295,8 +295,8 @@ class VideoCutManager(QObject):
         if idx < 0 or idx >= len(self.video_editor.playlist):
             return False
 
-        # 3) mpv-Filename (sofern mpv.py das unterstützt)
-        fname = self.video_editor._player.filename
+        # 3) Es muss auch wirklich eine Datei geladen sein
+        fname = self.video_editor.get_current_file()
         if not fname:
             return False
 
@@ -332,12 +332,11 @@ class VideoCutManager(QObject):
         macht sofort Pause, so dass 1 Frame sichtbar ist.
         """
         was_playing = self.video_editor.is_playing  # Merke, ob das Video vorher lief
-        # 1) mpv-Seeking
-        self.video_editor._jump_to_global_time(new_global_s)
+        # 1) Sprung in der Timeline
+        self.video_editor.seek_global(new_global_s)
         if not was_playing:
             # 2) Pause => Freeze
-            self.video_editor._player.pause = True
-            self.video_editor.is_playing = False
+            self.video_editor.set_paused(True)
         else:
             self._play_after_skip()    
             
@@ -356,8 +355,7 @@ class VideoCutManager(QObject):
         def _ensure_playing():
             """Prüft, ob das Video läuft, und startet es falls nötig."""
             if not self.video_editor.is_playing:
-                self.video_editor._player.pause = False
-                self.video_editor.is_playing = True
+                self.video_editor.set_paused(False)
 
 
         from PySide6.QtCore import QTimer

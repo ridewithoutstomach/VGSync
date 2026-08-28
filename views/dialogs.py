@@ -384,3 +384,78 @@ class DetachDialog(QDialog):
         super().closeEvent(event)
 
 
+
+
+class PreviewPrepareDialog(QDialog):
+    """
+    Zeigt beim Laden eines Projekts, dass die Vorschau noch vorbereitet wird.
+
+    Die Blenden werden vorgerendert (core/fade_cache.py). Bei grossen
+    Quelldateien dauert das mehrere Sekunden. Ohne Fenster sieht der Benutzer
+    in dieser Zeit harte Schnitte, haelt sie fuer einen Fehler - oder haelt die
+    App fuer abgestuerzt. Deshalb wird hier blockierend angezeigt, was laeuft.
+    """
+
+    abgebrochen = Signal()
+
+    def __init__(self, gesamt: int = 0, parent=None, titel: str = "Preparing preview…"):
+        super().__init__(parent)
+        self.setWindowTitle(titel)
+        self.setModal(True)
+        self.setMinimumWidth(460)
+
+        layout = QVBoxLayout(self)
+        self.label_info = QLabel(
+            "Rendering the crossfades for the preview. "
+            "This happens once per cut; afterwards it is reused.", self)
+        self.label_info.setWordWrap(True)
+        layout.addWidget(self.label_info)
+
+        self.progress_bar = QProgressBar(self)
+        if gesamt > 0:
+            self.progress_bar.setRange(0, gesamt)
+            self.progress_bar.setValue(0)
+            self.progress_bar.setFormat("%v / %m")
+        else:
+            # Unbekannte Dauer: laufender Balken statt falscher Prozentzahl.
+            self.progress_bar.setRange(0, 0)
+        layout.addWidget(self.progress_bar)
+
+        self.label_step = QLabel("", self)
+        layout.addWidget(self.label_step)
+
+        row = QHBoxLayout()
+        row.addStretch()
+        self.btn_cancel = QPushButton("Skip", self)
+        self.btn_cancel.setToolTip(
+            "Stop rendering. Cuts without a finished crossfade are shown as "
+            "hard cuts until you change something.")
+        self.btn_cancel.clicked.connect(self._on_cancel)
+        row.addWidget(self.btn_cancel)
+        layout.addLayout(row)
+
+        if gesamt > 0:
+            self.setzen(0, gesamt)
+
+    def schritt(self, text: str):
+        """Zeigt an, woran gerade gearbeitet wird."""
+        self.label_step.setText(text)
+        QApplication.processEvents()
+
+    def setzen(self, fertig: int, gesamt: int):
+        gesamt = max(1, gesamt)
+        self.progress_bar.setRange(0, gesamt)
+        self.progress_bar.setValue(min(fertig, gesamt))
+        self.label_step.setText(f"Crossfade {min(fertig + 1, gesamt)} of {gesamt}")
+
+    def _on_cancel(self):
+        self.btn_cancel.setEnabled(False)
+        self.label_step.setText("Stopping…")
+        self.abgebrochen.emit()
+
+    def closeEvent(self, event):
+        # Das Fenster schliesst sich selbst, wenn alles fertig ist. Klickt der
+        # Benutzer vorher auf X, zaehlt das wie "Skip".
+        if self.btn_cancel.isEnabled():
+            self.abgebrochen.emit()
+        super().closeEvent(event)

@@ -108,8 +108,7 @@ where the cut will really land."""
     # ------------------------------------------------------------------------
     def step_forward(self):
         if self.video_editor.is_playing:
-            self.video_editor._player.pause = True
-            self.video_editor.is_playing = False
+            self.video_editor.set_paused(True)
 
         if self.step_mode in ('s', 'm'):
             self._step_time(+1)
@@ -124,8 +123,7 @@ where the cut will really land."""
 
     def step_backward(self):
         if self.video_editor.is_playing:
-            self.video_editor._player.pause = True
-            self.video_editor.is_playing = False
+            self.video_editor.set_paused(True)
 
         if self.step_mode in ('s', 'm'):
             self._step_time(-1)
@@ -148,7 +146,7 @@ where the cut will really land."""
         if not keeps:
             target = max(cur_s + delta, 0.0)
             print(f"[DEBUG] (time): keine Schnitte => {cur_s:.3f} => {target:.3f}")
-            self.video_editor._jump_to_global_time(target)
+            self.video_editor.seek_global(target)
             return
 
         cur_final = self._final_from_source(cur_s)
@@ -157,7 +155,7 @@ where the cut will really land."""
         arrow = "+" if direction > 0 else "-"
         print(f"[DEBUG] (time {arrow}): roh {cur_s:.3f} => {target:.3f} | "
               f"fertig {cur_final:.3f} => {new_final:.3f} (dt={delta:+.3f})")
-        self.video_editor._jump_to_global_time(target)
+        self.video_editor.seek_global(target)
 
     def _compute_time_step_s(self):
         if self.step_mode == 'm':
@@ -193,7 +191,7 @@ where the cut will really land."""
         target = self._edge_seek_target("in", keeps[idx + 1][0])
         print(f"[DEBUG] (frame-forward): {cur_s:.3f} => {target:.3f} "
               f"(ueber den Schnitt {ke:.3f}..{keeps[idx + 1][0]:.3f})")
-        self.video_editor._jump_to_global_time(target)
+        self.video_editor.seek_global(target)
 
     def _step_frame_backward(self):
         cur_s = self._get_current_global_time()
@@ -220,7 +218,7 @@ where the cut will really land."""
         target = self._edge_seek_target("out", keeps[idx - 1][1])
         print(f"[DEBUG] (frame-backward): {cur_s:.3f} => {target:.3f} "
               f"(ueber den Schnitt {keeps[idx - 1][1]:.3f}..{ks:.3f})")
-        self.video_editor._jump_to_global_time(target)
+        self.video_editor.seek_global(target)
 
     # ------------------------------------------------------------------------
     # k => Keyframes, die im fertigen Video noch vorkommen
@@ -261,7 +259,7 @@ where the cut will really land."""
         arrow = "+" if direction > 0 else "-"
         print(f"[DEBUG] (k {arrow}): {cur_s:.3f} => {target:.3f} "
               f"(idx={idx} von {len(kfs)})")
-        self.video_editor._jump_to_global_time(target)
+        self.video_editor.seek_global(target)
 
     def _surviving_keyframes(self, raw):
         """
@@ -307,7 +305,7 @@ where the cut will really land."""
                 target = self._edge_seek_target(kind, t)
                 print(f"[DEBUG] (c {arrow}): {cur_s:.3f} => {target:.3f} "
                       f"({kind} @ {t:.3f})")
-                self.video_editor._jump_to_global_time(target)
+                self.video_editor.seek_global(target)
                 return
 
         print("[DEBUG] (c): letzte Schnittkante in dieser Richtung erreicht.")
@@ -446,26 +444,13 @@ where the cut will really land."""
     # ------------------------------------------------------------------------
     def _get_current_fps(self) -> float:
         """
-        Bildrate aus mpv. Fallback 25.0.
-
-        video_params kennt KEIN "fps" - nachgemessen an libmpv enthaelt es
-        w/h/aspect/par usw., aber keine Bildrate. Der frueher benutzte Zugriff
-        lief deshalb immer in den Fallback. Richtig sind "container-fps" und
-        ersatzweise "estimated-vf-fps".
+        Bildrate des aktuellen Videos. Fallback 25.0, wenn das Backend keine
+        liefert (welche Player-Eigenschaften dafuer taugen, steht in
+        core/player_backend.py).
         """
-        for name in ("container_fps", "estimated_vf_fps"):
-            try:
-                val = getattr(self.video_editor._player, name)
-                if val and float(val) > 0:
-                    return float(val)
-            except Exception:
-                pass
-        try:
-            val = self.video_editor._player.video_params["fps"]
-            if val and float(val) > 0:
-                return float(val)
-        except Exception:
-            pass
+        fps = self.video_editor.get_fps()
+        if fps and float(fps) > 0:
+            return float(fps)
         return 25.0
 
     def _get_current_global_time(self) -> float:

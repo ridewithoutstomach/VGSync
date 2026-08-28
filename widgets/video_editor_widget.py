@@ -31,8 +31,9 @@ Das funktioniert für normale Videos sofort. Zoomen > 0 macht das Panning sichtb
 """
 
 import platform
-import mpv
 import math
+
+from core.player_backend import create_backend
 
 from PySide6.QtWidgets import (
     QWidget, QGridLayout, QFrame, QLabel, QVBoxLayout
@@ -46,9 +47,10 @@ class VideoEditorWidget(QWidget):
     videosDropped = Signal(list)  # list[str]
     
     """
-    Ein mpv-basierter Video-Player, der die alten Methoden (show_first_frame_at_index,
-    set_playback_rate, etc.) bereitstellt, damit dein restlicher Code weiter funktioniert.
-    Er kann mehrere Videos in die mpv-Playlist laden und nacheinander abspielen.
+    Video-Player-Widget. Die Wiedergabe selbst macht ein PlayerBackend
+    (core/player_backend.py, derzeit libmpv); hier liegen die Oberflaeche und
+    die Zeitrechnung ueber mehrere Clips. Es kann mehrere Videos als Playlist
+    laden und nacheinander abspielen.
     
     Zusätzlich mit 360°-Video-Unterstützung, die mit Taste 'V' umgeschaltet werden kann.
     """
@@ -160,22 +162,14 @@ class VideoEditorWidget(QWidget):
         self._360_label.hide()
         layout.addWidget(self._360_label, 0, 0, alignment=Qt.AlignTop | Qt.AlignLeft)
 
-        # MPV Setup
-        self._player = mpv.MPV(
-            wid=str(int(self.video_frame.winId())),
+        # Wiedergabe-Backend: mpv oder GES, siehe core/player_backend.py.
+        self._backend, self._backend_name, backend_warning = create_backend(
+            window_id=self.video_frame.winId(),
             log_handler=self._mpv_log_handler,
-            hr_seek="yes",
-            hr_seek_framedrop="yes",
-            loglevel='info',
         )
-        self._player["input-vo-keyboard"] = "no"
-        # Fenstereinstellungen, damit wir (fast) nie Schwarz flackern
-        self._player["force-window"] = "immediate"
-        self._player["keep-open"] = "yes"
-
-        # Start = paused
-        self._player.pause = True
-        self._player.volume = 50
+        # Meldung merken; MainWindow zeigt sie nach dem Aufbau der Oberflaeche.
+        self.backend_warning = backend_warning
+        print(f"[PLAYER] Backend: {self._backend_name}")
 
         self.is_playing = False
         self.playlist = []
@@ -183,8 +177,8 @@ class VideoEditorWidget(QWidget):
         self.multi_durations = []
         self.boundaries = []
 
-        # Falls du end-file auswerten willst:
-        self._player.observe_property('playlist-pos', self._on_playlist_pos_changed)
+        # Ende der Playlist => play_ended
+        self._backend.set_end_callback(self.play_ended.emit)
 
         # Du kannst z. B. die Zeitanzeige in einer Timer-Schleife updaten
         self._time_timer = QTimer(self)
@@ -289,35 +283,28 @@ class VideoEditorWidget(QWidget):
             e.ignore()
         
 
+    def backend_name(self) -> str:
+        """'mpv' oder 'ges' - welches Backend gerade laeuft."""
+        return self._backend_name
+
+    def supports_view(self) -> bool:
+        """Ob das Backend Zoom/Pan/360 kann (mpv ja, GES nein)."""
+        return self._backend.supports_view()
+
     def toggle_360_mode(self):
         """Schaltet den 360°-Video-Modus um"""
+        if not self._backend.supports_view():
+            self._show_speed_label("360° braucht das mpv-Backend")
+            return
+
         self._is_360_mode = not self._is_360_mode
-        
+
         try:
+            self._backend.set_360(self._is_360_mode)
             if self._is_360_mode:
-                # 360°-Video Einstellungen aktivieren
-                self._player.video_rotate = 0
-                self._player.video_aspect = "16:9"
-                self._player.video_unscaled = "yes"
-                self._player.panscan = 1.0
-                
-                # 360°-spezifische Einstellungen
-                self._player.hr_seek_framedrop = "no"  # Bessere Qualität bei 360°
-                self._player.interpolation = "yes"     # Glattere Bewegung
-                
                 self._360_label.show()
                 print("360°-Modus aktiviert")
             else:
-                # Zurück zu normalen Einstellungen
-                self._player.video_rotate = 0
-                self._player.video_aspect = "-1"  # Automatisch
-                self._player.video_unscaled = "no"
-                self._player.panscan = 0.0
-                
-                # Zurück zu normalen Performance-Einstellungen
-                self._player.hr_seek_framedrop = "yes"
-                self._player.interpolation = "no"
-                
                 self._360_label.hide()
                 self._reset_view()
                 self._show_speed_label("360°-Modus: AUS")
@@ -377,21 +364,21 @@ class VideoEditorWidget(QWidget):
             return  # Ungültig => Abbruch
 
         self.is_playing = False
-    
-        # => mpv springt zu Clip 'index'
-        self._player.command("playlist-play-index", str(index))
-    
+
+        # => Player springt zu Clip 'index'
+        self._backend.play_index(index)
+
         def do_seek():
-            # 1) Prüfen, ob mpv noch ein Video hat + Position >=0
-            if self._player.playlist_count == 0:
+            # 1) Prüfen, ob noch ein Video geladen ist + Position >=0
+            if self._backend.count() == 0:
                 return
-            if self._player.playlist_pos is None or self._player.playlist_pos < 0:
+            if self._backend.index() < 0:
                 return
 
             # 2) Seek an 0s
             try:
-                self._player.command("seek", "0", "absolute", "exact")
-                self._player.pause = True
+                self._backend.seek_local(0)
+                self._backend.set_paused(True)
                 self.is_playing = False
             except SystemError as e:
                 # -12 bedeutet oft, dass mpv in Idle ist oder "keine Datei mehr hat"
@@ -401,8 +388,8 @@ class VideoEditorWidget(QWidget):
 
     def set_playback_rate(self, rate: float):
         print(f"DEBUG: set_playback_rate called with rate={rate}")  # Debug
-        self._player.speed = rate
-        print(f"DEBUG: mpv speed is now: {self._player.speed}")  # Debug
+        self._backend.set_rate(rate)
+        print(f"DEBUG: player speed is now: {self._backend.rate()}")  # Debug
         self._show_speed_label(f"Speed: {rate:.2f}x")
 
     def _show_speed_label(self, txt: str):
@@ -476,10 +463,10 @@ class VideoEditorWidget(QWidget):
 
     def play_pause(self):
         if self.is_playing:
-            self._player.pause = True
+            self._backend.set_paused(True)
             self.is_playing = False
         else:
-            self._player.pause = False
+            self._backend.set_paused(False)
             self.is_playing = True
 
     def get_current_position_s(self) -> float:
@@ -490,27 +477,104 @@ class VideoEditorWidget(QWidget):
         return self.get_current_global_time()
 
     def get_current_index(self) -> int:
-        """Ablösung für dein altes self._current_index => mpv.playlist_pos."""
-        pos = self._player.playlist_pos
-        if pos is None or pos < 0:
-            return -1
-        return pos
+        """Ablösung für dein altes self._current_index => Playlist-Index."""
+        return self._backend.index()
 
     def set_time(self, new_s: float):
         """
         Globaler Sprung in der gesamten Playlist:
-        Rechnet new_s => clipIndex + local_s und ruft 'playlist-play-index' + 'seek' auf.
+        Rechnet new_s => clipIndex + local_s und springt dorthin.
         """
-        self._jump_to_global_time(new_s)
+        self.seek_global(new_s)
 
     def frame_step_forward(self):
-        self._player.command("frame-step")
+        self._backend.step_frame(True)
 
     def frame_step_backward(self):
-        # mpv hat fuer den Rueckwaertsschritt einen EIGENEN Befehl.
-        # "frame-step" nimmt kein Argument -> "frame-step", -1 wurde von mpv
-        # mit MPV_ERROR_INVALID_PARAMETER (-4) abgelehnt, es passierte nichts.
-        self._player.command("frame-back-step")
+        self._backend.step_frame(False)
+
+    # -----------------------------------------
+    # Player-Auskuenfte fuer MainWindow und die Manager.
+    # Alles, was frueher ueber video_editor._player lief, geht hier durch.
+    # -----------------------------------------
+
+    def set_paused(self, paused: bool):
+        """
+        Pausiert bzw. setzt fort und haelt is_playing im Gleichtakt.
+
+        Der Zustand wird zuerst gesetzt, dann der Player angesprochen - so
+        stimmt is_playing auch dann, wenn der Player gerade nichts geladen hat
+        und der Zugriff fehlschlaegt. Genau so haben es die Aufrufer vorher
+        einzeln gemacht.
+        """
+        self.is_playing = not paused
+        try:
+            self._backend.set_paused(paused)
+        except Exception as e:
+            print(f"[WARN] set_paused({paused}) fehlgeschlagen: {e}")
+
+    def is_paused(self) -> bool:
+        return self._backend.is_paused()
+
+    def get_current_file(self):
+        """Pfad der gerade laufenden Datei, None wenn keine geladen ist."""
+        return self._backend.current_file()
+
+    def get_fps(self):
+        """Bildrate des aktuellen Videos oder None."""
+        return self._backend.fps()
+
+    def get_video_size(self):
+        """(Breite, Hoehe) des aktuellen Videos, (0, 0) wenn unbekannt."""
+        return self._backend.video_size()
+
+    def preview_width(self) -> int:
+        """Breite, in der das Backend die Vorschau rechnet."""
+        return int(getattr(self._backend, "PREVIEW_MAX_WIDTH", 1280))
+
+    def supports_preview_cuts(self) -> bool:
+        """Ob das Backend die Vorschau geschnitten samt Blenden zeigen kann."""
+        return self._backend.supports_cuts()
+
+    def set_preview_cuts(self, cuts):
+        """
+        Schnitte an das Backend geben: Liste von (start_s, ende_s, blende_s).
+
+        Wirkt nur bei Backends, die das koennen (GES). Bei mpv passiert nichts,
+        dort springt der CutManager wie bisher ueber die Schnitte hinweg.
+        """
+        try:
+            return bool(self._backend.set_cuts(cuts))
+        except Exception as e:
+            print(f"[WARN] set_preview_cuts: {e}")
+            return False
+
+    def shutdown_player(self):
+        """
+        Backend beim Beenden sauber herunterfahren.
+
+        Fuer mpv war das nie noetig - der Prozess endet ohnehin. Die
+        GES-Pipeline haelt aber eigene Threads; ohne dieses Abschalten laeuft
+        die Anwendung nach dem Schliessen des Fensters weiter.
+        """
+        try:
+            self._time_timer.stop()
+        except Exception:
+            pass
+        try:
+            self._backend.shutdown()
+        except Exception as e:
+            print(f"[WARN] shutdown_player: {e}")
+
+    def stop_and_clear(self):
+        """Wiedergabe hart beenden und die Playlist leeren (New Project)."""
+        for step in (self._backend.stop, self._backend.clear):
+            try:
+                step()
+            except Exception as e:
+                print(f"[WARN] stop_and_clear: {e}")
+        self.playlist = []
+        self.is_playing = False
 
     # -----------------------------------------
     # Playlist-Funktionen
@@ -524,27 +588,30 @@ class VideoEditorWidget(QWidget):
             accum += d
             self.boundaries.append(accum)
 
-    def set_playlist(self, video_list):
-        """Erzeugt mpv-Playlist per 'append-play'."""
-        self._player.command("playlist-clear")
+    def set_playlist(self, video_list, fortschritt=None):
+        """
+        Laedt die Videoliste ins Backend.
+
+        `fortschritt(nummer, gesamt, pfad)` wird - sofern das Backend das
+        unterstuetzt - vor jeder Datei gerufen. GES analysiert beim Oeffnen
+        die ganze Datei, was bei mehreren GB spuerbar dauert; damit laesst
+        sich anzeigen, woran gerade gearbeitet wird.
+        """
+        try:
+            self._backend.load_playlist(video_list, fortschritt)
+        except TypeError:
+            # Backend ohne Fortschrittsmeldung (mpv) - laedt ohnehin sofort.
+            self._backend.load_playlist(video_list)
         if not video_list:
             self.playlist = []
             self.set_empty_hint_visible(True)
             return
-        # Erstes normal load
-        self._player.command("loadfile", video_list[0])
-        # Rest => append
-        for path in video_list[1:]:
-            self._player.command("loadfile", path, "append-play")
 
-        # Start paused
-        self._player.pause = True
         self.is_playing = False
-
         self.playlist = video_list
         self.set_empty_hint_visible(False)
 
-    def _jump_to_global_time(self, wanted_s: float):
+    def seek_global(self, wanted_s: float):
         """
         'wanted_s' ist die globale Zeit über alle Clips.
         Wir ermitteln clipIndex + local_s.
@@ -571,55 +638,47 @@ class VideoEditorWidget(QWidget):
                     break
                 offset_prev = bound_val
             local_s = wanted_s - offset_prev
-    
-        # Aktueller mpv-Playlist-Index:
-        current_idx = self._player.playlist_pos
+
+        # Aktueller Playlist-Index:
+        current_idx = self._backend.index()
 
         if current_idx == clip_idx:
             # Gleicher Clip => direkt seek
             try:
-                self._player.command("seek", f"{local_s}", "absolute", "exact")
-                self._player.pause = True
+                self._backend.seek_local(local_s)
+                self._backend.set_paused(True)
                 self.is_playing = False
             except SystemError as e:
-                print(f"[WARN] _jump_to_global_time: mpv refused to seek => {e}")
+                print(f"[WARN] seek_global: player refused to seek => {e}")
         else:
-            # Clip-Wechsel => playlist-play-index + Delay
-            self._player.command("playlist-play-index", str(clip_idx))
-    
+            # Clip-Wechsel => Index setzen + Delay
+            self._backend.play_index(clip_idx)
+
             def do_seek():
-                if self._player.playlist_count == 0:
+                if self._backend.count() == 0:
                     return
-                if self._player.playlist_pos is None or self._player.playlist_pos < 0:
+                if self._backend.index() < 0:
                     return
                 try:
-                    self._player.command("seek", f"{local_s}", "absolute", "exact")
-                    self._player.pause = True
+                    self._backend.seek_local(local_s)
+                    self._backend.set_paused(True)
                     self.is_playing = False
                 except SystemError as e:
-                    print(f"[WARN] _jump_to_global_time: mpv refused to seek => {e}")
-    
-            QTimer.singleShot(100, do_seek)
-            
-    # -----------------------------------------
-    # mpv Event-Handling
-    # -----------------------------------------
+                    print(f"[WARN] seek_global: player refused to seek => {e}")
 
-    def _on_playlist_pos_changed(self, name, value):
-        """
-        mpv ruft diese Callback auf, sobald 'playlist-pos' wechselt.
-        Falls wir am Ende sind, pos=None. Dann => play_ended-Signal?
-        """
-        if value is None or value < 0:
-            # => wir sind evtl. am Ende der Playlist
-            self.play_ended.emit()
+            QTimer.singleShot(100, do_seek)
+
+
+    # -----------------------------------------
+    # Event-Handling
+    # -----------------------------------------
 
     # optionales Log
     def _mpv_log_handler(self, level, component, message):
         print(f"[MPV] {level} {component}: {message}", end="")
-    
+
     def _update_time_label(self):
-        if not self.playlist or self._player.playlist_count == 0:
+        if not self.playlist or self._backend.count() == 0:
             self.current_time_label.hide()
             return
         else:
@@ -653,29 +712,29 @@ class VideoEditorWidget(QWidget):
 
         if cut0_end > 0.001:
             # => wir haben einen Schnitt am Anfang => an cut0_end springen
-            self._jump_to_global_time(cut0_end)
-        
+            self.seek_global(cut0_end)
+
             # Danach Pause + is_playing = False
-            self._player.pause = True
+            self._backend.set_paused(True)
             self.is_playing = False
 
         else:
             # => kein Schnitt am Anfang => normaler Sprung an Clip=0, 0s
-            self._player.command("playlist-play-index", "0")
+            self._backend.play_index(0)
 
             def do_seek_zero():
-                if self._player.playlist_count == 0:
+                if self._backend.count() == 0:
                     return
-                if self._player.playlist_pos is None or self._player.playlist_pos < 0:
+                if self._backend.index() < 0:
                     return
-            
+
                 try:
-                    self._player.command("seek", "0", "absolute", "exact")
-                    self._player.pause = True
+                    self._backend.seek_local(0)
+                    self._backend.set_paused(True)
                     self.is_playing = False
                 except SystemError as e:
-                    print(f"[WARN] stop(): mpv refused to seek => {e}")
-        
+                    print(f"[WARN] stop(): player refused to seek => {e}")
+
             QTimer.singleShot(50, do_seek_zero)
 
     def get_current_global_time(self) -> float:
@@ -684,9 +743,9 @@ class VideoEditorWidget(QWidget):
         Beispiel: wenn wir im 2. Clip sind, der erste Clip war 60s lang 
         und im 2. Clip sind wir gerade bei Sekunde 10 => Rückgabe = 70.
         """
-        clipIndex = self._player.playlist_pos  # python-mpv property
-        local_s   = self._player.time_pos or 0.0
-        if clipIndex is None or clipIndex < 0:
+        clipIndex = self._backend.index()
+        local_s   = self._backend.position()
+        if clipIndex < 0:
             return 0.0
 
         # offset_prev = boundaries[clipIndex - 1] (0.0 wenn clipIndex==0)
@@ -702,52 +761,45 @@ class VideoEditorWidget(QWidget):
     def _nudge_speed(self, delta: float):
         """Erhöht/verringert die Abspielgeschwindigkeit und zeigt das Label."""
         print(f"DEBUG: _nudge_speed called with delta={delta}")  # Debug
-        try:
-            cur = float(self._player.speed or 1.0)
-            print(f"DEBUG: Current speed = {cur}")  # Debug
-        except Exception as e:
-            print(f"DEBUG: Error getting current speed: {e}")  # Debug
-            cur = 1.0
+        cur = self._backend.rate()
+        print(f"DEBUG: Current speed = {cur}")  # Debug
         new = max(0.10, min(32.00, cur + delta))  # Klammern 0.10x .. 4.00x
         self.set_playback_rate(new)
 
     def _nudge_zoom(self, dz: float):
+        if not self._backend.supports_view():
+            self._show_speed_label("Zoom braucht das mpv-Backend")
+            return
         # Nur im 360°-Modus erlauben
         if not getattr(self, "_is_360_mode", False):
             self._show_speed_label("Zoom nur im 360°-Modus (Taste V)")
             return
-        """Zoom der Videodarstellung (mpv video-zoom)."""
-        try:
-            cur = float(self._player.video_zoom or 0.0)
-        except Exception:
-            cur = 0.0
+        """Zoom der Videodarstellung."""
+        cur, _, _ = self._backend.view()
         new = max(-0.90, min(5.00, cur + dz))     # -0.9 .. 5.0 sind praxistauglich
-        self._player.video_zoom = new
-        # Beim Zoomen Pan beibehalten (mpv macht das), optional Overlay:
+        self._backend.set_view(zoom=new)
+        # Beim Zoomen Pan beibehalten (das Backend macht das), optional Overlay:
         self._show_speed_label(f"Zoom: {new:+.2f}")
 
     def _nudge_pan(self, dx: float = 0.0, dy: float = 0.0):
+        if not self._backend.supports_view():
+            return
         if not getattr(self, "_is_360_mode", False):
             self._show_speed_label("Pan/Tilt nur im 360°-Modus (Taste V)")
             return
-        """Viewport verschieben (mpv video-pan-x/y). Sinnvoll bei Zoom > 0."""
-        try:
-            px = float(self._player.video_pan_x or 0.0)
-            py = float(self._player.video_pan_y or 0.0)
-        except Exception:
-            px, py = 0.0, 0.0
+        """Viewport verschieben. Sinnvoll bei Zoom > 0."""
+        _, px, py = self._backend.view()
         px = max(-1.0, min(1.0, px + dx))
         py = max(-1.0, min(1.0, py + dy))
-        self._player.video_pan_x = px
-        self._player.video_pan_y = py
+        self._backend.set_view(pan_x=px, pan_y=py)
         # kleines Overlay, damit man Feedback hat:
         self._show_speed_label(f"Pan: x={px:+.2f}, y={py:+.2f}")
 
     def _reset_view(self):
         """Zoom/Pan auf Standard zurücksetzen."""
-        self._player.video_zoom = 0.0
-        self._player.video_pan_x = 0.0
-        self._player.video_pan_y = 0.0
+        if not self._backend.supports_view():
+            return
+        self._backend.set_view(zoom=0.0, pan_x=0.0, pan_y=0.0)
         self._show_speed_label("View reset")
         
     # NEU in der Klasse ergänzen:

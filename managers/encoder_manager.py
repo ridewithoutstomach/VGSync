@@ -455,10 +455,19 @@ def measure_real_duration(path):
         frame_dur = den / num
 
         # 2) nur die letzten Sekunden lesen und den letzten Zeitstempel nehmen
+        #
+        # Das Intervall braucht ein ausdrueckliches ENDE. "START%" allein ist
+        # nicht "bis zum Dateiende": nachgemessen liefert es je nach Datei
+        # entweder gar nichts oder genau EINEN Frame am Intervallanfang. Im
+        # zweiten Fall meldet diese Funktion die Datei um die Fensterbreite zu
+        # kurz - bei 60,000 s kamen 55,033 s heraus. Die Concat-Liste bekommt
+        # dann zu kleine Dauern, ffmpeg verwirft beim Zusammenfuegen Bilder,
+        # und das Ergebnis ist um mehrere Sekunden zu kurz.
         start = max(0.0, container_dur - 5.0)
+        fenster = container_dur - start + 1.0
         tail = subprocess.run(
             ["ffprobe", "-v", "error", "-select_streams", "v:0",
-             "-read_intervals", f"{start:.3f}%",
+             "-read_intervals", f"{start:.3f}%+{fenster:.3f}",
              "-show_entries", "frame=pts_time", "-of", "csv=p=0", path],
             capture_output=True, text=True, check=True)
         last = None
@@ -1107,8 +1116,19 @@ def crossfade_2(
     crf=23,
     fps=None,width=None,preset=None,
     overlap=2,
-    bitrate_mbps=None
+    bitrate_mbps=None,
+    ss_a=None, ss_b=None, seg_dur=None, seg_dur_b=None
 ):
+    """
+    Blendet inA nach inB. Die Blende beginnt am Anfang von inA (offset=0),
+    beide Eingaenge muessen also genau `overlap` lang sein.
+
+    Mit ss_a/ss_b/seg_dur wird der Ausschnitt direkt beim Lesen bestimmt,
+    statt vorher Teilstuecke herauszukopieren. Das ist bildgenau: `-ss` vor
+    `-i` dekodiert ab dem vorherigen Keyframe und verwirft, was davor liegt.
+    Noetig fuer die mittige Blende - deren Segmente beginnen mitten im
+    Material, und ein "-c copy"-Schnitt kann dort nicht ansetzen.
+    """
     enc_name, mode= determine_encoder(encoder,hw_encode)
     real_preset= preset
     if mode=="gpu":
@@ -1127,11 +1147,20 @@ def crossfade_2(
     filter_complex.append(f"[v0][v1]{xfade_chain}[vout]")
     flt=";".join(filter_complex)
 
+    def _eingang(pfad, ss, dauer):
+        vor = []
+        if ss is not None:
+            vor += ["-ss", f"{float(ss):.6f}"]
+        if dauer is not None:
+            vor += ["-t", f"{float(dauer):.6f}"]
+        return vor + ["-i", pfad]
+
+    # B darf laenger sein als die Blende: nach dem Uebergang laeuft es dann
+    # noch bis zum naechsten Keyframe weiter, damit das folgende
+    # "-c copy"-Stueck sauber dort ansetzen kann.
     cmd=[
         "ffmpeg","-hide_banner","-y"
-    ] + vaapi_input_args(hw_encode) + [
-        "-i",inA,
-        "-i",inB,
+    ] + vaapi_input_args(hw_encode) + _eingang(inA, ss_a, seg_dur)       + _eingang(inB, ss_b, seg_dur_b if seg_dur_b is not None else seg_dur) + [
         "-filter_complex",flt,
         "-map","[vout]"
     ]
@@ -1375,13 +1404,16 @@ def build_segments_with_skip_and_overlay(
         # 1) Normal-Part: [current_pos..t1]
         if t1 > current_pos:
             seg_start = get_kf_le(kf_list, current_pos)
-            if ev["type"] == "skip" and float(ev["overlap"]) <= 0:
-                # Harte Kante: hier folgt kein A-Segment, das an einem
-                # Keyframe beginnen muesste. Ein "-c copy"-Stueck darf mitten
-                # in der GOP ENDEN, nur der Anfang braucht einen Keyframe.
-                # Damit sitzt die Kante auch dann exakt, wenn der Keyframe
-                # oben nicht erzwungen werden konnte.
-                seg_end = t1
+            if ev["type"] == "skip":
+                # Ein "-c copy"-Stueck darf mitten in der GOP ENDEN, nur der
+                # Anfang braucht einen Keyframe. Deshalb sitzt die Kante hier
+                # exakt, auch wenn oben kein Keyframe erzwungen werden konnte.
+                #
+                # Bei einer Blende endet das Normalstueck eine HALBE
+                # Blendenlaenge vor der Kante: die Blende liegt mittig darauf,
+                # reicht also ebensoweit ins behaltene Material hinein.
+                ov = float(ev["overlap"])
+                seg_end = t1 if ov <= 0 else max(current_pos, t1 - ov / 2.0)
             else:
                 seg_end   = get_kf_le(kf_list, t1)
             if seg_end > seg_start:
@@ -1432,58 +1464,65 @@ def build_segments_with_skip_and_overlay(
             #    debug_logs.append(f"[SKIP] JSON-Bereich {t1:.2f}..{t2:.2f} liegt komplett hinter Video-Ende => skip!")
             #    continue
                 
-            # Wir "skippen" [t1..t2], aber crossfaden über overlap
-            # => Segment A = [normal_end..(t1+overlap)]
-            # => Segment B = [t2..(t2+overlap)]
-            A_start = normal_end
-            A_end   = get_kf_le(kf_list, t1 + overlap)
-            if A_end < A_start:
-                A_end = A_start
-
-            skipA = os.path.join(temp_dir, f"skipA_{out_count:02d}.mp4")
-            copy_cut(merged_file, A_start, A_end, skipA)
-
-            #B_start = get_kf_ge(kf_list, t2)
-            B_start = get_kf_ge(kf_list, min(t2, total_duration))
-            B_end   = get_kf_le(kf_list, t2 + overlap)
-            
-            if B_end > total_duration:
-                B_end = total_duration
-            if B_start >= B_end:
-                # kein (gültiges) B-Segment => kein Crossfade möglich
+            # Wir "skippen" [t1..t2] und blenden MITTIG ueber die Kante:
+            #   Segment A = [t1 - overlap/2 .. t1 + overlap/2]
+            #   Segment B = [t2 - overlap/2 .. t2 + overlap/2]
+            # Je zur Haelfte behaltenes Material, je zur Haelfte Ueberhang aus
+            # dem weggeschnittenen Bereich - so machen es Schnittprogramme.
+            # Die Gesamtlaenge bleibt gleich: das Normalstueck endet eine halbe
+            # Laenge frueher, das naechste beginnt eine halbe Laenge spaeter.
+            #
+            # A und B werden NICHT mehr vorher herauskopiert. Sie beginnen
+            # mitten im Material, und "-c copy" kann nur an einem Keyframe
+            # ansetzen - das Ergebnis waere um bis zu eine GOP verschoben.
+            # Stattdessen liest ffmpeg beide Ausschnitte direkt aus der
+            # zusammengefuegten Datei; beim Neukodieren ist "-ss" bildgenau.
+            half = overlap / 2.0
+            A_start = max(0.0, t1 - half)
+            B_start = max(0.0, t2 - half)
+            if B_start + overlap > total_duration:
+                # Am Materialende ist kein voller Ueberhang mehr da.
+                overlap = max(0.0, total_duration - B_start)
+                half = overlap / 2.0
+            if overlap <= 0:
                 debug_logs.append(
-                    f"[SKIP] B-Segment entfällt (Start={B_start:.2f} >= End={B_end:.2f}). Nur A-Segment wird benutzt."
+                    f"[SKIP] JSON-Bereich {t1:.2f}..{t2:.2f}: kein Platz fuer eine "
+                    f"Blende am Materialende => harte Kante."
                 )
-                segments.append(skipA)
-                current_pos = max(current_pos, t2 + overlap)
-                out_count += 1
+                current_pos = max(current_pos, min(t2, total_duration))
                 continue
-            
-            #if B_end < B_start:
-            #    B_end = B_start
 
-            skipB = os.path.join(temp_dir, f"skipB_{out_count:02d}.mp4")
-            copy_cut(merged_file, B_start, B_end, skipB)
+            # Die Blende endet bei t2 + overlap/2, also mitten in einer GOP.
+            # Das naechste Stueck wird aber mit "-c copy" geschnitten und muss
+            # an einem Keyframe beginnen. Deshalb laeuft dieses Segment nach
+            # der Blende noch bis zum naechsten Keyframe weiter - dort setzt
+            # das Normalstueck dann exakt an, ohne Luecke und ohne Dopplung.
+            blende_ende = min(t2 + half, total_duration)
+            naechster_kf = min(get_kf_ge(kf_list, blende_ende), total_duration)
+            nachlauf = max(0.0, naechster_kf - blende_ende)
 
-            # Crossfade beider Segmente:
             xf_out = os.path.join(temp_dir, f"skipX_{out_count:02d}_{int(t1)}_{int(t2)}.mp4")
             crossfade_2(
-                inA=skipA, inB=skipB, outname=xf_out,
+                inA=merged_file, inB=merged_file, outname=xf_out,
                 encoder=encoder, hw_encode=hw_encode, crf=crf,
                 fps=fps, width=width, preset=preset,
                 overlap=overlap,
-                bitrate_mbps=bitrate_mbps
+                bitrate_mbps=bitrate_mbps,
+                ss_a=A_start, ss_b=B_start,
+                seg_dur=overlap, seg_dur_b=overlap + nachlauf
             )
             segments.append(xf_out)
 
             debug_logs.append(
                 f"[SKIP] JSON-Bereich: {t1:.2f}..{t2:.2f}, overlap={overlap:.1f} "
-                f"=> A=({A_start:.2f}..{A_end:.2f}), B=({B_start:.2f}..{B_end:.2f})"
+                f"=> A=({A_start:.2f}..{A_start+overlap:.2f}), "
+                f"B=({B_start:.2f}..{B_start+overlap:.2f}), Blende mittig auf der Kante"
             )
             out_count += 1
 
-            # Jetzt ist current_pos = (t2 + overlap)
-            current_pos = max(current_pos, (t2 + overlap))
+            # Weiter geht es am Keyframe hinter der Blende - genau dort endet
+            # das eben erzeugte Segment.
+            current_pos = max(current_pos, naechster_kf)
 
         elif ev["type"] == "overlay":
             fade_in  = ev["fade_in"]

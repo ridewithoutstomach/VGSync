@@ -85,6 +85,9 @@ from .encoder_setup_dialog import EncoderSetupDialog  # Import Dialog
 
 from config import TMP_KEYFRAME_DIR, MY_GLOBAL_TMP_DIR, is_soft_opengl_enabled
 from core.mp4_keyframes import keyframe_times_from_index
+from core.player_backend import BACKEND_MPV, BACKEND_GES, DEFAULT_BACKEND
+from core.fade_cache import FadeJob, FadeRenderer
+from .dialogs import PreviewPrepareDialog
 
 from widgets.video_editor_widget import VideoEditorWidget
 from widgets.video_timeline_widget import VideoTimelineWidget
@@ -813,6 +816,39 @@ class MainWindow(QMainWindow):
         action_clear_mpv_path.triggered.connect(self._on_clear_mpv_path)
         mpv_menu.addAction(action_clear_mpv_path)
 
+        # --- Wiedergabe-Backend: mpv oder GES ---
+        backend_menu = setup_menu.addMenu("Video Backend")
+        # Das Video-Widget gibt es hier noch nicht (es entsteht weiter unten),
+        # deshalb der Blick direkt in die Einstellungen. Welches Backend dann
+        # wirklich laeuft, zeigt "Show current backend".
+        current_backend = QSettings("KVRouite", "KVRouite").value(
+            "player/backend", DEFAULT_BACKEND, type=str)
+        backend_group = QActionGroup(self)
+        backend_group.setExclusive(True)
+
+        self.action_backend_mpv = QAction("mpv (default)", self, checkable=True)
+        self.action_backend_mpv.setStatusTip(
+            "Playback via libmpv. Fast and proven, but cannot show transitions.")
+        self.action_backend_mpv.setChecked(current_backend == BACKEND_MPV)
+        self.action_backend_mpv.triggered.connect(
+            lambda: self._on_select_player_backend(BACKEND_MPV))
+        backend_group.addAction(self.action_backend_mpv)
+        backend_menu.addAction(self.action_backend_mpv)
+
+        self.action_backend_ges = QAction("GStreamer / GES (experimental)", self, checkable=True)
+        self.action_backend_ges.setStatusTip(
+            "Playback via GStreamer Editing Services. Needed to see crossfades.")
+        self.action_backend_ges.setChecked(current_backend == BACKEND_GES)
+        self.action_backend_ges.triggered.connect(
+            lambda: self._on_select_player_backend(BACKEND_GES))
+        backend_group.addAction(self.action_backend_ges)
+        backend_menu.addAction(self.action_backend_ges)
+
+        backend_menu.addSeparator()
+        action_backend_info = QAction("Show current backend", self)
+        action_backend_info.triggered.connect(self._on_show_player_backend)
+        backend_menu.addAction(action_backend_info)
+
         
         
         temp_dir_menu = setup_menu.addMenu("Temp Directory")
@@ -1042,6 +1078,23 @@ class MainWindow(QMainWindow):
         self.video_editor = VideoEditorWidget()
         if hasattr(self, "action_toggle_360"):
             self.action_toggle_360.setChecked(bool(getattr(self.video_editor, "_is_360_mode", False)))
+
+        # Menuehaken auf das Backend setzen, das wirklich laeuft - GES kann
+        # beim Start fehlgeschlagen und auf mpv zurueckgefallen sein.
+        # Blenden fuer die Vorschau werden im Hintergrund vorgerendert.
+        self._fade_jobs = {}
+        self._fade_dialog = None
+        self._fade_renderer = FadeRenderer("ffmpeg", "ffprobe", self)
+        self._fade_renderer.progress.connect(self._on_fades_progress)
+        self._fade_renderer.finished.connect(self._on_fades_ready)
+
+        running_backend = self.video_editor.backend_name()
+        if hasattr(self, "action_backend_mpv"):
+            self.action_backend_mpv.setChecked(running_backend == BACKEND_MPV)
+            self.action_backend_ges.setChecked(running_backend == BACKEND_GES)
+        if getattr(self.video_editor, "backend_warning", None):
+            QTimer.singleShot(0, lambda: QMessageBox.warning(
+                self, "Video Backend", self.video_editor.backend_warning))
             
             
         
@@ -1515,6 +1568,41 @@ class MainWindow(QMainWindow):
         self.action_map_directions.setChecked(True)
         self._on_map_directions_toggled(True)
         
+    def _on_select_player_backend(self, name: str):
+        """
+        Waehlt das Wiedergabe-Backend. Wirkt erst nach einem Neustart - das
+        Backend wird beim Bau des Video-Widgets erzeugt und haengt am
+        Fenster-Handle; ein Tausch im laufenden Betrieb waere genau die
+        Reparenting-Falle, die beim Ab- und Andocken schon Aerger macht.
+        """
+        s = QSettings("KVRouite", "KVRouite")
+        if s.value("player/backend", DEFAULT_BACKEND, type=str) == name:
+            return
+        s.setValue("player/backend", name)
+
+        if name == BACKEND_GES:
+            text = ("The player will use GStreamer / GES after the next restart.\n\n"
+                    "GES can show the crossfades at your cuts - mpv cannot.\n\n"
+                    "Please note:\n"
+                    "  - This is experimental.\n"
+                    "  - 360° mode, zoom and pan are only available with mpv.\n"
+                    "  - Mid-transition the picture is rendered a bit too dark;\n"
+                    "    timing and length of the fade are correct.\n"
+                    "  - If GStreamer is missing, KVRouite falls back to mpv\n"
+                    "    and tells you at startup.")
+        else:
+            text = "The player will use mpv again after the next restart."
+        QMessageBox.information(self, "Video Backend", text)
+
+    def _on_show_player_backend(self):
+        running = self.video_editor.backend_name()
+        wanted = QSettings("KVRouite", "KVRouite").value(
+            "player/backend", DEFAULT_BACKEND, type=str)
+        msg = f"Currently running: {running}\nSelected for next start: {wanted}"
+        if running != wanted:
+            msg += "\n\nThe selection takes effect after a restart."
+        QMessageBox.information(self, "Video Backend", msg)
+
     def _on_show_mpv_path(self):
         s = QSettings("KVRouite", "KVRouite")
         path_stored = s.value("paths/mpv", "", type=str)
@@ -1988,6 +2076,9 @@ class MainWindow(QMainWindow):
         
         
     def _set_edit_mode(self, new_mode: str):
+        # Nach dem Wechsel die Vorschau nachziehen: Copy-Mode hat keine
+        # Blenden, Encode-Mode schon.
+        QTimer.singleShot(0, self._refresh_preview_timeline)
         old_mode = self._edit_mode
         if new_mode == old_mode:
             return  # Nichts geändert
@@ -2040,29 +2131,51 @@ class MainWindow(QMainWindow):
             self.video_control.show_ovl_button(True)
             self.overlay_setup_action.setEnabled(True)
 
-        # Abfrage: nur wenn alter Modus 'off' war + neuer Modus copy/encode
+        # Abfrage: nur wenn alter Modus 'off' war + neuer Modus copy/encode.
+        #
+        # Sie wird nur VORGEMERKT und spaeter gestellt. Beim Laden eines
+        # Projekts laeuft dieser Modus-Wechsel mitten im Ladevorgang - die
+        # Frage waere dann ueber dem Ladefenster aufgeploppt und gleich
+        # darauf vom Blenden-Fenster ueberdeckt worden. Sie kommt jetzt zum
+        # Schluss, wenn nichts anderes mehr offen ist.
         if old_mode == "off" and new_mode in ("copy", "encode"):
-            answer = QMessageBox.question(
-                self,
-                "Index Videos?",
-                "Do you want to index all currently loaded videos now?\n"
-                "(Currently loaded videos: %d)\n\n"
-                "Any *new* video you load from now on will also be indexed automatically."
-                % len(self.playlist),
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
-            )
-            if answer == QMessageBox.Yes:
-                # Selbst wenn playlist leer ist, tut das einfach nichts
-                for video_path in self.playlist:
-                    self.start_indexing_process(video_path)
-            else:
-                self._userDeclinedIndexing = True    
+            self._index_question_pending = True
+            QTimer.singleShot(0, self._maybe_ask_index)
         
         if hasattr(self, "autocut_button"):
             self.autocut_button.setVisible(enabled)
             
         self._update_set_gpx2video_enabled()
+
+    def _maybe_ask_index(self):
+        """
+        Stellt die Indexierungsfrage - aber erst, wenn nichts anderes offen ist.
+
+        Laeuft noch das Laden oder das Vorrendern der Blenden, passiert
+        nichts; beide rufen hier am Ende erneut herein.
+        """
+        if not getattr(self, "_index_question_pending", False):
+            return
+        if getattr(self, "_loading_project", False):
+            return
+        if getattr(self, "_fade_dialog", None) is not None:
+            return
+
+        self._index_question_pending = False
+        answer = QMessageBox.question(
+            self,
+            "Index Videos?",
+            "Do you want to index all currently loaded videos now?" + chr(10) +
+            "(Currently loaded videos: %d)" % len(self.playlist) + chr(10) + chr(10) +
+            "Any *new* video you load from now on will also be indexed automatically.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        if answer == QMessageBox.Yes:
+            for video_path in self.playlist:
+                self.start_indexing_process(video_path)
+        else:
+            self._userDeclinedIndexing = True
 
     def _on_encoder_setup_clicked(self):
         # xfade vor dem Öffnen merken
@@ -2084,6 +2197,7 @@ class MainWindow(QMainWindow):
         if new_xfade != old_xfade:
             print(f"[DEBUG] encoder/xfade changed: {old_xfade} -> {new_xfade} (validating overlays)")
             self._validate_overlays_after_xfade_change()
+            self._refresh_preview_timeline()
 
     
             
@@ -2696,6 +2810,10 @@ class MainWindow(QMainWindow):
             self._save_window_layout()
         except Exception as e:
             print("[WARN] window layout not saved:", e)
+        try:
+            self.video_editor.shutdown_player()
+        except Exception as e:
+            print("[WARN] player not shut down:", e)
         super().closeEvent(event)
 
     _INFO_SAMPLES = (
@@ -4100,8 +4218,7 @@ class MainWindow(QMainWindow):
             elif result == 2:
                 self._set_edit_mode("encode")
 
-            w = self.video_editor._player.width
-            h = self.video_editor._player.height
+            w, h = self.video_editor.get_video_size()
             if w==h*2 and not self.video_editor.is_360_mode():
                 self._on_toggle_360_from_menu(True)
             self.proposeVideoGpxSync()
@@ -4490,7 +4607,28 @@ class MainWindow(QMainWindow):
             action.triggered.connect(lambda checked, f=filepath, a=action: self.confirm_remove(f, a))
 
             
-            self.video_editor.set_playlist(self.playlist)
+            # Auch hier kann das Oeffnen dauern: GES analysiert jede Datei
+            # beim Laden durch (gemessen 6 s bei 8,6 GB). Ohne Fenster
+            # steht die App scheinbar.
+            ladefenster = PreviewPrepareDialog(0, self, titel="Loading video…")
+            ladefenster.label_info.setText(
+                "Opening the video and preparing the preview. "
+                "Large source files can take a moment.")
+            ladefenster.btn_cancel.hide()
+            ladefenster.show()
+            ladefenster.raise_()
+            QApplication.processEvents()
+            try:
+                self.video_editor.set_playlist(
+                    self.playlist,
+                    lambda nr, ges, pfad: ladefenster.schritt(
+                        f"Opening video {nr} of {ges}: {os.path.basename(pfad)}"))
+            finally:
+                try:
+                    ladefenster.close()
+                    ladefenster.deleteLater()
+                except Exception:
+                    pass
             self.video_control.activate_controls(True)
             
             if self._edit_mode in ("copy", "encode") and (not self._userDeclinedIndexing):
@@ -4685,9 +4823,9 @@ class MainWindow(QMainWindow):
             #        self._show_endcut_popup(final_end_position)
 
             # Mehrfacher Jump für exaktes Einrasten
-            QTimer.singleShot(10,  lambda: self.video_editor._jump_to_global_time(final_end_position))
-            QTimer.singleShot(100, lambda: self.video_editor._jump_to_global_time(final_end_position))
-            QTimer.singleShot(250, lambda: self.video_editor._jump_to_global_time(final_end_position))
+            QTimer.singleShot(10,  lambda: self.video_editor.seek_global(final_end_position))
+            QTimer.singleShot(100, lambda: self.video_editor.seek_global(final_end_position))
+            QTimer.singleShot(250, lambda: self.video_editor.seek_global(final_end_position))
 
             print(f"[GOTO_END] jumped to {final_end_position:.3f}s (total={total_duration:.3f}, endcut={has_endcut})")
         except Exception as e:
@@ -4700,12 +4838,8 @@ class MainWindow(QMainWindow):
     def on_play_ended(self):
         """Wird aufgerufen, wenn das Video natürlich endet"""
         # Stelle sicher, dass alle Zustände korrekt zurückgesetzt werden
-        self.video_editor.is_playing = False
-        try:
-            self.video_editor._player.pause = True
-        except Exception:
-            pass
-        
+        self.video_editor.set_paused(True)
+
         self.video_control.update_play_pause_icon(False)
         self.gpx_widget.set_video_playing(False)
         self.map_widget.set_video_playing(False)
@@ -4734,7 +4868,7 @@ class MainWindow(QMainWindow):
         self.step_manager.set_step_multiplier(val)
 
     def _on_timeline_marker_moved(self, new_time_s: float):
-        self.video_editor._jump_to_global_time(new_time_s)
+        self.video_editor.seek_global(new_time_s)
         
     def _on_timeline_overlay_remove(self, start_s, end_s):
         self._overlay_manager.remove_overlay_interval(start_s, end_s)    
@@ -4776,6 +4910,7 @@ class MainWindow(QMainWindow):
         print(f"[DEBUG] cut {start_s:.3f}-{end_s:.3f} => "
               f"{'hard cut' if new_state else 'crossfade'}")
         self.timeline.update()
+        self._refresh_preview_timeline()
 
     def on_time_hms_set_clicked(self, hh: int, mm: int, ss: int, ms=0):
         """
@@ -4804,7 +4939,7 @@ class MainWindow(QMainWindow):
         # 3) Aufruft der mpv-Funktion => "globaler" Sprung
         self.video_editor.set_time(total_s)
         #
-        # Damit ruft Ihr intern mpv._jump_to_global_time(total_s) auf,
+        # Damit ruft Ihr intern video_editor.seek_global(total_s) auf,
         # das berechnet, in welchem Clip wir landen und spult dorthin.
         #
     
@@ -4817,7 +4952,201 @@ class MainWindow(QMainWindow):
             new_duration = 0
         self.video_editor.set_old_time(self.real_total_duration)
         self.video_editor.set_cut_time(new_duration)
-        self._update_gpx_overview()    
+        self._update_gpx_overview()
+        self._refresh_preview_timeline()
+
+    def _refresh_preview_timeline(self, blockierend: bool = False):
+        """
+        Schnitte und Blenden an die Vorschau geben.
+
+        Kann das Backend das (GES), zeigt die Vorschau danach das FERTIGE
+        Video: geschnittene Bereiche fehlen, an den Schnitten liegt die Blende.
+        Bei mpv passiert nichts - dort springt der CutManager wie bisher.
+
+        Die Verteilung der Blenden ist bewusst dieselbe wie beim Export
+        (siehe skip_array in on_render_clicked): Start- und Endschnitt werden
+        nur weggetrimmt, harte Kanten bekommen keine Blende, und Copy-Mode hat
+        ueberhaupt keine. Sonst wuerde die Vorschau etwas anderes zeigen als
+        das, was hinterher herauskommt.
+        """
+        if not hasattr(self, "video_editor"):
+            return
+        if not self.video_editor.supports_preview_cuts():
+            print("[DEBUG] preview-cuts: Backend kann das nicht "
+                  f"({self.video_editor.backend_name()}) => uebersprungen")
+            return
+        try:
+            cuts = self.cut_manager.get_cut_intervals()
+        except Exception as e:
+            print(f"[WARN] preview-cuts: Schnitte nicht lesbar: {e}")
+            return
+
+        total_dur = getattr(self, "real_total_duration", 0.0) or 0.0
+        xfade_val = 0
+        if getattr(self, "_edit_mode", "") == "encode":
+            xfade_val = QSettings("KVRouite", "KVRouite").value("encoder/xfade", 2, type=int)
+
+        preview = []
+        for (cstart, cend) in sorted(cuts, key=lambda x: x[0]):
+            fade = xfade_val
+            if abs(cstart - 0.0) < 0.1:                       # Startschnitt
+                fade = 0
+            elif total_dur > 0 and abs(cend - total_dur) < 0.1:  # Endschnitt
+                fade = 0
+            elif self.cut_manager.is_hard_cut(cstart, cend):
+                fade = 0
+            preview.append((cstart, cend, fade))
+
+        mit_blende = sum(1 for c in preview if c[2] > 0)
+        print(f"[DEBUG] preview-cuts: mode={getattr(self, '_edit_mode', '?')} "
+              f"xfade={xfade_val}s total={total_dur:.3f}s "
+              f"=> {len(preview)} Schnitt(e), davon {mit_blende} mit Blende")
+
+        # Blenden werden vorgerendert (siehe core/fade_cache.py). Was schon
+        # fertig ist, kommt sofort mit; der Rest wird angefordert und per
+        # _on_fades_ready nachgereicht. Bis dahin zeigt die Vorschau dort
+        # einen harten Schnitt.
+        self._fade_jobs = {}
+        angereichert = []
+        for (cstart, cend, fade) in preview:
+            job = self._make_fade_job(cstart, cend, fade)
+            pfad = None
+            if job is not None:
+                self._fade_jobs[(cstart, cend)] = job
+                pfad = self._fade_renderer.ready_path(job)
+            angereichert.append((cstart, cend, fade, pfad))
+
+        ok = self.video_editor.set_preview_cuts(angereichert)
+        print(f"[DEBUG] preview-cuts: uebernommen={ok}")
+        offen = self._fade_renderer.request(list(self._fade_jobs.values()))
+
+        # Immer anzeigen, sobald wirklich gerendert werden muss - egal von
+        # welcher Stelle der Aufruf kam.
+        #
+        # Frueher haing das am Projektladen. Das ging daneben: der Ladevorgang
+        # ruft hier zuerst im Modus "off" herein, da gibt es noch keine
+        # Blenden. Die Arbeit entsteht erst beim anschliessenden Wechsel in den
+        # Encode-Modus - und der lief ohne Fenster. Fertige Blenden werden
+        # ohnehin wiederverwendet, das Fenster erscheint also nur, wenn
+        # tatsaechlich etwas zu tun ist.
+        if offen > 0:
+            self._close_fade_dialog()
+            self._fade_dialog = PreviewPrepareDialog(offen, self)
+            self._fade_dialog.abgebrochen.connect(self._on_fades_abort)
+            self._fade_dialog.show()
+            self._fade_dialog.raise_()
+            QApplication.processEvents()
+
+    def _make_fade_job(self, cstart, cend, fade):
+        """
+        Beschreibt die zu rendernde Blende fuer einen Schnitt.
+
+        Die Blende liegt MITTIG auf dem Schnitt: bei 2 s Blende ueberlappen
+        sich die beiden Seiten um 2 s, je zur Haelfte vor und hinter der
+        Schnittkante. Abgehend ist also [cstart - fade/2 .. cstart + fade/2],
+        ankommend [cend - fade/2 .. cend + fade/2]. Die jeweils innere Haelfte
+        stammt aus dem weggeschnittenen Bereich, die aeussere aus dem
+        behaltenen Material - so machen es Schnittprogramme ueblicherweise,
+        und die Gesamtlaenge aendert sich dadurch nicht.
+
+        None, wenn keine Blende noetig ist oder eine der beiden Stellen ueber
+        eine Dateigrenze laeuft - dann bleibt es beim harten Schnitt.
+        """
+        if fade <= 0 or not getattr(self, "playlist", None):
+            return None
+        durations = getattr(self, "video_durations", None) or []
+        if len(durations) != len(self.playlist):
+            return None
+
+        def datei_und_offset(t, laenge):
+            """(Datei, Sekunde darin) - None, wenn das Fenster die Datei verlaesst."""
+            if t < 0:
+                return None
+            start = 0.0
+            for pfad, d in zip(self.playlist, durations):
+                if start <= t < start + d:
+                    if t - start + laenge > d:
+                        return None       # laeuft in die naechste Datei
+                    return pfad, t - start
+                start += d
+            return None
+
+        halb = fade / 2.0
+        a = datei_und_offset(cstart - halb, fade)
+        b = datei_und_offset(cend - halb, fade)
+        if a is None or b is None:
+            print(f"[DEBUG] Blende {cstart:.2f}-{cend:.2f}: Material liegt an einer "
+                  f"Dateigrenze, bleibt harter Schnitt")
+            return None
+
+        fps = (30000, 1001)
+        try:
+            f = self.video_editor.get_fps()
+            if f and f > 0:
+                fps = (int(round(f * 1000)), 1000)
+        except Exception:
+            pass
+        return FadeJob(a[0], a[1], b[0], b[1], float(fade),
+                       self.video_editor.preview_width(), fps)
+
+    def _on_fades_progress(self, fertig, gesamt):
+        if gesamt <= 0:
+            return
+        self.statusBar().showMessage(
+            f"Rendering crossfades for the preview: {fertig}/{gesamt}", 0)
+        if getattr(self, "_fade_dialog", None):
+            self._fade_dialog.setzen(fertig, gesamt)
+
+    def _on_fades_abort(self):
+        """Benutzer bricht das Vorrendern ab - offene Schnitte bleiben hart."""
+        self._fade_renderer.cancel()
+        self._close_fade_dialog()
+        self.statusBar().clearMessage()
+
+    def _close_fade_dialog(self):
+        dlg = getattr(self, "_fade_dialog", None)
+        self._fade_dialog = None
+        if dlg is not None:
+            try:
+                dlg.close()
+                dlg.deleteLater()
+            except Exception:
+                pass
+
+    def _on_fades_ready(self):
+        """Alle Blenden liegen vor - Timeline mit den fertigen Dateien neu setzen."""
+        self.statusBar().clearMessage()
+        self._close_fade_dialog()
+        if not self._fade_jobs or not self.video_editor.supports_preview_cuts():
+            return
+        try:
+            cuts = self.cut_manager.get_cut_intervals()
+        except Exception:
+            return
+        total_dur = getattr(self, "real_total_duration", 0.0) or 0.0
+        xfade_val = 0
+        if getattr(self, "_edit_mode", "") == "encode":
+            xfade_val = QSettings("KVRouite", "KVRouite").value("encoder/xfade", 2, type=int)
+
+        fertig = []
+        gefunden = 0
+        for (cstart, cend) in sorted(cuts, key=lambda x: x[0]):
+            fade = xfade_val
+            if abs(cstart - 0.0) < 0.1:
+                fade = 0
+            elif total_dur > 0 and abs(cend - total_dur) < 0.1:
+                fade = 0
+            elif self.cut_manager.is_hard_cut(cstart, cend):
+                fade = 0
+            job = self._fade_jobs.get((cstart, cend))
+            pfad = self._fade_renderer.ready_path(job) if job is not None else None
+            if pfad:
+                gefunden += 1
+            fertig.append((cstart, cend, fade, pfad))
+
+        print(f"[DEBUG] Blenden fertig: {gefunden} von {len(self._fade_jobs)}")
+        self.video_editor.set_preview_cuts(fertig)
+        QTimer.singleShot(0, self._maybe_ask_index)
         
         
     ## on_safe_click
@@ -5374,13 +5703,13 @@ class MainWindow(QMainWindow):
                         self._show_endcut_popup(final_end_position)
                     
                     # Springe zum Endcut mit mehrfachen Sprüngen für Stabilität
-                    QTimer.singleShot(10, lambda: self.video_editor._jump_to_global_time(final_end_position))
-                    QTimer.singleShot(100, lambda: self.video_editor._jump_to_global_time(final_end_position))
-                    QTimer.singleShot(250, lambda: self.video_editor._jump_to_global_time(final_end_position))
+                    QTimer.singleShot(10, lambda: self.video_editor.seek_global(final_end_position))
+                    QTimer.singleShot(100, lambda: self.video_editor.seek_global(final_end_position))
+                    QTimer.singleShot(250, lambda: self.video_editor.seek_global(final_end_position))
                     
                 else:
                     # Kein Endcut - einfach am Ende bleiben
-                    QTimer.singleShot(10, lambda: self.video_editor._jump_to_global_time(final_end_position))
+                    QTimer.singleShot(10, lambda: self.video_editor.seek_global(final_end_position))
 
         except Exception as e:
             print(f"[ERROR] Fehler in check_and_handle_video_end: {e}")
@@ -5445,12 +5774,7 @@ class MainWindow(QMainWindow):
         """
         try:
             # Sofortiger Stop/Pause
-            self.video_editor.is_playing = False
-            try:
-                if hasattr(self.video_editor, '_player') and self.video_editor._player:
-                    self.video_editor._player.pause = True
-            except Exception as e:
-                print(f"[WARN] Konnte Player nicht pausieren: {e}")
+            self.video_editor.set_paused(True)
 
             # UI aktualisieren
             self.video_control.update_play_pause_icon(False)
@@ -5928,19 +6252,11 @@ class MainWindow(QMainWindow):
         if reply != QMessageBox.Yes:
             return
 
-        # --- 1) Video/mpv hart stoppen & leeren ---
+        # --- 1) Video hart stoppen & leeren ---
         try:
-            if getattr(self.video_editor, "_player", None):
-                try:
-                    self.video_editor._player.command("stop")
-                except Exception:
-                    pass
-                try:
-                    self.video_editor._player.command("playlist-clear")
-                except Exception:
-                    pass
+            self.video_editor.stop_and_clear()
         except Exception as e:
-            print(f"[WARN] NewProject: mpv cleanup: {e}")
+            print(f"[WARN] NewProject: player cleanup: {e}")
 
         # Zeitmodus/Callback zurück auf "global"/None
         try:
@@ -6477,6 +6793,7 @@ class MainWindow(QMainWindow):
             self.cut_manager._sync_timeline_hard_cuts()
 
             self.cut_manager.video_editor.set_cut_intervals(snapshot)
+            self._refresh_preview_timeline()
             self.timeline.update()
 
             # 🆕: Letzten Cut-Endpunkt ermitteln
@@ -6578,8 +6895,20 @@ class MainWindow(QMainWindow):
             )
     
     def process_open_project(self, filename: str):
-                    
+        # Das Laden dauert bei grossen Quelldateien zehn Sekunden und mehr -
+        # ohne Rueckmeldung sieht die App dabei aus, als waere sie abgestuerzt.
+        # Deshalb ein Fenster, das sagt, woran gerade gearbeitet wird.
+        ladefenster = PreviewPrepareDialog(0, self, titel="Loading project…")
+        ladefenster.label_info.setText(
+            "Opening the project and preparing the preview. "
+            "Large source files can take a moment.")
+        ladefenster.btn_cancel.hide()
+        self._loading_project = True
+        ladefenster.show()
+        ladefenster.raise_()
+        QApplication.processEvents()
         try:
+            ladefenster.schritt("Reading project file…")
             with open(filename, "r", encoding="utf-8") as f:
                 project_data = json.load(f)
 
@@ -6598,6 +6927,7 @@ class MainWindow(QMainWindow):
             self.video_durations = project_data.get("video_durations", [])
             self.rebuild_timeline()
 
+            ladefenster.schritt("Loading GPX data…")
             # 2. GPX-Daten laden + reparieren (datetime aus String machen)
             gpx_data = project_data.get("gpx_data", [])
             for pt in gpx_data:
@@ -6610,6 +6940,7 @@ class MainWindow(QMainWindow):
             self._gpx_data = gpx_data
             self.gpx_widget.gpx_list._gpx_data = gpx_data
 
+            ladefenster.schritt("Loading cuts…")
             # 3. Cuts laden
             self.cut_manager._cut_intervals = project_data.get("cut_intervals", [])
             # Aeltere Projektdateien kennen "hard_cuts" nicht -> alle
@@ -6637,19 +6968,25 @@ class MainWindow(QMainWindow):
             if(is_gpx_video_shift_set()):
                 self.enableVideoGpxSync(True)
 
+            ladefenster.schritt("Loading overlays…")
             # 5. Overlays laden
             overlays = project_data.get("overlays", [])
             self._overlay_manager.clear_overlays()
             for ovl in overlays:
                 self._overlay_manager.add_overlay(ovl)
 
+            ladefenster.schritt("Opening the videos…")
             # 6. VideoEditor neu setzen
-            self.video_editor.set_playlist(self.playlist)
+            self.video_editor.set_playlist(
+                self.playlist,
+                lambda nr, ges, pfad: ladefenster.schritt(
+                    f"Opening video {nr} of {ges}: {os.path.basename(pfad)}"))
             self.video_control.activate_controls(True)
             if self.video_durations:
                 self.video_editor.set_multi_durations(self.video_durations)
 
             self.video_editor.set_cut_intervals(self.cut_manager._cut_intervals)
+            self._refresh_preview_timeline(blockierend=True)
 
             if self.video_durations:
                 total_duration = sum(self.video_durations)
@@ -6675,6 +7012,7 @@ class MainWindow(QMainWindow):
             except Exception as _e:
                 print(f"[WARN] Could not restore edit_mode '{mode}': {_e}")    
 
+            ladefenster.schritt("Building the display…")
             # 7. GPX Widgets neu aufbauen
             self.gpx_widget.set_gpx_data(gpx_data)
             self.chart.set_gpx_data(gpx_data)
@@ -6699,6 +7037,17 @@ class MainWindow(QMainWindow):
 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load project:\n{e}")
+        finally:
+            # In JEDEM Fall schliessen - ein stehengebliebenes modales
+            # Fenster waere schlimmer als gar keins.
+            self._loading_project = False
+            try:
+                ladefenster.close()
+                ladefenster.deleteLater()
+            except Exception:
+                pass
+            QTimer.singleShot(0, self._maybe_ask_index)
+
             
     def _rebuild_playlist_menu(self):
         self.playlist_menu.clear()
@@ -7919,8 +8268,7 @@ class MainWindow(QMainWindow):
     # NEU: kleine Hilfsfunktion neben deinem Helper platzieren
     def _auto_enable_360_if_needed(self):
         try:
-            w = getattr(self.video_editor._player, "width", 0) or 0
-            h = getattr(self.video_editor._player, "height", 0) or 0
+            w, h = self.video_editor.get_video_size()
             if h > 0 and w == h * 2 and not self.video_editor.is_360_mode():
                 self._on_toggle_360_from_menu(True)  # schaltet Menü+Player sauber um
         except Exception as e:
@@ -8563,7 +8911,7 @@ class MainWindow(QMainWindow):
             if total > 0.0 and (total - current) <= wrap_window:
                 self._handle_video_end_state(mark_as_end=False)
                 for delay in (10, 100, 250):
-                    QTimer.singleShot(delay, lambda t=0.0: self.video_editor._jump_to_global_time(t))
+                    QTimer.singleShot(delay, lambda t=0.0: self.video_editor.seek_global(t))
                 try:
                     self.statusBar().showMessage("Wrapped to 0.000s", 2000)
                 except Exception:
@@ -8608,7 +8956,7 @@ class MainWindow(QMainWindow):
             if not events:
                 self._handle_video_end_state(mark_as_end=False)
                 for delay in (10, 100, 250):
-                    QTimer.singleShot(delay, lambda t=0.0: self.video_editor._jump_to_global_time(t))
+                    QTimer.singleShot(delay, lambda t=0.0: self.video_editor.seek_global(t))
                 try:
                     self.statusBar().showMessage("Wrapped to 0.000s", 2000)
                 except Exception:
@@ -8624,7 +8972,7 @@ class MainWindow(QMainWindow):
             # 7) Springen (robust, wie bei Goto-End)
             self._handle_video_end_state(mark_as_end=False)
             for delay in (10, 100, 250):
-                QTimer.singleShot(delay, lambda t=next_t: self.video_editor._jump_to_global_time(t))
+                QTimer.singleShot(delay, lambda t=next_t: self.video_editor.seek_global(t))
 
             try:
                 label = next_kind.replace('_', ' ')
