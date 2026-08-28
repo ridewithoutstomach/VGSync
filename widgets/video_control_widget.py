@@ -91,10 +91,14 @@ class VideoControlWidget(QWidget):
         self.goto_end.customContextMenuRequested.connect(lambda _pos: self.gotoNextEditRequested.emit())
         
         
-        self._step_values = ["s", "m", "k", "f"]  # <-- "f" ergänzt
+        self._step_values = ["s", "m", "k", "f", "c"]  # <-- "f" ergänzt, "c" = Schnittkanten
         self._step_index = 0
         self.step_button = QPushButton(self._step_values[self._step_index])
-        self.step_button.setToolTip("Choose the Step-Value")
+        self.step_button.setToolTip(
+            "Choose the Step-Value\n"
+            "s = seconds, m = minutes, k = keyframes, f = single frame\n"
+            "c = cut edges (Encode-Mode only)"
+        )
         self.step_button.setFixedSize(40, 24)
         self.step_button.clicked.connect(self.on_step_button_clicked)
         layout.addWidget(self.step_button)

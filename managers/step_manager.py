@@ -22,69 +22,77 @@
 """
 step_manager.py
 
-Erweiterter StepManager für verschiedene Step-Modi:
+Der Stepper hinter den Vor-/Zurueck-Knoepfen. Modi:
 
-- 's' (Sekunden-Schritte)
-- 'm' (Minuten-Schritte)
-- 'k' (Keyframe-Schritte)
-- 'f' (Frame-Schritte) NEU
+- 's' Sekunden
+- 'm' Minuten
+- 'f' Einzelbild
+- 'k' Keyframes
+- 'c' Schnittkanten
 
-Mit Folgendem Verhalten:
-1) s/m-Modus:
-   - Bei Schritt ins Cut-Interval -> "Freeze" knapp vor/hinter dem Cut.
-   - Beim nächsten Schritt -> Überspringe den Cut.
+GRUNDSATZ: gezaehlt wird im FERTIGEN Video, nicht im Rohmaterial.
 
-2) k-Modus:
-   - Falls das Keyframe im Cut-Bereich liegt -> direkt drüber springen
-     (also ohne Freeze).
+Ein Schnitt kommt im Ergebnis nicht vor. Steht man also auf dem letzten Bild
+vor einem Schnitt und drueckt "+1 s", dann liegt das Ziel eine Sekunde weiter
+im fertigen Video - im Rohmaterial also hinter dem Schnitt plus einer Sekunde.
+Frueher wurde stattdessen im Rohmaterial gerechnet: 1 s weiter landete mitten
+im geloeschten Bereich, und eine "Freeze"-Mechanik hat den Player dann an die
+Schnittkante gesetzt. Dadurch blieb man an jedem Schnitt haengen, der laenger
+war als die Schrittweite, und kam nie weiter. Diese Mechanik gibt es nicht mehr.
 
-3) f-Modus (Frame-Step):
-   - Springt um ca. 1 Frame (bzw. step_multiplier Frames).
-   - Vor jedem Step wird überprüft, ob wir ins Cut-Interval geraten würden;
-     wenn ja, wird wie bei s/m ein Freeze gemacht.
-   - ACHTUNG: Da MPV bei Rückwärts-Frame-Step eventuell keine exakte
-     Einzelframe-Auflösung unterstützt (und VFR-Videos variieren können),
-     ist dies nur ein Approx. Man nimmt (1 / fps).
+Was die Modi damit tun:
+
+  s / m  Schrittweite x Multiplier weiter, im fertigen Video gemessen.
+         Schnitte werden ueberflogen, als gaebe es sie nicht.
+
+  f      genau ein Bild weiter, im fertigen Video. Steht man auf dem letzten
+         Bild vor einem Schnitt, fuehrt EIN Druck auf das erste Bild dahinter.
+         Solange kein Schnitt im Weg ist, macht das mpv selbst ("frame-step"),
+         das ist bildgenau. Der Multiplier bleibt hier ohne Wirkung, wie bisher.
+
+  k      zum naechsten Keyframe, DER IM FERTIGEN VIDEO NOCH EXISTIERT.
+         Keyframes, die in einem Schnitt liegen, werden uebersprungen.
+
+  c      die Schnittkanten selbst: je Schnitt das letzte Bild davor und das
+         erste danach, dazu Anfang und Ende des fertigen Videos. Nur im
+         Encode-Mode, siehe _require_encode_mode(). Der Multiplier bleibt ohne
+         Wirkung, es geht immer eine Kante weiter.
+
+ZUM SPRINGEN: mpv zeigt bei "seek ... absolute exact" das ERSTE Bild AB der
+Zielzeit (nachgemessen an libmpv). Wer das letzte Bild VOR einem Zeitpunkt
+sehen will, muss deshalb eine ganze Bilddauer abziehen - eine Millisekunde
+reicht nicht, die liegt noch im selben Bild. Siehe _edge_seek_target().
 """
 
-from PySide6.QtCore import QTimer
 
 class StepManager(object):
+
+    # Steht hier oben, damit unten keine mehrzeiligen Texte im Code haengen.
+    _C_MODE_HINT = """Stepping along the cut edges works in Encode-Mode only.
+
+Encode-Mode places a keyframe exactly on every cut, so the two frames you see
+here are the ones the result will show.
+
+Copy-Mode cuts at the nearest keyframe instead - use step mode 'k' there to see
+where the cut will really land."""
+
     def __init__(self, video_editor):
         """
-        :param video_editor: Referenz auf das VideoEditorWidget (enthaelt multi_durations, MPV player usw.)
-
-        Mögliche step_mode:
-        - 's' => Sekunden
-        - 'm' => Minuten
-        - 'k' => Keyframes
-        - 'f' => Einzelbild (Frame) - NEU
+        :param video_editor: das VideoEditorWidget (mpv-Player, multi_durations)
         """
         self.video_editor = video_editor
         self.mainwindow = None
         self.cut_manager = None
 
-        self.step_mode = "s"   # 's', 'm', 'k', 'f'
+        self.step_mode = "s"   # 's', 'm', 'k', 'f', 'c'
         self.step_multiplier = 1.0
 
-        # Freeze-Logik fuer s/m/f
-        self._freeze_mode = False
-        self._frozen_cut_interval = None
-
-        # Fuer Keyframe-Schritte
-        self._last_skip_target = None
-
     def set_mainwindow(self, mw):
-        """
-        Damit wir z.B. auf mw.global_keyframes zugreifen können
-        (fuer K-Mode).
-        """
+        """Fuer global_keyframes, _compute_keep_intervals und _edit_mode."""
         self.mainwindow = mw
 
     def set_cut_manager(self, cm):
-        """
-        Uebergibt den VideoCutManager, damit wir auf dessen get_cut_intervals() zugreifen koennen.
-        """
+        """Uebergibt den VideoCutManager (liefert die Schnitte)."""
         self.cut_manager = cm
 
     def set_step_mode(self, new_mode):
@@ -99,315 +107,379 @@ class StepManager(object):
     # Oeffentliche Step-Funktionen (werden per Buttons aufgerufen)
     # ------------------------------------------------------------------------
     def step_forward(self):
-        # Falls das Video laeuft -> Pausieren
         if self.video_editor.is_playing:
             self.video_editor._player.pause = True
             self.video_editor.is_playing = False
 
-        # (1) Freeze-Modus schon aktiv?
-        if self._freeze_mode:
-            self._handle_freeze_forward()
-            return
-
-        # (2) Normaler Step, je nach Mode
-        if self.step_mode == 'k':
-            self._step_keyframe_forward()
-        elif self.step_mode in ('s', 'm'):
-            self._step_time_forward()
-        elif self.step_mode == 'f':  # *** F-Mode START ***
-            self._step_frame_forward() 
+        if self.step_mode in ('s', 'm'):
+            self._step_time(+1)
+        elif self.step_mode == 'f':
+            self._step_frame_forward()
+        elif self.step_mode == 'k':
+            self._step_keyframe(+1)
+        elif self.step_mode == 'c':
+            self._step_cut(+1)
         else:
             print(f"[DEBUG] step_mode='{self.step_mode}'? Unbekannter Modus.")
 
     def step_backward(self):
-        # Falls das Video laeuft -> Pausieren
         if self.video_editor.is_playing:
             self.video_editor._player.pause = True
             self.video_editor.is_playing = False
 
-        # (1) Freeze aktiv?
-        if self._freeze_mode:
-            self._handle_freeze_backward()
-            return
-
-        # (2) Normaler Step
-        if self.step_mode == 'k':
-            self._step_keyframe_backward()
-        elif self.step_mode in ('s', 'm'):
-            self._step_time_backward()
-        elif self.step_mode == 'f':  # *** F-Mode START ***
+        if self.step_mode in ('s', 'm'):
+            self._step_time(-1)
+        elif self.step_mode == 'f':
             self._step_frame_backward()
+        elif self.step_mode == 'k':
+            self._step_keyframe(-1)
+        elif self.step_mode == 'c':
+            self._step_cut(-1)
         else:
             print(f"[DEBUG] step_mode='{self.step_mode}'? Unbekannter Modus.")
 
     # ------------------------------------------------------------------------
-    # Freeze-Logik entkoppelt, damit wir keinen Code-Duplikat haben.
+    # s / m => Zeitschritte, im fertigen Video gemessen
     # ------------------------------------------------------------------------
-    def _handle_freeze_forward(self):
-        """
-        Falls wir schon eingefroren sind und nochmal step_forward rufen,
-        überspringen wir direkt das Cut-Ende.
-        """
-        self._freeze_mode = False
-        if self._frozen_cut_interval:
-            start_s, end_s = self._frozen_cut_interval
-            self._frozen_cut_interval = None
-            jump_s = end_s + 0.001
-            print(f"[DEBUG] War eingefroren - Ueberspringe Cut => gehe zu {jump_s:.3f}")
-            self.video_editor._jump_to_global_time(jump_s)
-        else:
-            print("[DEBUG] War eingefroren, aber _frozen_cut_interval=None => normal step forward")
-
-    def _handle_freeze_backward(self):
-        """
-        Falls wir schon eingefroren sind und nochmal step_backward rufen,
-        überspringen wir direkt das Cut-Start.
-        """
-        self._freeze_mode = False
-        if self._frozen_cut_interval:
-            start_s, end_s = self._frozen_cut_interval
-            self._frozen_cut_interval = None
-            jump_s = max(start_s - 0.001, 0.0)
-            print(f"[DEBUG] War eingefroren - Ueberspringe Cut rueckwaerts => gehe zu {jump_s:.3f}")
-            self.video_editor._jump_to_global_time(jump_s)
-        else:
-            print("[DEBUG] War eingefroren, aber _frozen_cut_interval=None => normal step backward")
-
-    # ------------------------------------------------------------------------
-    # s-/m-Modus => Zeit-Schritte + Freeze-Logik
-    # ------------------------------------------------------------------------
-    def _step_time_forward(self):
+    def _step_time(self, direction: int):
+        delta = self._compute_time_step_s() * direction
         cur_s = self._get_current_global_time()
-        delta_s = self._compute_time_step_s()
-        new_s = cur_s + delta_s
-
-        # Check, ob new_s im Cut => freeze
-        if self._check_and_freeze_if_stepping_into_cut(cur_s, new_s, forward=True):
+        keeps = self._get_keep_intervals()
+        if not keeps:
+            target = max(cur_s + delta, 0.0)
+            print(f"[DEBUG] (time): keine Schnitte => {cur_s:.3f} => {target:.3f}")
+            self.video_editor._jump_to_global_time(target)
             return
 
-        print(f"[DEBUG] (time-forward): {cur_s:.3f} => {new_s:.3f} (dt={delta_s:.3f})")
-        self.video_editor._jump_to_global_time(new_s)
-
-    def _step_time_backward(self):
-        cur_s = self._get_current_global_time()
-        delta_s = self._compute_time_step_s()
-        new_s = cur_s - delta_s
-        if new_s < 0.0:
-            new_s = 0.0
-
-        if self._check_and_freeze_if_stepping_into_cut(cur_s, new_s, forward=False):
-            return
-
-        print(f"[DEBUG] (time-backward): {cur_s:.3f} => {new_s:.3f} (dt={delta_s:.3f})")
-        self.video_editor._jump_to_global_time(new_s)
+        cur_final = self._final_from_source(cur_s)
+        new_final = self._clamp_final(cur_final + delta, keeps)
+        target = self._source_from_final(new_final, keeps)
+        arrow = "+" if direction > 0 else "-"
+        print(f"[DEBUG] (time {arrow}): roh {cur_s:.3f} => {target:.3f} | "
+              f"fertig {cur_final:.3f} => {new_final:.3f} (dt={delta:+.3f})")
+        self.video_editor._jump_to_global_time(target)
 
     def _compute_time_step_s(self):
         if self.step_mode == 'm':
             return 60.0 * self.step_multiplier
-        elif self.step_mode == 's':
-            return 1.0 * self.step_multiplier
-        else:
-            # Falls man hier landet (k/f) => normal 1.0
-            return 1.0
+        return 1.0 * self.step_multiplier
 
     # ------------------------------------------------------------------------
-    # *** F-Mode START *** => Frame-Step + Freeze
+    # f => Einzelbild, im fertigen Video
     # ------------------------------------------------------------------------
     def _step_frame_forward(self):
-        """
-        Einzelbild vorwärts, mit Freeze-Check.
-        Wir approximieren die nächste Zeit als current + (step_multiplier / fps).
-        """
         cur_s = self._get_current_global_time()
-        fps = self._get_current_fps()
-        # step_multiplier = '2x' => 2 Frames?
-        frame_delta = (1.0 * self.step_multiplier) / fps  
-        next_s = cur_s + frame_delta
+        keeps = self._get_keep_intervals()
+        d = 1.0 / self._get_current_fps()
+        idx = self._keep_index_for(cur_s, keeps, d)
 
-        # Freeze-Check
-        if self._check_and_freeze_if_stepping_into_cut(cur_s, next_s, forward=True):
+        if idx is None:
+            print(f"[DEBUG] (frame-forward): {cur_s:.3f} liegt in keinem "
+                  f"Keep-Bereich => normaler mpv-Schritt")
+            self.video_editor.frame_step_forward()
             return
 
-        print(f"[DEBUG] (frame-forward): {cur_s:.3f} => ~{next_s:.3f} (+{frame_delta:.5f}s)")
-        self.video_editor.frame_step_forward()
+        ke = keeps[idx][1]
+        if cur_s + d < ke - 0.25 * d:
+            # Das naechste Bild bleibt erhalten: mpv macht das bildgenau.
+            print(f"[DEBUG] (frame-forward): {cur_s:.3f} + 1 Bild (mpv)")
+            self.video_editor.frame_step_forward()
+            return
+
+        if idx + 1 >= len(keeps):
+            print("[DEBUG] (frame-forward): letztes Bild des Videos erreicht.")
+            return
+
+        target = self._edge_seek_target("in", keeps[idx + 1][0])
+        print(f"[DEBUG] (frame-forward): {cur_s:.3f} => {target:.3f} "
+              f"(ueber den Schnitt {ke:.3f}..{keeps[idx + 1][0]:.3f})")
+        self.video_editor._jump_to_global_time(target)
 
     def _step_frame_backward(self):
-        """
-        Einzelbild rückwärts, mit Freeze-Check.
-        Achtung: MPV kann rückwärts-frame-step nur eingeschränkt.
-        """
         cur_s = self._get_current_global_time()
-        fps = self._get_current_fps()
-        frame_delta = (1.0 * self.step_multiplier) / fps
-        next_s = cur_s - frame_delta
-        if next_s < 0.0:
-            next_s = 0.0
+        keeps = self._get_keep_intervals()
+        d = 1.0 / self._get_current_fps()
+        idx = self._keep_index_for(cur_s, keeps, d)
 
-        if self._check_and_freeze_if_stepping_into_cut(cur_s, next_s, forward=False):
+        if idx is None:
+            print(f"[DEBUG] (frame-backward): {cur_s:.3f} liegt in keinem "
+                  f"Keep-Bereich => normaler mpv-Schritt")
+            self.video_editor.frame_step_backward()
             return
 
-        print(f"[DEBUG] (frame-backward): {cur_s:.3f} => ~{next_s:.3f} (-{frame_delta:.5f}s)")
-        self.video_editor.frame_step_backward()
+        ks = keeps[idx][0]
+        if cur_s - d > ks - 0.25 * d:
+            print(f"[DEBUG] (frame-backward): {cur_s:.3f} - 1 Bild (mpv)")
+            self.video_editor.frame_step_backward()
+            return
 
-    def _get_current_fps(self):
+        if idx == 0:
+            print("[DEBUG] (frame-backward): erstes Bild des Videos erreicht.")
+            return
+
+        target = self._edge_seek_target("out", keeps[idx - 1][1])
+        print(f"[DEBUG] (frame-backward): {cur_s:.3f} => {target:.3f} "
+              f"(ueber den Schnitt {keeps[idx - 1][1]:.3f}..{ks:.3f})")
+        self.video_editor._jump_to_global_time(target)
+
+    # ------------------------------------------------------------------------
+    # k => Keyframes, die im fertigen Video noch vorkommen
+    # ------------------------------------------------------------------------
+    def _step_keyframe(self, direction: int):
+        raw = self._get_kfs_list()
+        if not raw:
+            print("[DEBUG] (k): Keine Keyframes vorhanden.")
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(None, "No Keyframes Loaded",
+                "No keyframes loaded! Please index your videos or switch off 'k' mode.")
+            return
+
+        kfs = self._surviving_keyframes(raw)
+        if not kfs:
+            print("[DEBUG] (k): Alle Keyframes liegen in geschnittenen Bereichen.")
+            return
+
+        cur_s = self._get_current_global_time()
+        n = max(1, int(max(1.0, self.step_multiplier)))
+        EPS = 0.005
+
+        if direction > 0:
+            idx = next((i for i, t in enumerate(kfs) if t > cur_s + EPS), None)
+            if idx is None:
+                print("[DEBUG] (k-forward): bereits am letzten Keyframe.")
+                return
+            idx = min(idx + (n - 1), len(kfs) - 1)
+        else:
+            idx = next((i for i in reversed(range(len(kfs)))
+                        if kfs[i] < cur_s - EPS), None)
+            if idx is None:
+                print("[DEBUG] (k-backward): vor dem ersten Keyframe.")
+                return
+            idx = max(idx - (n - 1), 0)
+
+        target = kfs[idx]
+        arrow = "+" if direction > 0 else "-"
+        print(f"[DEBUG] (k {arrow}): {cur_s:.3f} => {target:.3f} "
+              f"(idx={idx} von {len(kfs)})")
+        self.video_editor._jump_to_global_time(target)
+
+    def _surviving_keyframes(self, raw):
         """
-        Lese das aktuelle FPS aus MPV (falls verfügbar).
-        Fallback = 25.0 bei unbekannter Framerate.
+        Keyframes ohne die, die in einem geschnittenen Bereich liegen.
+
+        Ein Keyframe genau auf dem Anfang eines Schnitts faellt weg (das ist das
+        erste geloeschte Bild), einer genau auf dem Ende bleibt (das ist das
+        erste Bild, das wieder vorkommt).
         """
+        keeps = self._get_keep_intervals()
+        if not keeps:
+            return list(raw)
+        out = []
+        i = 0
+        for t in raw:
+            while i < len(keeps) and t >= keeps[i][1]:
+                i += 1
+            if i >= len(keeps):
+                break
+            if t >= keeps[i][0]:
+                out.append(t)
+        return out
+
+    # ------------------------------------------------------------------------
+    # c => Schnittkanten
+    # ------------------------------------------------------------------------
+    def _step_cut(self, direction: int):
+        if not self._require_encode_mode():
+            return
+
+        edges = self._get_cut_edges()
+        if not edges:
+            print("[DEBUG] (c): keine Schnittkanten vorhanden.")
+            return
+
+        cur_s = self._get_current_global_time()
+        tol = self._edge_tolerance()
+        order = edges if direction > 0 else list(reversed(edges))
+        arrow = "+" if direction > 0 else "-"
+        for kind, t in order:
+            hit = (t > cur_s + tol) if direction > 0 else (t < cur_s - tol)
+            if hit:
+                target = self._edge_seek_target(kind, t)
+                print(f"[DEBUG] (c {arrow}): {cur_s:.3f} => {target:.3f} "
+                      f"({kind} @ {t:.3f})")
+                self.video_editor._jump_to_global_time(target)
+                return
+
+        print("[DEBUG] (c): letzte Schnittkante in dieser Richtung erreicht.")
+
+    def _get_cut_edges(self):
+        """
+        Die Schnittkanten als aufsteigende Liste (art, zeit_global_s).
+
+        Gerechnet wird ueber die Keep-Bereiche, nicht ueber die Schnitte selbst:
+
+          Anfang eines Keep-Bereichs ("in")  = erstes Bild nach einem Schnitt
+                                               bzw. Anfang des Videos
+          Ende eines Keep-Bereichs   ("out") = letztes Bild vor einem Schnitt
+                                               bzw. Ende des Videos
+
+        Ein Schnitt am Anfang (0..x) hat links keine Kante, einer am Ende rechts
+        keine - das faellt so von selbst heraus.
+        """
+        keeps = self._get_keep_intervals()
+        if not keeps:
+            return []
+        edges = []
+        for ks, ke in keeps:
+            edges.append(("in", ks))
+            edges.append(("out", ke))
+        edges.sort(key=lambda e: e[1])
+        return edges
+
+    def _edge_tolerance(self) -> float:
+        """
+        Abstand, ab dem eine Kante als "andere Kante" gilt.
+
+        Nach dem Anfahren einer "out"-Kante steht der Player rund ein Bild vor
+        der Kante. Ohne diese Toleranz wuerde derselbe Punkt beim naechsten
+        Druck noch einmal angefahren.
+        """
+        return max(1.5 / self._get_current_fps(), 0.005)
+
+    def _require_encode_mode(self) -> bool:
+        """
+        Der c-Modus ergibt nur im Encode-Mode einen Sinn: dort wird an jeder
+        Schnittkante ein Keyframe erzwungen, der Schnitt landet also genau auf
+        der Markierung. Der Copy-Mode schneidet am naechsten Keyframe.
+        """
+        mode = getattr(self.mainwindow, "_edit_mode", "off") if self.mainwindow else "off"
+        if mode == "encode":
+            return True
+        from PySide6.QtWidgets import QMessageBox
+        QMessageBox.information(None, "Cut mode needs Encode-Mode", self._C_MODE_HINT)
+        return False
+
+    # ------------------------------------------------------------------------
+    # Umrechnung Rohzeit <-> Zeit im fertigen Video
+    # ------------------------------------------------------------------------
+    def _get_keep_intervals(self):
+        """
+        Die Bereiche, die im fertigen Video uebrig bleiben.
+
+        Kommt aus MainWindow._compute_keep_intervals(), damit ueberlappende
+        Schnitte genauso zusammengefasst werden wie ueberall sonst.
+        """
+        total = self._get_total_duration()
+        if total <= 0.0:
+            return []
+        cuts = self.cut_manager.get_cut_intervals() if self.cut_manager else []
+        if self.mainwindow and hasattr(self.mainwindow, "_compute_keep_intervals"):
+            keeps = self.mainwindow._compute_keep_intervals(cuts, total)
+        else:
+            keeps = [(0.0, total)]
+        return [(float(a), float(b)) for (a, b) in keeps if b > a]
+
+    def _final_from_source(self, t: float) -> float:
+        """Rohzeit => Zeit im fertigen Video."""
+        acc = 0.0
+        for ks, ke in self._get_keep_intervals():
+            if t < ks:
+                return acc
+            if t < ke:
+                return acc + (t - ks)
+            acc += (ke - ks)
+        return acc
+
+    def _source_from_final(self, f: float, keeps=None) -> float:
+        """Zeit im fertigen Video => Rohzeit."""
+        if keeps is None:
+            keeps = self._get_keep_intervals()
+        if not keeps:
+            return max(f, 0.0)
+        if f <= 0.0:
+            return keeps[0][0]
+        acc = 0.0
+        for ks, ke in keeps:
+            seg = ke - ks
+            if f < acc + seg:
+                return ks + (f - acc)
+            acc += seg
+        return keeps[-1][1]
+
+    def _clamp_final(self, f: float, keeps) -> float:
+        """Begrenzt eine Zeit im fertigen Video auf das erste/letzte Bild."""
+        total_final = sum(ke - ks for ks, ke in keeps)
+        last = max(0.0, total_final - 1.0 / self._get_current_fps())
+        return min(max(f, 0.0), last)
+
+    def _keep_index_for(self, t: float, keeps, d: float):
+        """Nummer des Keep-Bereichs, in dem t liegt - oder None."""
+        tol = 0.25 * d
+        for i, (ks, ke) in enumerate(keeps):
+            if (ks - tol) <= t < (ke + tol):
+                return i
+        return None
+
+    def _edge_seek_target(self, kind: str, t: float) -> float:
+        """
+        Rechnet eine Kante in die Zeit um, auf die wir springen.
+
+        Nachgemessen an libmpv (hr_seek + "exact"): mpv zeigt das ERSTE Bild AB
+        der Zielzeit, nicht das davor. Also:
+
+          "in"  (erstes Bild ab der Kante)   -> die Kante selbst, minus 0,1 ms,
+                damit ein Bild genau auf der Kante sicher getroffen wird.
+          "out" (letztes Bild vor der Kante) -> eine ganze Bilddauer frueher.
+
+        Eine Millisekunde reicht bei "out" NICHT: Schnittkanten liegen auf einer
+        Bildgrenze (MarkB/MarkE kommen aus der Player-Position), man landet dann
+        auf dem ersten geloeschten Bild - und der 200-ms-Timer
+        VideoCutManager._check_cut_skip() schiebt einen von dort ans Cut-Ende.
+        """
+        eps = 1e-4
+        if kind == "in":
+            return max(t - eps, 0.0)
+        return max(t - (1.0 / self._get_current_fps()) - eps, 0.0)
+
+    # ------------------------------------------------------------------------
+    # Player-Auskuenfte
+    # ------------------------------------------------------------------------
+    def _get_current_fps(self) -> float:
+        """
+        Bildrate aus mpv. Fallback 25.0.
+
+        video_params kennt KEIN "fps" - nachgemessen an libmpv enthaelt es
+        w/h/aspect/par usw., aber keine Bildrate. Der frueher benutzte Zugriff
+        lief deshalb immer in den Fallback. Richtig sind "container-fps" und
+        ersatzweise "estimated-vf-fps".
+        """
+        for name in ("container_fps", "estimated_vf_fps"):
+            try:
+                val = getattr(self.video_editor._player, name)
+                if val and float(val) > 0:
+                    return float(val)
+            except Exception:
+                pass
         try:
-            fps = self.video_editor._player.video_params["fps"]
-            if fps and fps > 0:
-                return float(fps)
-        except:
+            val = self.video_editor._player.video_params["fps"]
+            if val and float(val) > 0:
+                return float(val)
+        except Exception:
             pass
         return 25.0
 
-    # ------------------------------------------------------------------------
-    # k-Modus => Keyframe-Schritte (ohne Freeze, direkter Skip)
-    # ------------------------------------------------------------------------
-    def _step_keyframe_forward(self):
-        kfs = self._get_kfs_list()
-        if not kfs:
-            print("[DEBUG] (k-forward): Keine Keyframes vorhanden.")
-            from PySide6.QtWidgets import QMessageBox
-            QMessageBox.warning(None, "No Keyframes Loaded",
-                "No keyframes loaded! Please index your videos or switch off 'k' mode.")
-            return
-
-        cur_s = self._get_current_global_time()
-        mul = max(1.0, self.step_multiplier)
-        n = int(mul)
-
-        EPS = 0.005
-        idx = None
-        for i, t in enumerate(kfs):
-            if t > (cur_s + EPS):
-                idx = i
-                break
-        if idx is None:
-            print("[DEBUG] (k-forward): bereits am letzten Keyframe.")
-            return
-
-        idx_n = idx + (n - 1)
-        if idx_n >= len(kfs):
-            idx_n = len(kfs) - 1
-
-        target_s = kfs[idx_n]
-        skip_s = self._maybe_skip_cut(target_s, forward=True)
-        if skip_s is not None:
-            print(f"[DEBUG] (k-forward): Keyframe {target_s:.3f} im Cut => springe {skip_s:.3f}")
-            self.video_editor._jump_to_global_time(skip_s)
-            return
-
-        print(f"[DEBUG] (k-forward): current={cur_s:.3f} => {target_s:.3f} (idx={idx_n})")
-        self.video_editor._jump_to_global_time(target_s)
-
-    def _step_keyframe_backward(self):
-        kfs = self._get_kfs_list()
-        if not kfs:
-            print("[DEBUG] (k-backward): Keine Keyframes vorhanden.")
-            from PySide6.QtWidgets import QMessageBox
-            QMessageBox.warning(None, "No Keyframes Loaded",
-                "No keyframes loaded! Please index your videos or switch off 'k' mode.")
-            return
-
-        cur_s = self._get_current_global_time()
-        mul = max(1.0, self.step_multiplier)
-        n = int(mul)
-
-        EPS = 0.005
-        idx = None
-        # Rueckwaerts => den naechsten Keyframe UNTERHALB cur_s
-        for i in reversed(range(len(kfs))):
-            if kfs[i] < (cur_s - EPS):
-                idx = i
-                break
-        if idx is None:
-            print("[DEBUG] (k-backward): Vor erstem Keyframe.")
-            return
-
-        idx_n = idx - (n - 1)
-        if idx_n < 0:
-            idx_n = 0
-
-        target_s = kfs[idx_n]
-        skip_s = self._maybe_skip_cut(target_s, forward=False)
-        if skip_s is not None:
-            print(f"[DEBUG] (k-backward): Keyframe {target_s:.3f} im Cut => springe {skip_s:.3f}")
-            self.video_editor._jump_to_global_time(skip_s)
-            return
-
-        print(f"[DEBUG] (k-backward): current={cur_s:.3f} => {target_s:.3f} (idx={idx_n})")
-        self.video_editor._jump_to_global_time(target_s)
-
-    # ------------------------------------------------------------------------
-    # Gemeinsame Hilfsfunktionen
-    # ------------------------------------------------------------------------
-    def _maybe_skip_cut(self, target_s: float, forward: bool) -> float | None:
-        """
-        Prueft, ob target_s in einem geschnittenen Bereich liegt.
-        Falls ja => "Cut-Ende+0.001" (forward) oder "Cut-Start-0.001" (backward).
-        Sonst None => normal.
-        """
-        if not self.cut_manager:
-            return None
-
-        for (start_s, end_s) in self.cut_manager.get_cut_intervals():
-            if start_s <= target_s < end_s:
-                if forward:
-                    return min(end_s + 0.001, self._get_total_duration())
-                else:
-                    return max(start_s - 0.001, 0.0)
-        return None
-
-    def _check_and_freeze_if_stepping_into_cut(self, cur_s, next_s, forward: bool) -> bool:
-        """
-        Falls wir in einen geschnittenen Bereich gelangen, freeze knapp davor.
-        Nächster Step => actual skip.
-        """
-        if not self.cut_manager:
-            return False
-
-        for (start_s, end_s) in self.cut_manager.get_cut_intervals():
-            # check if [cur_s, next_s] => in den Cut-Bereich läuft
-            # forward => next_s > cur_s
-            # backward => next_s < cur_s
-            if forward:
-                # wir wollen von cur_s nach next_s
-                if (start_s <= next_s < end_s):
-                    freeze_s = max(start_s - 0.001, 0.0)
-                    print(f"[DEBUG] Step => freeze @ {freeze_s:.3f}")
-                    self._frozen_cut_interval = (start_s, end_s)
-                    self._freeze_mode = True
-                    self.video_editor._jump_to_global_time(freeze_s)
-                    return True
-            else:
-                if (start_s < next_s <= end_s):
-                    freeze_s = min(end_s + 0.001, self._get_total_duration())
-                    print(f"[DEBUG] Step => freeze @ {freeze_s:.3f}")
-                    self._frozen_cut_interval = (start_s, end_s)
-                    self._freeze_mode = True
-                    self.video_editor._jump_to_global_time(freeze_s)
-                    return True
-
-        return False
-
     def _get_current_global_time(self) -> float:
         """
-        Index => local => global
+        Aktuelle globale Zeit - dieselbe Quelle, mit der auch
+        VideoCutManager rechnet.
         """
-        idx = self.video_editor._current_index
-        local_s = self.video_editor.get_current_position_s()
-        total_before = sum(self.video_editor.multi_durations[:idx])
-        return total_before + local_s
+        return float(self.video_editor.get_current_position_s())
 
     def _get_total_duration(self) -> float:
         return sum(self.video_editor.multi_durations)
 
     def _get_kfs_list(self):
-        """
-        Aus dem MainWindow => global_keyframes
-        """
+        """Die indizierten Keyframes aus dem MainWindow."""
         if not self.mainwindow:
             return []
         return self.mainwindow.global_keyframes or []
