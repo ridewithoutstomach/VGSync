@@ -7,7 +7,7 @@ Versions up to and including 5.0 are documented in the GitHub releases only.
 
 ---
 
-## 5.01 – unreleased
+## 5.01 – 2026-08-28
 
 ### Added
 
@@ -102,6 +102,48 @@ When the GPX bar gets narrow, the logo hides itself instead of pushing the whole
 window wider.
 
 ### Fixed
+
+**Rendered videos could come out several seconds too short**
+
+Before merging, every pre-trimmed part is measured to find out how much of it is
+really playable, and that length is written into the concat list. The
+measurement could return a value that was far too small. ffmpeg then trimmed the
+part down to that length while merging, and the finished video was short by the
+difference.
+
+Measured on a project with two 60 s clips and one cut from 30 s to 90 s:
+
+    part 1 reported  55.033 s   instead of  60.000 s
+    part 2 reported  55.700 s   instead of  60.833 s
+    merged file      115.933 s  instead of 120.833 s   (147 frames dropped)
+    final video       55.933 s  instead of  60.833 s
+
+The cut itself was placed correctly - the material after it simply started
+almost five seconds too late.
+
+The cause was the interval passed to ffprobe. `START%` without an explicit end
+does not reliably mean "to the end of the file": depending on the file it
+returned nothing at all, or only the very first frame of the interval. In the
+second case the file was reported short by the width of the measuring window,
+which is five seconds.
+
+The interval now has an explicit end. On top of that the result is checked for
+plausibility: this measurement exists to subtract a small overhang - at most one
+GOP, measured 0.901 s - so anything more than 1.5 s below the container length is
+discarded and the container value is used instead. That is the behaviour from
+before this measurement existed: at worst a stutter at a joint, never a video
+that is too short.
+
+Measured after the change: five consecutive renders of the same project, all
+exactly 60.833333 s, with the measurement returning correct values every time.
+Before the change the same code returned a usable value in only one of three
+runs. Forcing the faulty answers by hand - first frame only, two frames, no
+answer at all - is now caught in every case, while a genuine correction of
+0.9 s still goes through.
+
+This affects 5.0 as well. The measurement arrived with the merge fix that first
+shipped in 5.0; releases up to and including 4.34 do not contain it and are not
+affected.
 
 **The stepper now counts in the finished video**
 
