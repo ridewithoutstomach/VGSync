@@ -31,7 +31,7 @@ from PySide6.QtCore import QSettings
 # 1) Versions-Konfiguration & Modus
 ##############################################################################
 
-APP_VERSION = "5.0"
+APP_VERSION = "5.01_pre"
 # use 4.30_pre for a pre Version
 
 
