@@ -87,7 +87,8 @@ from config import TMP_KEYFRAME_DIR, MY_GLOBAL_TMP_DIR, is_soft_opengl_enabled
 from core.mp4_keyframes import keyframe_times_from_index
 from core.player_backend import BACKEND_MPV, BACKEND_GES, DEFAULT_BACKEND
 from core.fade_cache import FadeJob, FadeRenderer
-from .dialogs import PreviewPrepareDialog
+from .dialogs import PreviewPrepareDialog, OutputFrameRateDialog
+from core import framerate
 
 from widgets.video_editor_widget import VideoEditorWidget
 from widgets.video_timeline_widget import VideoTimelineWidget
@@ -849,6 +850,45 @@ class MainWindow(QMainWindow):
         action_backend_info.triggered.connect(self._on_show_player_backend)
         backend_menu.addAction(action_backend_info)
 
+        # --- Render-Engine: ffmpeg oder GES ---
+        # Zweiter Export-Weg, damit sich beide Ergebnisse vergleichen lassen.
+        # Faellt komplett weg, sobald managers/ges_encoder_manager.py geloescht
+        # wird: dann schlaegt der Import fehl, das Menue erscheint nicht, und
+        # der Export laeuft unveraendert ueber ffmpeg.
+        try:
+            from managers.ges_encoder_manager import (
+                SETTINGS_KEY as _ENGINE_KEY, ENGINE_FFMPEG, ENGINE_GES,
+                DEFAULT_ENGINE)
+        except ImportError:
+            _ENGINE_KEY = None
+        if _ENGINE_KEY is not None:
+            self._engine_key = _ENGINE_KEY
+            engine_menu = setup_menu.addMenu("Render Engine")
+            aktuelle_engine = QSettings("KVRouite", "KVRouite").value(
+                _ENGINE_KEY, DEFAULT_ENGINE, type=str)
+            engine_group = QActionGroup(self)
+            engine_group.setExclusive(True)
+
+            self.action_engine_ffmpeg = QAction("ffmpeg (default)", self,
+                                                checkable=True)
+            self.action_engine_ffmpeg.setStatusTip(
+                "Proven export: cut on keyframes, copy, re-encode only the fades.")
+            self.action_engine_ffmpeg.setChecked(aktuelle_engine != ENGINE_GES)
+            self.action_engine_ffmpeg.triggered.connect(
+                lambda: self._on_select_render_engine(ENGINE_FFMPEG))
+            engine_group.addAction(self.action_engine_ffmpeg)
+            engine_menu.addAction(self.action_engine_ffmpeg)
+
+            self.action_engine_ges = QAction("GStreamer / GES (experimental)",
+                                             self, checkable=True)
+            self.action_engine_ges.setStatusTip(
+                "Second path: renders the whole timeline in one pass, no ffmpeg.")
+            self.action_engine_ges.setChecked(aktuelle_engine == ENGINE_GES)
+            self.action_engine_ges.triggered.connect(
+                lambda: self._on_select_render_engine(ENGINE_GES))
+            engine_group.addAction(self.action_engine_ges)
+            engine_menu.addAction(self.action_engine_ges)
+
         
         
         temp_dir_menu = setup_menu.addMenu("Temp Directory")
@@ -1586,13 +1626,42 @@ class MainWindow(QMainWindow):
                     "Please note:\n"
                     "  - This is experimental.\n"
                     "  - 360° mode, zoom and pan are only available with mpv.\n"
-                    "  - Mid-transition the picture is rendered a bit too dark;\n"
-                    "    timing and length of the fade are correct.\n"
+                    "  - Crossfades are pre-rendered on first use, so the very\n"
+                    "    first playback after loading needs a moment.\n"
                     "  - If GStreamer is missing, KVRouite falls back to mpv\n"
                     "    and tells you at startup.")
         else:
             text = "The player will use mpv again after the next restart."
         QMessageBox.information(self, "Video Backend", text)
+
+    def _on_select_render_engine(self, name: str):
+        """Waehlt die Engine fuer den Export. Gilt sofort beim naechsten Lauf.
+
+        Anders als beim Wiedergabe-Backend ist kein Neustart noetig: welche
+        Engine laeuft, wird erst beim Druck auf Encode gelesen.
+        """
+        QSettings("KVRouite", "KVRouite").setValue(
+            getattr(self, "_engine_key", "encoder/engine"), name)
+        if name == "ges":
+            text = (
+                "The next export will be rendered with GStreamer / GES.\n"
+                "\n"
+                "This is the second export path, built so you can compare it\n"
+                "against the ffmpeg one on the same project. It renders the\n"
+                "whole timeline in a single pass: no merged.mp4, no keyframe\n"
+                "alignment, no concat - and the crossfades come out first\n"
+                "generation instead of second.\n"
+                "\n"
+                "Please note:\n"
+                "  - Experimental. Check length and picture before relying\n"
+                "    on it for real work.\n"
+                "  - Needs GStreamer. Without it the export fails and you\n"
+                "    have to switch back here.\n"
+                "  - Overlays work but are less tested than in the ffmpeg\n"
+                "    path.")
+        else:
+            text = "The next export will be rendered with ffmpeg again."
+        QMessageBox.information(self, "Render Engine", text)
 
     def _on_show_player_backend(self):
         running = self.video_editor.backend_name()
@@ -2087,6 +2156,17 @@ class MainWindow(QMainWindow):
         self.encode_action.setChecked(new_mode== "encode")
 
         self._edit_mode = new_mode
+
+        # "k" (Keyframe-Schritt) nur im Copy-Mode anbieten. Dort landet ein
+        # Schnitt am naechsten Keyframe und "k" zeigt, wo das waere. Im
+        # Encode-Mode sitzt jeder Schnitt auf dem gewaehlten Bild, und der
+        # Keyframe-Index wird gar nicht gebaut - ein Knopf, der dann nur eine
+        # Fehlermeldung bringt, gehoert nicht in die Oberflaeche.
+        if new_mode == "copy":
+            self.video_control.set_step_values(["s", "m", "k", "f", "c"])
+        else:
+            self.video_control.set_step_values(["s", "m", "f", "c"])
+
         if new_mode == "off" and self._autoSyncVideoEnabled:
             print("[DEBUG] EditMode=off => deaktiviere AutoCutVideo+GPX")
             self._autoSyncVideoEnabled = False
@@ -2147,6 +2227,81 @@ class MainWindow(QMainWindow):
             
         self._update_set_gpx2video_enabled()
 
+    def _fps_nach_laden(self, nur_bei_abweichung=False):
+        """Bildrate aus dem Material lesen und die Ausgaberate danach setzen.
+
+        Wird nach dem Laden eines Projekts und nach der ersten Videodatei
+        aufgerufen, ausserdem bei jeder weiteren Datei - dann aber nur, wenn
+        deren Bildrate von der ersten abweicht (nur_bei_abweichung).
+
+        Gesetzt wird ausschliesslich die Bildrate. Aufloesung, Container,
+        Hardware, CRF, Preset, Bitrate und X-Fade bleiben unangetastet.
+
+        Der Sinn: laeuft die Ausgabe mit der Rate der Quelle, ist jedes
+        Ausgabebild genau ein Quellbild - keine Umrechnung, kein Versatz. Mit
+        30 statt 30000/1001 war der Export eines 4:26-Projekts 35 ms zu lang
+        und lag durchgehend ein Bild hinter dem Quellmaterial (gemessen am
+        29.08.2026). Mit der Quellrate: 0 ms und 0 Bilder.
+        """
+        if not self.playlist:
+            return
+        try:
+            raten, alle_gleich = framerate.liste_lesen(self.playlist)
+        except Exception as exc:
+            print(f"[WARN] Bildraten nicht lesbar: {exc}")
+            return
+        quelle = next((r for r in raten if r), None)
+        if quelle is None:
+            return
+        if nur_bei_abweichung and alle_gleich:
+            return
+
+        s = QSettings("KVRouite", "KVRouite")
+        s.setValue("encoder/fps_source", framerate.als_text(*quelle))
+        gespeichert = framerate.parsen(s.value("encoder/fps", "", type=str), None)
+        werte = framerate.auswahl(quelle, zusaetzlich=gespeichert)
+
+        # Vorgeschlagen wird die Rate der Quelle.
+        index = 0
+        for i, w in enumerate(werte):
+            if framerate.gleich(w, quelle):
+                index = i
+                break
+
+        warnung = details = None
+        if not alle_gleich:
+            warnung = "The loaded videos do not all have the same frame rate."
+            zeilen = []
+            for pfad, rate in zip(self.playlist, raten):
+                text = framerate.anzeige(*rate) if rate else "unknown"
+                zeilen.append(f"    {os.path.basename(pfad)}   {text} fps")
+            details = ("\n".join(zeilen) + "\n\n"
+                       "Everything is exported at the rate you choose below, so "
+                       "the files with a different rate have to be converted - "
+                       "that costs accuracy. Best keep one rate throughout.")
+
+        dlg = OutputFrameRateDialog(
+            framerate.anzeige(*quelle),
+            [framerate.anzeige(*w) for w in werte],
+            index, warnung, details, self)
+        dlg.exec()
+
+        gewaehlt = werte[max(0, min(dlg.gewaehlt(), len(werte) - 1))]
+        s.setValue("encoder/fps", framerate.als_text(*gewaehlt))
+        print(f"[INFO] Quelle {framerate.anzeige(*quelle)} fps, Ausgabe "
+              f"{framerate.anzeige(*gewaehlt)} fps "
+              f"({framerate.als_text(*gewaehlt)})")
+
+    def _fragen_nach_dem_laden(self):
+        """Die Fragen nach dem Laden nacheinander stellen, nicht uebereinander.
+
+        Zwei getrennt eingereihte Aufrufe reichten nicht: das erste Fenster
+        laeuft mit exec() in einer eigenen Ereignisschleife, und darin wird der
+        zweite Aufruf sofort abgearbeitet - die Fenster lagen uebereinander.
+        """
+        self._fps_nach_laden()
+        self._maybe_ask_index()
+
     def _maybe_ask_index(self):
         """
         Stellt die Indexierungsfrage - aber erst, wenn nichts anderes offen ist.
@@ -2155,6 +2310,15 @@ class MainWindow(QMainWindow):
         nichts; beide rufen hier am Ende erneut herein.
         """
         if not getattr(self, "_index_question_pending", False):
+            return
+        # Der Keyframe-Index hat genau einen Abnehmer: Step-Modus "k" im
+        # step_manager, und den gibt es nur, um zu zeigen, wo COPY-Mode
+        # schneiden wuerde. Der Encoder holt sich seine Keyframes selbst aus
+        # merged.mp4, der Cut-Manager rastet gar nicht auf Keyframes ein.
+        # Im Encode-Modus indiziert die Anwendung also fuer nichts - deshalb
+        # wird dort auch nicht mehr gefragt.
+        if getattr(self, "_edit_mode", "") != "copy":
+            self._index_question_pending = False
             return
         if getattr(self, "_loading_project", False):
             return
@@ -4630,8 +4794,17 @@ class MainWindow(QMainWindow):
                 except Exception:
                     pass
             self.video_control.activate_controls(True)
-            
-            if self._edit_mode in ("copy", "encode") and (not self._userDeclinedIndexing):
+
+            # Bildrate: bei der ERSTEN Datei immer fragen - auch nach "New
+            # Project", denn dann soll die Ausgaberate neu bestimmt werden.
+            # Bei jeder weiteren Datei nur, wenn sie von der ersten abweicht;
+            # dann aber deutlich. Beim Laden eines Projekts nicht: dort wird
+            # die Liste am Stueck gesetzt und einmal am Ende gefragt.
+            if not getattr(self, "_loading_project", False):
+                self._fps_nach_laden(nur_bei_abweichung=len(self.playlist) > 1)
+
+            # Nur Copy-Mode braucht den Keyframe-Index (siehe _maybe_ask_index).
+            if self._edit_mode == "copy" and (not self._userDeclinedIndexing):
                 self.start_indexing_process(filepath)
             else:
                 print("[DEBUG] Kein Indexing, weil der User es abgelehnt hat oder EditVideo=OFF.")                
@@ -5174,7 +5347,12 @@ class MainWindow(QMainWindow):
             hw_encode   = s.value("encoder/hw", "none", type=str)
             container   = s.value("encoder/container", "x265", type=str)
             crf_val     = s.value("encoder/crf", 25, type=int)
-            fps_val     = s.value("encoder/fps", 30, type=int)
+            # Als BRUCH weitergeben ("30000/1001"), nicht als gerundete
+            # Zahl - sonst ist die Genauigkeit sofort wieder dahin.
+            # Beide Encoder-Wege verstehen die Schreibweise: ffmpeg als
+            # "-r 30000/1001", GES als Zaehler und Nenner.
+            fps_val     = framerate.als_text(
+                *framerate.parsen(s.value("encoder/fps", "30", type=str)))
             preset_val  = s.value("encoder/preset", "fast", type=str)
             width_val   = s.value("encoder/res_w", 1280, type=int)
 
@@ -7046,7 +7224,7 @@ class MainWindow(QMainWindow):
                 ladefenster.deleteLater()
             except Exception:
                 pass
-            QTimer.singleShot(0, self._maybe_ask_index)
+            QTimer.singleShot(0, self._fragen_nach_dem_laden)
 
             
     def _rebuild_playlist_menu(self):
@@ -7325,7 +7503,7 @@ class MainWindow(QMainWindow):
         if path_stored and os.path.isdir(path_stored):
             msg = f"Currently stored Temp Directory:\n{path_stored}"
         else:
-            msg = f"No temp dir stored. Default:\n{config.get_temp_segments_dir()}"
+            msg = f"No temp dir stored. Default:\n{config.get_temp_segments_container()}"
         QMessageBox.information(self, "Temp Directory", msg)
 
 

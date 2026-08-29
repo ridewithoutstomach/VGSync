@@ -91,13 +91,16 @@ class VideoControlWidget(QWidget):
         self.goto_end.customContextMenuRequested.connect(lambda _pos: self.gotoNextEditRequested.emit())
         
         
-        self._step_values = ["s", "m", "k", "f", "c"]  # <-- "f" ergänzt, "c" = Schnittkanten
+        # Ohne "k": den Keyframe-Schritt gibt es nur im Copy-Mode, und beim
+        # Start steht der Bearbeitungsmodus auf "off". _set_edit_mode()
+        # setzt die Liste danach passend (siehe set_step_values).
+        self._step_values = ["s", "m", "f", "c"]
         self._step_index = 0
         self.step_button = QPushButton(self._step_values[self._step_index])
         self.step_button.setToolTip(
             "Choose the Step-Value\n"
-            "s = seconds, m = minutes, k = keyframes, f = single frame\n"
-            "c = cut edges (Encode-Mode only)"
+            "s = seconds, m = minutes, f = single frame\n"
+            "c = cut edges"
         )
         self.step_button.setFixedSize(40, 24)
         self.step_button.clicked.connect(self.on_step_button_clicked)
@@ -329,6 +332,40 @@ class VideoControlWidget(QWidget):
             self.play_pause_button.setIcon(
                 self.style().standardIcon(QStyle.SP_MediaPlay)
             )
+
+    def set_step_values(self, values):
+        """Legt fest, welche Schrittweiten der Knopf durchschaltet.
+
+        Der Keyframe-Schritt "k" hat nur im Copy-Mode einen Sinn: dort landet
+        ein Schnitt am naechsten Keyframe, und "k" zeigt, wo das waere. Im
+        Encode-Mode liegt jeder Schnitt genau auf dem gewaehlten Bild, und der
+        Keyframe-Index wird dort gar nicht erst gebaut. Statt "k" anzubieten
+        und dann eine Fehlermeldung zu zeigen, wird er ausgeblendet.
+
+        Die aktuelle Auswahl bleibt erhalten, wenn es sie noch gibt; sonst
+        faellt sie auf den ersten Eintrag zurueck und der Wechsel wird gemeldet.
+        """
+        werte = [v for v in values if v]
+        if not werte or werte == self._step_values:
+            return
+        vorher = self._step_values[self._step_index] if self._step_values else None
+        self._step_values = werte
+        if vorher in werte:
+            self._step_index = werte.index(vorher)
+            geaendert = False
+        else:
+            self._step_index = 0
+            geaendert = True
+        self.step_button.setText(self._step_values[self._step_index])
+        self.step_button.setToolTip(
+            "Choose the Step-Value\n"
+            + ", ".join({
+                "s": "s = seconds", "m": "m = minutes",
+                "k": "k = keyframes", "f": "f = single frame",
+                "c": "c = cut edges",
+            }.get(v, v) for v in self._step_values))
+        if geaendert:
+            self.step_value_changed.emit(self._step_values[self._step_index])
 
     def on_step_button_clicked(self):
         self._step_index = (self._step_index + 1) % len(self._step_values)

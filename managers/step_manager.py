@@ -228,8 +228,17 @@ where the cut will really land."""
         if not raw:
             print("[DEBUG] (k): Keine Keyframes vorhanden.")
             from PySide6.QtWidgets import QMessageBox
-            QMessageBox.warning(None, "No Keyframes Loaded",
-                "No keyframes loaded! Please index your videos or switch off 'k' mode.")
+            # Indiziert wird nur noch im Copy-Mode: der Keyframe-Index hat
+            # keinen anderen Abnehmer als diesen Schrittmodus, und der zeigt,
+            # wo Copy-Mode schneiden wuerde. Im Encode-Mode liegt jeder Schnitt
+            # ohnehin genau auf dem Bild, das man gewaehlt hat.
+            QMessageBox.warning(
+                None, "No Keyframes Loaded",
+                "No keyframes are indexed.\n\n"
+                "Keyframe stepping shows where Copy mode would cut, so the "
+                "index is only built in Copy mode.\n\n"
+                "In Encode mode every cut lands exactly on the frame you "
+                "picked - use step mode '1' or 'c' there.")
             return
 
         kfs = self._surviving_keyframes(raw)

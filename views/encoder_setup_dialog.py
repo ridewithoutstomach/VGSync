@@ -29,6 +29,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import QSettings, Qt
 
+from core import framerate
+
 
 # Hilfsfunktion: kurzer Test, ob ein FFmpeg-Encoder läuft
 
@@ -155,10 +157,15 @@ class EncoderSetupDialog(QDialog):
         self.bitrate_spin.setRange(1, 200)
         form_layout.addRow("Bitrate (Mbit/s):", self.bitrate_spin)
 
-        # (F) FPS
-        self.fps_spin = QSpinBox()
-        self.fps_spin.setRange(1, 120)
-        form_layout.addRow("FPS:", self.fps_spin)
+        # (F) FPS - Auswahl statt freier Eingabe.
+        # Eine Bildrate ist ein Bruch: NTSC-Material laeuft mit 30000/1001,
+        # nicht mit 29,97. In ein Zahlenfeld liesse sich das gar nicht
+        # eintragen, und frei gewaehlte Raten haetten hier ohnehin keinen
+        # Nutzen. Welche Werte angeboten werden, haengt an der Bildrate des
+        # geladenen Materials (siehe core/framerate.auswahl); der Bruch steckt
+        # als userData hinter dem angezeigten Text.
+        self.fps_combo = QComboBox()
+        form_layout.addRow("FPS:", self.fps_combo)
 
         # (G) Xfade
         self.xfade_spin = QSpinBox()
@@ -262,8 +269,24 @@ class EncoderSetupDialog(QDialog):
         self.preset_combo.setCurrentIndex(idx_p)
 
         # 5) FPS
-        fps_val = self.settings.value("encoder/fps", 30, type=int)
-        self.fps_spin.setValue(fps_val)
+        # "encoder/fps_source" schreibt das Hauptfenster beim Laden eines
+        # Projekts: die Bildrate der ersten Videodatei. Daran haengt, welche
+        # Werte ueberhaupt sinnvoll sind - NTSC-Raten nur bei NTSC-Material.
+        quelle = framerate.parsen(
+            self.settings.value("encoder/fps_source", "", type=str), None)
+        aktuell = framerate.parsen(
+            self.settings.value("encoder/fps", "30", type=str))
+        self._fps_werte = framerate.auswahl(quelle, zusaetzlich=aktuell)
+        self.fps_combo.clear()
+        for wert in self._fps_werte:
+            text = framerate.anzeige(*wert)
+            if quelle and framerate.gleich(wert, quelle):
+                text += "   (source)"
+            self.fps_combo.addItem(text, userData=wert)
+        for i, wert in enumerate(self._fps_werte):
+            if framerate.gleich(wert, aktuell):
+                self.fps_combo.setCurrentIndex(i)
+                break
 
         # 6) Xfade
         xfade_val = self.settings.value("encoder/xfade", 2, type=int)
@@ -419,8 +442,10 @@ class EncoderSetupDialog(QDialog):
         preset = self.preset_combo.currentText()
         self.settings.setValue("encoder/preset", preset)
 
-        # fps
-        self.settings.setValue("encoder/fps", self.fps_spin.value())
+        # fps - als Bruch ablegen ("30000/1001"), nicht als gerundete Zahl.
+        wert = self.fps_combo.currentData()
+        if wert:
+            self.settings.setValue("encoder/fps", framerate.als_text(*wert))
 
         xfade_val = self.xfade_spin.value()
         if xfade_val < 1:

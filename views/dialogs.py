@@ -24,7 +24,7 @@ import os
 import shutil
 
 from PySide6.QtWidgets import QDialog, QLabel, QVBoxLayout, QPushButton, QProgressBar, \
-    QHBoxLayout, QMessageBox, QTextEdit, QApplication
+    QHBoxLayout, QMessageBox, QTextEdit, QApplication, QComboBox, QFrame
     
 from PySide6.QtCore import QTimer, QProcess, Signal, Qt
 from PySide6.QtCore import QEvent
@@ -459,3 +459,98 @@ class PreviewPrepareDialog(QDialog):
         if self.btn_cancel.isEnabled():
             self.abgebrochen.emit()
         super().closeEvent(event)
+
+
+class OutputFrameRateDialog(QDialog):
+    """Zeigt nach dem Laden, mit welcher Bildrate exportiert wird.
+
+    Die Rate wird aus der ersten Videodatei gelesen und vorgeschlagen - so
+    machen es Schnittprogramme auch (Shotcut "Automatic", Resolve "set project
+    frame rate from first clip"). Stimmt die Ausgabe mit der Quelle ueberein,
+    muss nichts umgerechnet werden: jedes Ausgabebild ist genau ein Quellbild,
+    und Video und GPX-Spur bleiben auf die Millisekunde beieinander.
+
+    Nur die Bildrate. Aufloesung, Container, Hardware, CRF, Preset, Bitrate und
+    X-Fade bleiben unangetastet - das sind die Einstellungen des Anwenders.
+
+    Das Fenster kommt bei jedem Laden. Damit man die eine Meldung, auf die es
+    ankommt, nicht im gewohnten Bild uebersieht, sieht es bei unterschiedlichen
+    Bildraten deutlich anders aus: roter Rahmen, grosse Ueberschrift, anderer
+    Fenstertitel. Ein Hinweis im Kleingedruckten wuerde genau dann untergehen,
+    wenn er gebraucht wird.
+    """
+
+    def __init__(self, quelle_text, auswahl_texte, aktuell_index,
+                 warnung=None, warnung_details=None, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Frame rate mismatch" if warnung
+                            else "Output frame rate")
+        self.setModal(True)
+        self.setMinimumWidth(460)
+
+        layout = QVBoxLayout(self)
+
+        if warnung:
+            kasten = QFrame()
+            kasten.setFrameShape(QFrame.StyledPanel)
+            kasten.setStyleSheet(
+                "QFrame { border: 2px solid #c62828; border-radius: 6px;"
+                " background: #fdecea; }"
+                " QLabel { border: none; background: transparent; }")
+            innen = QVBoxLayout(kasten)
+
+            titel = QLabel("⚠  " + warnung)
+            schrift = titel.font()
+            schrift.setPointSize(max(12, schrift.pointSize() + 4))
+            schrift.setBold(True)
+            titel.setFont(schrift)
+            titel.setStyleSheet("color: #b71c1c;")
+            titel.setWordWrap(True)
+            innen.addWidget(titel)
+
+            if warnung_details:
+                text = QLabel(warnung_details)
+                text.setWordWrap(True)
+                text.setStyleSheet("color: #7f1d1d;")
+                innen.addWidget(text)
+
+            layout.addWidget(kasten)
+
+        kopf = QLabel(f"Your source material runs at <b>{quelle_text} fps</b>.")
+        kopf.setTextFormat(Qt.RichText)
+        layout.addWidget(kopf)
+
+        info = QLabel(
+            "The export is set to the same rate. That way every exported frame "
+            "is exactly one source frame, and the video stays in step with the "
+            "GPX track.\n\n"
+            "You can pick a different rate - the video is then converted, which "
+            "costs a little accuracy.")
+        info.setWordWrap(True)
+        layout.addWidget(info)
+
+        zeile = QHBoxLayout()
+        zeile.addWidget(QLabel("Output frame rate:"))
+        self.combo = QComboBox()
+        for text in auswahl_texte:
+            self.combo.addItem(text)
+        if 0 <= aktuell_index < len(auswahl_texte):
+            self.combo.setCurrentIndex(aktuell_index)
+        zeile.addWidget(self.combo)
+        zeile.addStretch(1)
+        layout.addLayout(zeile)
+
+        fuss = QLabel("You can change this later under Config → Encoder Setup.")
+        fuss.setStyleSheet("color: gray;")
+        layout.addWidget(fuss)
+
+        knoepfe = QHBoxLayout()
+        knoepfe.addStretch(1)
+        self.btn_ok = QPushButton("OK")
+        self.btn_ok.setDefault(True)
+        self.btn_ok.clicked.connect(self.accept)
+        knoepfe.addWidget(self.btn_ok)
+        layout.addLayout(knoepfe)
+
+    def gewaehlt(self):
+        return self.combo.currentIndex()
