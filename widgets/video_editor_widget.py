@@ -58,6 +58,10 @@ class VideoEditorWidget(QWidget):
 
     play_ended = Signal()  # z.B. wenn das letzte Video fertig ist
 
+    #: Ein Overlay wurde im Vorschaubild verschoben oder skaliert:
+    #: Platz in der Overlay-Liste, x, y in Exportpixeln, neue Skalierung.
+    overlayImBildGeaendert = Signal(int, int, int, float)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         
@@ -103,6 +107,7 @@ class VideoEditorWidget(QWidget):
         # dem Ablegebereich, damit die weiterhin darueber liegen.
         self.video_surface = VideoSurface(self)
         self.video_surface.hide()
+        self.video_surface.overlayGeaendert.connect(self.overlayImBildGeaendert)
         layout.addWidget(self.video_surface, 0, 0)
         layout.setRowStretch(0, 1)
         layout.setColumnStretch(0, 1)
@@ -581,7 +586,16 @@ class VideoEditorWidget(QWidget):
             return False
 
     def set_preview_overlays(self, overlays, export_groesse=None):
-        """Overlays an das Backend geben (siehe PlayerBackend.set_overlays)."""
+        """Overlays an das Backend geben (siehe PlayerBackend.set_overlays).
+
+        Dieselben Rechtecke gehen an die Zeichenflaeche - sie braucht sie zum
+        Anwaehlen und Ziehen. Gezeichnet wird das Bild weiterhin von
+        GStreamer; Qt malt nur Rahmen und Anfasser darueber.
+        """
+        try:
+            self.video_surface.overlays_setzen(overlays, export_groesse)
+        except Exception as e:
+            print(f"[WARN] Overlays fuer die Zeichenflaeche: {e}")
         try:
             return bool(self._backend.set_overlays(overlays, export_groesse))
         except Exception as e:
@@ -725,6 +739,13 @@ class VideoEditorWidget(QWidget):
             
         # 1) globale Sekunde
         global_s = self.get_current_global_time()
+
+        # Die Zeichenflaeche braucht dieselbe Zeit: nur Overlays, die gerade
+        # im Bild stehen, sollen sich anwaehlen und ziehen lassen.
+        try:
+            self.video_surface.zeit_setzen(global_s)
+        except Exception:
+            pass
 
         # 2) falls "global" => zeige global_s
         #    falls "final"  => rufe callback auf

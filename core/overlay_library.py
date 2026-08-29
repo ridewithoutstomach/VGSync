@@ -37,6 +37,7 @@ bleiben unangetastet stehen, damit nichts verlorengeht.
 
 import json
 import os
+import re
 
 from PySide6.QtCore import QSettings
 
@@ -47,6 +48,12 @@ SCHLUESSEL = "overlay/bibliothek"
 
 #: Die alten festen Plaetze, aus denen einmalig uebernommen wird.
 ALTE_PLAETZE = (1, 2, 3)
+
+#: Hoechstzahl der Eintraege. Eine Bibliothek soll eine ueberschaubare
+#: Auswahl sein, keine Ablage - wer jahrelang jedes Bild aufnimmt, findet
+#: darin nichts mehr wieder. Ein vorhandenes Bild zu ersetzen geht immer,
+#: auch wenn die Grenze erreicht ist.
+HOECHSTZAHL = 20
 
 ECKEN = ("top-left", "top-right", "bottom-left", "bottom-right", "center")
 
@@ -74,6 +81,71 @@ def ausdruecke(ecke, dx, dy):
     if ecke == "bottom-right":
         return f"(W-w)-{dx}", f"(H-h)-{dy}"
     return f"((W-w)/2)-{dx}", f"((H-h)/2)-{dy}"
+
+
+#: Die Formen, die `ausdruecke` erzeugt - hier rueckwaerts gelesen. Der
+#: Schluessel ist die Verankerung, der Wert das Muster mit dem Abstand darin.
+#: Der Abstand darf halbzahlig sein. Grund: bei mittiger Verankerung ist
+#: (W-w)/2 ein Halbwert, sobald W-w ungerade ist. Mit ganzzahligem Abstand
+#: waeren dann nur jede zweite Bildspalte erreichbar - beim Ziehen bliebe das
+#: Bild an ungeraden Stellen einen Punkt daneben stehen.
+_ABSTAND = r"(-?\d+(?:\.\d+)?)"
+
+_MUSTER_X = (
+    ("right",  re.compile(r"^\(W-w\)-" + _ABSTAND + r"$")),
+    ("center", re.compile(r"^\(\(W-w\)/2\)-" + _ABSTAND + r"$")),
+    ("left",   re.compile(r"^" + _ABSTAND + r"$")),
+)
+_MUSTER_Y = (
+    ("right",  re.compile(r"^\(H-h\)-" + _ABSTAND + r"$")),
+    ("center", re.compile(r"^\(\(H-h\)/2\)-" + _ABSTAND + r"$")),
+    ("left",   re.compile(r"^" + _ABSTAND + r"$")),
+)
+
+
+def _abstand_text(wert):
+    """Ganze Zahlen ohne Nachkomma, Halbwerte mit - nie in Exponentialform."""
+    if float(wert) == int(wert):
+        return f"{int(wert)}"
+    return f"{wert:.1f}"
+
+
+def verankerung(ausdruck, achse="x"):
+    """Woran haengt dieser Ausdruck - "left", "right", "center" oder None.
+
+    None heisst: eine Form, die nicht von hier stammt. Dann wird beim
+    Zurueckschreiben nicht geraten, sondern auf eine feste Zahl gewechselt.
+    """
+    text = str(ausdruck).strip()
+    for name, muster in (_MUSTER_X if achse == "x" else _MUSTER_Y):
+        if muster.match(text):
+            return name
+    return None
+
+
+def lage_zurueck(alter_ausdruck, neuer_wert, gross, klein, achse="x"):
+    """Neue Pixellage -> Ausdruck, der die alte Verankerung behaelt.
+
+    Wer ein Overlay als "30 Pixel vom rechten Rand" angelegt hat, will es
+    nach dem Verschieben immer noch am rechten Rand haben - nur mit einem
+    anderen Abstand. Wuerde hier stumpf eine Zahl hineingeschrieben, saesse
+    das Bild bei geaenderter Ausgabegroesse ploetzlich woanders.
+
+    `gross` ist W bzw. H, `klein` ist w bzw. h - dieselben Namen wie in den
+    Ausdruecken selbst.
+    """
+    wert = int(round(neuer_wert))
+    art = verankerung(alter_ausdruck, achse)
+    rand = max(0, int(gross) - int(klein))
+    if art == "right":
+        abstand = _abstand_text(rand - wert)
+        return (f"(W-w)-{abstand}" if achse == "x" else f"(H-h)-{abstand}")
+    if art == "center":
+        abstand = _abstand_text(rand / 2.0 - wert)
+        return (f"((W-w)/2)-{abstand}" if achse == "x"
+                else f"((H-h)/2)-{abstand}")
+    # "left" und alles Unbekannte: feste Zahl, das ist immer eindeutig.
+    return f"{wert}"
 
 
 def _saeubern(eintrag):
@@ -156,16 +228,25 @@ def enthalten(pfad):
     return any(_gleicher_pfad(e["pfad"], pfad) for e in eintraege())
 
 
+def voll():
+    """True, wenn kein weiteres Bild mehr hineinpasst."""
+    return len(eintraege()) >= HOECHSTZAHL
+
+
 def aufnehmen(pfad, scale=1.0, ecke="top-left", dx=10, dy=10):
     """Bild in die Bibliothek aufnehmen. Ein bereits vorhandenes wird ersetzt.
 
-    True, wenn danach ein Eintrag dafuer existiert.
+    False, wenn der Pfad unbrauchbar ist oder die Bibliothek voll ist. Das
+    Ersetzen eines vorhandenen Bildes gelingt auch dann - dabei kommt ja
+    keiner dazu.
     """
     eintrag = _saeubern({"pfad": pfad, "scale": scale, "ecke": ecke,
                          "dx": dx, "dy": dy})
     if eintrag is None:
         return False
     liste = [e for e in eintraege() if not _gleicher_pfad(e["pfad"], eintrag["pfad"])]
+    if len(liste) >= HOECHSTZAHL:
+        return False
     liste.append(eintrag)
     speichern(liste)
     return True

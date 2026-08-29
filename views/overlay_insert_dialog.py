@@ -266,8 +266,16 @@ class OverlayInsertDialog(QDialog):
             skalierung = 1.0
             # Ohne eigene Lage in die Bildmitte.
             x_ausdruck, y_ausdruck = overlay_library.ausdruecke("center", 0, 0)
-            if self.haken_bibliothek.isChecked():
-                overlay_library.aufnehmen(pfad, skalierung, "center", 0, 0)
+            if (self.haken_bibliothek.isChecked() and
+                    not overlay_library.aufnehmen(pfad, skalierung,
+                                                  "center", 0, 0)):
+                # Das Overlay entsteht trotzdem - nur gemerkt wird es nicht.
+                QMessageBox.information(
+                    self, "Bibliothek ist voll",
+                    f"Die Bibliothek fasst {overlay_library.HOECHSTZAHL} "
+                    "Bilder.\nDas Overlay wird eingefuegt, aber nicht "
+                    "aufgenommen.\n\nUnter Setup -> Overlay Library laesst "
+                    "sich Platz schaffen.")
 
         if not pfad or not os.path.isfile(pfad):
             QMessageBox.warning(self, "Bild fehlt",

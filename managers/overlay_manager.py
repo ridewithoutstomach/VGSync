@@ -42,11 +42,19 @@ class OverlayManager(QObject):
 
     overlaysChanged = Signal()
 
+    #: Wird VOR jeder vom Anwender ausgeloesten Aenderung gesendet und traegt
+    #: den Stand davor. Daran haengt das globale Strg+Z: das Hauptfenster legt
+    #: sich daraus eine Ruecknahmefunktion auf seinen Stapel.
+    #:
+    #: Absichtlich nur beim Anlegen und beim Aendern. Das Leeren beim Laden
+    #: eines Projekts oder bei "New Project" ist keine Bearbeitung - dafuer
+    #: einen Ruecknahmeschritt anzubieten, waere irrefuehrend.
+    vorAenderung = Signal(list)
+
     def __init__(self, timeline, parent=None):
         super().__init__(parent)
         self.timeline = timeline
         self._overlays = []
-        self._history_stack = []
 
     def add_overlay(self, ovl_dict):
         """
@@ -141,7 +149,7 @@ class OverlayManager(QObject):
 
         # --- Alles gut -> speichern + Timeline markieren ---
         import copy
-        self._history_stack.append(copy.deepcopy(self._overlays))
+        self.vorAenderung.emit(copy.deepcopy(self._overlays))
         self._overlays.append(ovl_dict)
         self.timeline.add_overlay_interval(start_s, end_s)
         self.overlaysChanged.emit()
@@ -160,18 +168,51 @@ class OverlayManager(QObject):
         self.overlaysChanged.emit()
         
         
-    def undo_overlay(self):
-        if not self._history_stack:
-            return
-        old_state = self._history_stack.pop()
-        self._overlays = old_state
-        self.timeline.clear_overlay_intervals()
-        for ovl in self._overlays:
-            self.timeline.add_overlay_interval(ovl["start"], ovl["end"])
-        self.overlaysChanged.emit()   
-
     def get_all_overlays(self):
         return self._overlays
+
+    def update_overlay(self, index, **werte):
+        """Einzelne Felder eines vorhandenen Overlays aendern.
+
+        Gedacht fuer das Verschieben und Skalieren im Vorschaubild: dort
+        aendern sich nur Lage und Groesse, nie Anfang oder Ende. Deshalb
+        werden hier auch die Markierungen in der Timeline nicht angefasst -
+        die haengen an der Zeit.
+
+        Der vorherige Stand kommt wie bei add_overlay auf den Verlaufsstapel,
+        damit "Undo Overlay" auch ein Verschieben zuruecknimmt.
+        """
+        if not isinstance(index, int) or not (0 <= index < len(self._overlays)):
+            print(f"[WARN] update_overlay: Platz {index} gibt es nicht.")
+            return False
+        if not werte:
+            return False
+        if "start" in werte or "end" in werte:
+            # Zeiten muessen gegen Schnitte und Blendenraender geprueft
+            # werden; das kann diese Methode nicht leisten.
+            print("[WARN] update_overlay: Zeiten aendert diese Methode nicht.")
+            return False
+
+        self.vorAenderung.emit(copy.deepcopy(self._overlays))
+        self._overlays[index].update(werte)
+        self.overlaysChanged.emit()
+        return True
+
+    def set_all_overlays(self, liste):
+        """Den kompletten Stand ersetzen - fuer das Zuruecknehmen.
+
+        Die Markierungen in der Timeline werden mitgezogen, sonst blieben
+        blaue Balken stehen, zu denen es kein Overlay mehr gibt.
+        """
+        self._overlays = [dict(o) for o in (liste or [])]
+        self.timeline.clear_overlay_intervals()
+        for ovl in self._overlays:
+            try:
+                self.timeline.add_overlay_interval(ovl["start"], ovl["end"])
+            except (KeyError, TypeError):
+                continue
+        self.overlaysChanged.emit()
+        return True
 
     # -------------------------------------------------------------------------
     # Public-Methode: ask_user_for_overlay(marker_s, parent)
@@ -495,8 +536,8 @@ class OverlayManager(QObject):
         if not self._overlays:
             return
         import copy
-        # Falls du Undo möchtest:
-        self._history_stack.append(copy.deepcopy(self._overlays))
+        # Damit Strg+Z auch das Loeschen zuruecknimmt.
+        self.vorAenderung.emit(copy.deepcopy(self._overlays))
 
         found_i = -1
         for i, ovl in enumerate(self._overlays):

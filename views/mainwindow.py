@@ -742,8 +742,9 @@ class MainWindow(QMainWindow):
         setup_menu.addAction(self.encoder_setup_action)
         self.encoder_setup_action.triggered.connect(self._on_encoder_setup_clicked)
         
-        self.overlay_setup_action = QAction("Overlay-Setup", self)
-        self.overlay_setup_action.setStatusTip("Setup Menu for your standard Overlays")
+        self.overlay_setup_action = QAction("Overlay Library", self)
+        self.overlay_setup_action.setStatusTip(
+            "Bilder verwalten, die beim Einfuegen zur Auswahl stehen")
         self.overlay_setup_action.setEnabled(False)  # Standard: ausgegraut
         setup_menu.addAction(self.overlay_setup_action)
         self.overlay_setup_action.triggered.connect(self._on_overlay_setup_clicked)
@@ -1358,6 +1359,8 @@ class MainWindow(QMainWindow):
         # wie die Blenden, sondern live auf die oberste Ebene gelegt -
         # es fehlte nur der Anstoss, dass sich etwas geaendert hat.
         self._overlay_manager.overlaysChanged.connect(self._overlays_an_vorschau)
+        # Overlay-Aenderungen landen im selben Strg+Z wie Schnitte und GPX.
+        self._overlay_manager.vorAenderung.connect(self._overlay_undo_merken)
         
         
         self.end_manager = EndManager(
@@ -1421,6 +1424,8 @@ class MainWindow(QMainWindow):
         self.video_editor.set_final_time_callback(self._compute_final_time)
         
         self.video_editor.videosDropped.connect(self._on_videos_dropped)       # Player
+        self.video_editor.overlayImBildGeaendert.connect(
+            self._overlay_im_bild_geaendert)                                   # Overlay ziehen
         self.gpx_widget.gpx_list.tracksDropped.connect(self._on_tracks_dropped)  # GPX-Liste
         self.map_widget.tracksDropped.connect(self._on_tracks_dropped)    
         
@@ -2111,6 +2116,17 @@ class MainWindow(QMainWindow):
 
         self._edit_mode = new_mode
 
+        # Overlays nachziehen: sie gehoeren nur in den Encode-Mode. Beim
+        # Wechsel nach Copy oder Off muessen sie aus der Vorschau
+        # verschwinden, beim Wechsel nach Encode wieder erscheinen. In der
+        # Timeline bleiben sie sichtbar, dort aber nur als leerer Rahmen -
+        # man soll wissen, dass eines da ist, ohne dass es wirkt.
+        QTimer.singleShot(0, self._overlays_an_vorschau)
+        try:
+            self.timeline.set_overlays_wirksam(new_mode == "encode")
+        except Exception as exc:
+            print(f"[WARN] Overlay-Markierung in der Timeline: {exc}")
+
         # "k" (Keyframe-Schritt) nur im Copy-Mode anbieten. Dort landet ein
         # Schnitt am naechsten Keyframe und "k" zeigt, wo das waere. Im
         # Encode-Mode sitzt jeder Schnitt auf dem gewaehlten Bild, und der
@@ -2320,18 +2336,18 @@ class MainWindow(QMainWindow):
     
             
     def _on_overlay_setup_clicked(self):
+        """Menue "Overlay Library": die Bibliothek pflegen.
+
+        Frueher stand hier das Overlay-Setup mit drei festen Plaetzen. Die
+        Bibliothek hat es abgeloest - dieselbe Stelle im Menue, aber ohne die
+        Beschraenkung auf drei Bilder.
         """
-        Wird aufgerufen, wenn im Menü "Overlay-Setup" geklickt wird.
-        Öffnet ein Dummy-Fenster (OverlaySetupDialog).
-        """
-        from .overlay_setup_dialog import OverlaySetupDialog  # wir importieren gleich die neue Klasse
-        dlg = OverlaySetupDialog(self)
-        result = dlg.exec()
-        
-        if result == QDialog.Accepted:
-            print("[DEBUG] => Overlay-Setup: changes saved.")
+        from .overlay_library_dialog import OverlayLibraryDialog
+        dlg = OverlayLibraryDialog(self)
+        if dlg.exec() == QDialog.Accepted:
+            print("[DEBUG] => Overlay-Bibliothek: gespeichert.")
         else:
-            print("[DEBUG] => Overlay-Setup: canceled or closed.")
+            print("[DEBUG] => Overlay-Bibliothek: abgebrochen.")
         
 
     def _on_clear_ffmpeg_path(self):
@@ -5195,9 +5211,19 @@ class MainWindow(QMainWindow):
             QApplication.processEvents()
 
     def _overlays_an_vorschau(self):
-        """Overlays an die Vorschau geben, sofern das Backend sie zeigen kann."""
+        """Overlays an die Vorschau geben, sofern das Backend sie zeigen kann.
+
+        Nur im Encode-Mode. Nur dort gehen Overlays ueberhaupt in den Export -
+        im Copy-Mode wird das Material durchgereicht, ein Logo kommt im
+        Ergebnis nicht vor. Es trotzdem in der Vorschau zu zeigen, wuerde
+        etwas versprechen, was hinterher fehlt. Dieselbe Ueberlegung wie bei
+        den Blenden, die im Copy-Mode als harter Schnitt gezeigt werden.
+        """
         try:
             if not self.video_editor.supports_preview_overlays():
+                return
+            if getattr(self, "_edit_mode", "") != "encode":
+                self.video_editor.set_preview_overlays([], None)
                 return
             liste, groesse = self._overlay_rechtecke()
             self.video_editor.set_preview_overlays(liste, groesse)
@@ -5227,6 +5253,51 @@ class MainWindow(QMainWindow):
         if not alle or not getattr(self, "playlist", None):
             return [], None
 
+        groesse = self._export_groesse()
+        if groesse is None:
+            return [], None
+        breite, hoehe = groesse
+
+        from managers.ges_encoder_manager import _zahl
+        from PySide6.QtGui import QImage
+
+        liste = []
+        for platz, ovl in enumerate(alle):
+            bild = ovl.get("image") or ""
+            if not bild or not os.path.isfile(bild):
+                continue
+            bildgroesse = QImage(bild).size()
+            bw, bh = bildgroesse.width(), bildgroesse.height()
+            faktor = float(ovl.get("scale", 1.0) or 1.0)
+            zw = max(1, int(round(bw * faktor))) if bw > 0 else 0
+            zh = max(1, int(round(bh * faktor))) if bh > 0 else 0
+            liste.append({
+                # Platz in get_all_overlays(): damit ein im Bild verschobenes
+                # Overlay wieder dem richtigen Eintrag zugeordnet werden kann.
+                # Ueber den Listenplatz ginge das nicht - Overlays ohne
+                # vorhandene Bilddatei fallen hier heraus.
+                "index": platz,
+                "start": float(ovl.get("start", 0.0)),
+                "end": float(ovl.get("end", 0.0)),
+                "fade_in": float(ovl.get("fade_in", 0) or 0),
+                "fade_out": float(ovl.get("fade_out", 0) or 0),
+                "image": bild,
+                "scale": faktor,
+                "x": _zahl(ovl.get("x", 0), (breite, hoehe), (zw, zh)),
+                "y": _zahl(ovl.get("y", 0), (breite, hoehe), (zw, zh)),
+                "w": zw, "h": zh,
+            })
+        return liste, (breite, hoehe)
+
+    def _export_groesse(self):
+        """(Breite, Hoehe) der Ausgabe, genauso bestimmt wie im Encoder.
+
+        Aus der eingestellten Breite und dem Seitenverhaeltnis der ersten
+        Quelldatei, auf eine gerade Zahl gebracht. Die Hoehe steckt in
+        Ausdruecken wie "(H-h)-70" und muss deshalb stimmen.
+        """
+        if not getattr(self, "playlist", None):
+            return None
         s = QSettings("KVRouite", "KVRouite")
         breite = int(s.value("encoder/res_w", 1280, type=int) or 1280)
         daten = framerate.eckdaten(self.playlist[0]) or {}
@@ -5237,31 +5308,59 @@ class MainWindow(QMainWindow):
                 hoehe += 1
         else:
             hoehe = int(s.value("encoder/res_h", 720, type=int) or 720)
+        return breite, hoehe
 
-        from managers.ges_encoder_manager import _zahl
+    def _overlay_undo_merken(self, stand):
+        """Overlay-Stand vor einer Aenderung auf den Strg+Z-Stapel legen.
+
+        Overlays hatten bisher einen eigenen, von nirgendwo aufgerufenen
+        Verlaufsstapel - Anlegen und Verschieben liessen sich also gar nicht
+        zuruecknehmen. Jetzt liegen sie in derselben Reihe wie Schnitte und
+        GPX-Aenderungen, und das gewohnte Strg+Z erfasst sie mit.
+        """
+        def zuruecknehmen():
+            self._overlay_manager.set_all_overlays(stand)
+
+        self._undo_stack.append(zuruecknehmen)
+
+    def _overlay_im_bild_geaendert(self, index, x, y, skalierung):
+        """Ein Overlay wurde im Vorschaubild verschoben oder skaliert.
+
+        Ankommend sind Lage und Groesse in Exportpixeln. Zurueckgeschrieben
+        wird mit der Verankerung, die im Overlay schon steht: was "30 Pixel
+        vom rechten Rand" war, bleibt rechts verankert und bekommt nur einen
+        anderen Abstand. Sonst saesse das Bild bei geaenderter
+        Ausgabegroesse ploetzlich woanders.
+        """
         from PySide6.QtGui import QImage
+        from core import overlay_library
 
-        liste = []
-        for ovl in alle:
-            bild = ovl.get("image") or ""
-            if not bild or not os.path.isfile(bild):
-                continue
-            groesse = QImage(bild).size()
-            bw, bh = groesse.width(), groesse.height()
-            faktor = float(ovl.get("scale", 1.0) or 1.0)
-            zw = max(1, int(round(bw * faktor))) if bw > 0 else 0
-            zh = max(1, int(round(bh * faktor))) if bh > 0 else 0
-            liste.append({
-                "start": float(ovl.get("start", 0.0)),
-                "end": float(ovl.get("end", 0.0)),
-                "fade_in": float(ovl.get("fade_in", 0) or 0),
-                "fade_out": float(ovl.get("fade_out", 0) or 0),
-                "image": bild,
-                "x": _zahl(ovl.get("x", 0), (breite, hoehe), (zw, zh)),
-                "y": _zahl(ovl.get("y", 0), (breite, hoehe), (zw, zh)),
-                "w": zw, "h": zh,
-            })
-        return liste, (breite, hoehe)
+        try:
+            alle = self._overlay_manager.get_all_overlays()
+            if not (0 <= index < len(alle)):
+                return
+            ovl = alle[index]
+            groesse = self._export_groesse()
+            if groesse is None:
+                return
+            breite, hoehe = groesse
+
+            bildgroesse = QImage(ovl.get("image") or "").size()
+            bw, bh = bildgroesse.width(), bildgroesse.height()
+            if bw <= 0 or bh <= 0:
+                return
+            faktor = max(0.01, float(skalierung))
+            zw = max(1, int(round(bw * faktor)))
+            zh = max(1, int(round(bh * faktor)))
+
+            self._overlay_manager.update_overlay(
+                index,
+                x=overlay_library.lage_zurueck(ovl.get("x", 0), x, breite, zw, "x"),
+                y=overlay_library.lage_zurueck(ovl.get("y", 0), y, hoehe, zh, "y"),
+                scale=faktor,
+            )
+        except Exception as exc:
+            print(f"[WARN] Overlay im Bild geaendert: {exc}")
 
     def _make_fade_job(self, cstart, cend, fade):
         """

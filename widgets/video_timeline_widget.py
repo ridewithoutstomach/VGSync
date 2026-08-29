@@ -71,6 +71,8 @@ class VideoTimelineWidget(QWidget):
         self._scroll_speed_px = 50
         self.setStyleSheet("background-color: #333333;")
         self._overlay_intervals = []
+        # Siehe set_overlays_wirksam: im Copy-Mode nur Rahmen statt Fuellung.
+        self._overlays_wirksam = True
         self.setContextMenuPolicy(Qt.DefaultContextMenu)
         
     def clear_all_cuts(self):
@@ -110,6 +112,20 @@ class VideoTimelineWidget(QWidget):
     def clear_overlay_intervals(self):
         self._overlay_intervals.clear()
         self.update()
+
+    def set_overlays_wirksam(self, wirksam: bool):
+        """Ob die Overlays im aktuellen Modus ueberhaupt im Export landen.
+
+        Nur im Encode-Mode tun sie das. Im Copy-Mode wird das Material
+        durchgereicht, ein Logo kommt im Ergebnis nicht vor - dann wird der
+        Balken nur als Rahmen gezeichnet, ohne Fuellung. Gleiche Lage,
+        gleiche Farbe, aber sichtbar leer: das Overlay ist da, es wirkt hier
+        nur nicht.
+        """
+        wirksam = bool(wirksam)
+        if wirksam != self._overlays_wirksam:
+            self._overlays_wirksam = wirksam
+            self.update()
     
 
     def set_marker_position(self, time_s: float):
@@ -440,10 +456,16 @@ class VideoTimelineWidget(QWidget):
 
         # Zeichnen der Overlay-Intervalle (blau)
         if self.total_duration > 0 and self._overlay_intervals:
-            brush_blue = QBrush(QColor(0, 0, 255, 80))  # halbtransparentes Blau
             pen_blue = QPen(QColor("blue"), 2)
             painter.setPen(pen_blue)
-            painter.setBrush(brush_blue)
+            if self._overlays_wirksam:
+                # halbtransparentes Blau
+                painter.setBrush(QBrush(QColor(0, 0, 255, 80)))
+            else:
+                # Copy-Mode: das Overlay landet nicht im Export. Gleiche Lage,
+                # gleiche Farbe, aber ohne Fuellung - der leere Rahmen sagt,
+                # dass hier nichts herauskommt.
+                painter.setBrush(Qt.NoBrush)
             for (start_s, end_s) in self._overlay_intervals:
                 if end_s <= start_s:
                     continue
