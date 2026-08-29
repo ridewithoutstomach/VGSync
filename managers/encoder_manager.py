@@ -411,6 +411,16 @@ def pre_trim_input_videos(videos, keep_segments, temp_dir):
     return result_files, timeline_map
     
     
+# Wie weit vom Dateiende zurueck gemessen wird.
+MEASURE_WINDOW_S = 5.0
+
+# Wieviel die Messung hoechstens unter dem Containerwert liegen darf, bevor sie
+# als unbrauchbar gilt. Der abzuziehende Ueberhang ist hoechstens eine GOP -
+# bei GoPro-Material rund eine Sekunde, dokumentiert gemessen 0,901 s. Alles
+# darunter ist keine Korrektur mehr, sondern ein Messfehler.
+MEASURE_MAX_CORRECTION_S = 1.5
+
+
 def measure_real_duration(path):
     """
     Liefert die TATSAECHLICHE Inhaltsdauer einer Datei (Frames x Framedauer).
@@ -456,14 +466,11 @@ def measure_real_duration(path):
 
         # 2) nur die letzten Sekunden lesen und den letzten Zeitstempel nehmen
         #
-        # Das Intervall braucht ein ausdrueckliches ENDE. "START%" allein ist
-        # nicht "bis zum Dateiende": nachgemessen liefert es je nach Datei
-        # entweder gar nichts oder genau EINEN Frame am Intervallanfang. Im
-        # zweiten Fall meldet diese Funktion die Datei um die Fensterbreite zu
-        # kurz - bei 60,000 s kamen 55,033 s heraus. Die Concat-Liste bekommt
-        # dann zu kleine Dauern, ffmpeg verwirft beim Zusammenfuegen Bilder,
-        # und das Ergebnis ist um mehrere Sekunden zu kurz.
-        start = max(0.0, container_dur - 5.0)
+        # Dem Intervall wird ausdruecklich ein ENDE mitgegeben. "START%" allein
+        # heisst nicht zuverlaessig "bis zum Dateiende"; beobachtet wurde, dass
+        # ffprobe dann je nach Lage gar nichts oder nur den ERSTEN Frame des
+        # Intervalls liefert.
+        start = max(0.0, container_dur - MEASURE_WINDOW_S)
         fenster = container_dur - start + 1.0
         tail = subprocess.run(
             ["ffprobe", "-v", "error", "-select_streams", "v:0",
@@ -480,7 +487,28 @@ def measure_real_duration(path):
                     pass
         if last is None:
             return None
-        return last + frame_dur
+        gemessen = last + frame_dur
+
+        # 3) Plausibilitaet. Diese Messung soll einen kleinen Ueberhang
+        #    abziehen - bei einer geseekten Trim-Datei hoechstens eine GOP,
+        #    gemessen 0,901 s. Kommt deutlich weniger heraus als der Container
+        #    sagt, war die Messung unvollstaendig und der Wert ist Muell.
+        #
+        #    Genau das ist am 28.08.2026 passiert: statt 60,000 s kam 55,033 s
+        #    heraus - der Intervallanfang plus ein Bild. Dieser Wert landete in
+        #    der Concat-Liste, ffmpeg schnitt die Datei beim Zusammenfuegen auf
+        #    diese Laenge zurueck (147 verworfene Bilder), und das fertige Video
+        #    war knapp 5 Sekunden zu kurz.
+        #
+        #    Lieber den Containerwert nehmen: dann verhaelt sich der Export wie
+        #    vor dieser Funktion - im schlimmsten Fall ein Ruckler an einer
+        #    Naht, aber niemals ein zu kurzes Video.
+        if gemessen < container_dur - MEASURE_MAX_CORRECTION_S:
+            print(f"[WARN] measure_real_duration({os.path.basename(path)}): "
+                  f"{gemessen:.3f}s gemessen, Container sagt {container_dur:.3f}s "
+                  f"- unplausibel, benutze den Containerwert.")
+            return None
+        return gemessen
     except Exception as e:
         print(f"[WARN] measure_real_duration({path}) failed: {e}")
         return None
