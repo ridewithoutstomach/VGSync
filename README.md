@@ -53,6 +53,46 @@ sudo apt update
 sudo apt install ffmpeg libmpv-dev python3-venv
 ```
 
+#### Optional: GES video backend (6.0)
+
+From 6.0 on, KVRouite can play the timeline through GStreamer Editing
+Services instead of mpv, which makes crossfades visible in the preview.
+mpv stays the default -- skip this section if you do not need it.
+
+On Linux there are no GStreamer Python wheels, so this comes from the
+distribution:
+
+```bash
+sudo apt install python3-gi python3-gi-cairo \
+    gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 gir1.2-ges-1.0 \
+    gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+    gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly \
+    gstreamer1.0-libav gstreamer1.0-gl gstreamer1.0-x
+```
+
+`gir1.2-ges-1.0` is in the *universe* component; if apt cannot find it,
+enable it once with `sudo add-apt-repository universe`. Ubuntu 24.04 LTS
+ships GStreamer 1.24.2, Ubuntu 26.04 LTS ships 1.28.2; the Windows build
+uses the 1.28.6 wheels (see `requirements-ges.txt`).
+
+These are **system** packages. A plain venv hides them and `import gi`
+fails although everything is installed -- create the venv with
+`--system-site-packages` as shown below.
+
+Then verify the environment before starting the app:
+
+```bash
+python3 check_ges.py
+```
+
+It checks typelibs, the GES engine, a usable video sink, an H.264 decoder
+and ffmpeg, and names the missing package instead of failing later inside
+the player. Switch the backend in the app under Config -> Video Backend;
+it takes effect after a restart.
+
+A step-by-step guide with a troubleshooting table is in
+[`GES_Installation_Kubuntu.md`](GES_Installation_Kubuntu.md) (German).
+
 #### Download the Project
 
 You can **either**:
@@ -69,7 +109,8 @@ git clone https://github.com/ridewithoutstomach/KVRouite.git
 
 ```bash
 cd KVRouite
-python3 -m venv venv
+python3 -m venv venv                            # with the GES backend:
+# python3 -m venv --system-site-packages venv
 source venv/bin/activate
 pip install -r requirements.txt
 python KVRouite.py

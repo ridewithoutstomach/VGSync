@@ -153,7 +153,13 @@ class GesPlayerBackend(PlayerBackend):
     def _build_sink(self):
         names = self._SINKS_WINDOWS if platform.system() == "Windows" else self._SINKS_OTHER
         for name in names:
-            sink = Gst.ElementFactory.make(name, "kvr-videosink")
+            try:
+                # Das gi-Override von ElementFactory.make wirft MissingPluginError,
+                # statt None zu liefern. Ohne das try bricht die Suche beim ersten
+                # fehlenden Kandidaten ab, statt den naechsten zu probieren.
+                sink = Gst.ElementFactory.make(name, "kvr-videosink")
+            except Exception:
+                sink = None
             if sink is None:
                 continue
             self._sink = sink

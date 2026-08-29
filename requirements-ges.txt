@@ -1,0 +1,51 @@
+# KVRouite 6.0 - additional packages for the GES (GStreamer) video backend.
+# Install on top of requirements.txt:
+#
+#     pip install -r requirements.txt
+#     pip install -r requirements-ges.txt      # Windows / macOS only
+#
+# The GES backend is optional. Without it KVRouite still runs on mpv, which
+# stays the default (Config -> Video Backend switches, takes effect after a
+# restart). Nothing in here is imported unless that switch is set to "ges".
+#
+# ---------------------------------------------------------------------------
+# WINDOWS (and macOS): pip wheels
+# ---------------------------------------------------------------------------
+# gstreamer-bundle is a meta package. It pulls in PyGObject, pycairo and the
+# complete GStreamer runtime (core, libs, plugins base/good/bad/ugly, libav,
+# GES) as prebuilt wheels - no compiler, no MSYS2, no system installation.
+# ~80 MB unpacked in site-packages. Uninstalling removes every file.
+#
+# Verified with Python 3.12 on Windows 11 (venv E:\venv_6.0).
+gstreamer-bundle==1.28.6
+
+# ---------------------------------------------------------------------------
+# LINUX: do NOT pip install the line above - there are no Linux wheels
+#        (checked for 1.28.6). Use the distribution packages instead:
+#
+#   sudo apt update
+#   sudo apt install python3-gi python3-gi-cairo \
+#       gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 gir1.2-ges-1.0 \
+#       gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+#       gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly \
+#       gstreamer1.0-libav gstreamer1.0-gl gstreamer1.0-x
+#
+# The venv must be able to see those system packages, so create it with
+# --system-site-packages (a plain venv hides python3-gi and the import fails):
+#
+#   python3 -m venv --system-site-packages venv
+#   source venv/bin/activate
+#   pip install -r requirements.txt
+#
+# Kubuntu 24.04 ships GStreamer 1.24.2. The backend uses no API newer than
+# that, but this combination has not been run yet.
+#
+# Before starting the app run the bundled check - it names the missing package
+# instead of failing somewhere inside the player:
+#
+#   python3 check_ges.py
+#
+# ---------------------------------------------------------------------------
+# ffmpeg is still required on both platforms. The GES backend only previews;
+# rendering, and the pre-rendered crossfade snippets it shows, come from
+# ffmpeg exactly as before.
