@@ -549,6 +549,21 @@ class VideoEditorWidget(QWidget):
             print(f"[WARN] set_preview_cuts: {e}")
             return False
 
+    def supports_preview_overlays(self) -> bool:
+        """Ob das Backend Overlays in der Vorschau zeigen kann."""
+        try:
+            return bool(self._backend.supports_overlays())
+        except Exception:
+            return False
+
+    def set_preview_overlays(self, overlays, export_groesse=None):
+        """Overlays an das Backend geben (siehe PlayerBackend.set_overlays)."""
+        try:
+            return bool(self._backend.set_overlays(overlays, export_groesse))
+        except Exception as e:
+            print(f"[WARN] set_preview_overlays: {e}")
+            return False
+
     def shutdown_player(self):
         """
         Backend beim Beenden sauber herunterfahren.

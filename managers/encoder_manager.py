@@ -1881,23 +1881,11 @@ class EncoderDialog(QDialog):
                 # 5) xfade_main(temp_cfg) => ruft dein "main()" auf, 
                 #    nur ohne sys.argv.
                 #
-                # Zweiter Weg: rendern mit GStreamer/GES statt ffmpeg, um beide
-                # Ergebnisse vergleichen zu koennen. Der Import steht absichtlich
-                # hier und in einem try: fehlt managers/ges_encoder_manager.py,
-                # laeuft alles unveraendert ueber ffmpeg weiter. Zum Entfernen
-                # des zweiten Weges genuegt es also, die Datei zu loeschen.
-                ges_lauf = None
-                try:
-                    from managers.ges_encoder_manager import (use_ges_encoder,
-                                                              ges_xfade_main)
-                    if use_ges_encoder():
-                        ges_lauf = ges_xfade_main
-                except ImportError:
-                    pass
-                if ges_lauf is not None:
-                    ges_lauf(temp_cfg)
-                else:
-                    xfade_main(temp_cfg)
+                # Der Encode-Mode rendert ueber GES. ffmpeg wird in KVRouite
+                # nur noch fuer den Copy-Mode gebraucht, und der hat seinen
+                # eigenen Weg in mainwindow.on_render_clicked().
+                from managers.ges_encoder_manager import ges_xfade_main
+                ges_xfade_main(temp_cfg)
                 result = self._increment_counter_on_server("video")
                 
                     

@@ -9,19 +9,11 @@ Bildinhalt an gleichen Zeitpunkten, Dauer des Laufs.
     ffmpeg-Weg:  managers.encoder_manager.xfade_main(cfg_path)
     GES-Weg:     managers.ges_encoder_manager.ges_xfade_main(cfg_path)
 
-WIEDER ENTFERNEN
-----------------
-Diese Datei loeschen - mehr nicht. Beide Anknuepfungspunkte importieren das
-Modul in einem try/except ImportError:
-
-  * managers/encoder_manager.py, EncoderDialog.run_encoding()
-    -> ohne das Modul laeuft der Export unveraendert ueber xfade_main()
-  * views/mainwindow.py, Menue Config -> Render Engine
-    -> ohne das Modul erscheint der Menuepunkt gar nicht erst
-
-Nachgeprueft: nach dem Umbenennen der Datei starten beide Module sauber.
-Wer auch die zwei Bloecke herausnehmen will, findet sie an den genannten
-Stellen; noetig ist es nicht.
+WER RUFT AUF
+------------
+managers/encoder_manager.py, EncoderDialog.run_encoding() - das ist der
+Export im Encode-Mode. Der Copy-Mode geht einen eigenen Weg ueber ffmpeg
+(mainwindow.on_render_clicked) und beruehrt diese Datei nicht.
 
 WARUM ER ANDERS RECHNET
 -----------------------
@@ -54,21 +46,6 @@ import os
 import time
 
 from PySide6.QtCore import QSettings
-
-# QSettings-Schluessel fuer die Umschaltung. Steht hier, damit die einzige
-# Abfrage in encoder_manager.py nichts ueber die Interna wissen muss.
-SETTINGS_KEY = "encoder/engine"
-ENGINE_FFMPEG = "ffmpeg"
-ENGINE_GES = "ges"
-DEFAULT_ENGINE = ENGINE_FFMPEG
-
-
-def use_ges_encoder():
-    """True, wenn der Anwender den GES-Weg gewaehlt hat."""
-    wert = QSettings("KVRouite", "KVRouite").value(
-        SETTINGS_KEY, DEFAULT_ENGINE, type=str)
-    return (wert or DEFAULT_ENGINE).lower() == ENGINE_GES
-
 
 class GesRenderError(RuntimeError):
     pass

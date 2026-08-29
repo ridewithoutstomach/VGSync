@@ -121,6 +121,20 @@ class PlayerBackend:
         """
         return False
 
+    def set_overlays(self, overlays, export_groesse=None):
+        """Overlays fuer die Vorschau: Liste von Woerterbuechern mit
+        start, end, fade_in, fade_out, image sowie x, y, w, h in Pixeln der
+        EXPORTaufloesung. `export_groesse` ist (breite, hoehe) des Exports;
+        das Backend rechnet auf seine Vorschaugroesse um.
+
+        Backends, die das nicht koennen (mpv), tun nichts.
+        """
+        return False
+
+    def supports_overlays(self):
+        """True, wenn set_overlays wirklich etwas bewirkt."""
+        return False
+
     def supports_cuts(self):
         """True, wenn set_cuts wirklich etwas bewirkt."""
         return False

@@ -64,10 +64,11 @@ try:
     gi.require_version('Gst', '1.0')
     gi.require_version('GES', '1.0')
     gi.require_version('GstVideo', '1.0')
-    from gi.repository import Gst, GES, GstVideo, GLib
+    gi.require_version('GstController', '1.0')
+    from gi.repository import Gst, GES, GstVideo, GstController, GLib
 except Exception as exc:            # pragma: no cover - haengt an der Umgebung
     _GST_IMPORT_ERROR = exc
-    Gst = GES = GstVideo = GLib = None
+    Gst = GES = GstVideo = GstController = GLib = None
 
 from core.player_backend import PlayerBackend
 
@@ -120,7 +121,14 @@ class GesPlayerBackend(PlayerBackend):
         self._final_total_ns = 0
 
         self._timeline = GES.Timeline.new_audio_video()
-        self._layer = self._timeline.append_layer()
+        # Overlays liegen ganz oben. Eigene Ebene, weil zwei Clips auf
+        # derselben Ebene nicht ueberlappen duerfen - ein Overlay kann
+        # aber sehr wohl ueber einer Blende liegen.
+        self._ovl_layer = self._timeline.append_layer()   # Prioritaet 0
+        self._layer = self._timeline.append_layer()       # Prioritaet 1
+        self._overlays = []
+        self._overlay_export = None
+        self._preview_w = 0
         self._pipeline = GES.Pipeline()
         self._pipeline.set_timeline(self._timeline)
         self._build_sink()
@@ -303,6 +311,7 @@ class GesPlayerBackend(PlayerBackend):
                 if track.get_property("track-type") == GES.TrackType.VIDEO:
                     track.set_restriction_caps(Gst.Caps.from_string(
                         f"video/x-raw,width={w},height={h},framerate={num}/{den}"))
+            self._preview_w = w
             self._note(f"Vorschau rechnet in {w}x{h} bei {num/den:.2f} fps")
         except Exception as exc:
             self._note(f"Vorschauaufloesung nicht gesetzt: {exc}")
@@ -481,6 +490,7 @@ class GesPlayerBackend(PlayerBackend):
                     self._layer.add_asset(asset, final + (rohstart - start), inpoint,
                                           dur, GES.TrackType.UNKNOWN))
 
+        ovl = self._overlays_einsetzen()
         self._timeline.commit_sync()
         self._total_ns = self._final_total_ns
         if self._keeps:
@@ -491,7 +501,7 @@ class GesPlayerBackend(PlayerBackend):
                    f"Vorschau {self._final_total_ns/NS:.3f}s von roh "
                    f"{self._raw_total_ns()/NS:.3f}s, "
                    f"{len(self._layer.get_clips())} Clip(s), "
-                   f"{mit_blende} Blende(n) eingesetzt")
+                   f"{mit_blende} Blende(n), {ovl} Overlay(s) eingesetzt")
 
     # ------------------------------------------------------------------
     # Timeline-Hilfen
@@ -677,12 +687,14 @@ class GesPlayerBackend(PlayerBackend):
                    f"Vorschau {self._final_total_ns/NS:.3f}s")
 
     def clear(self):
-        for clip in list(self._layer.get_clips()):
-            self._layer.remove_clip(clip)
+        for ebene in (self._layer, self._ovl_layer):
+            for clip in list(ebene.get_clips()):
+                ebene.remove_clip(clip)
         self._timeline.commit_sync()
         self._assets = []
         self._keeps = []
         self._cuts = []
+        self._overlays = []
         self._total_ns = 0
         self._final_total_ns = 0
         self._pipeline.set_state(Gst.State.READY)
@@ -797,6 +809,111 @@ class GesPlayerBackend(PlayerBackend):
     # ------------------------------------------------------------------
     # Ansicht - GES kennt kein Zoom/Pan/360 wie mpv
     # ------------------------------------------------------------------
+    def set_overlays(self, overlays, export_groesse=None):
+        """Overlays fuer die Vorschau setzen.
+
+        `overlays` ist eine Liste von Woerterbuechern mit den Feldern
+
+            start, end        Rohzeit in Sekunden (wie in der Projektdatei)
+            fade_in, fade_out Ein- und Ausblenddauer in Sekunden
+            image             Pfad zur Bilddatei
+            x, y, w, h        Lage und Groesse IN PIXELN DER EXPORTAUFLOESUNG
+
+        `export_groesse` ist (breite, hoehe) des Exports. Die Vorschau rechnet
+        in einer kleineren Aufloesung, deshalb muessen Lage und Groesse
+        umgerechnet werden - sonst zeigt sie ein Logo, das im Export ein
+        Fuenftel des Bildes einnimmt, doppelt so gross. Genau darum geht es
+        hier: die Vorschau soll zeigen, was hinterher herauskommt.
+
+        Die Rechtecke kommen fertig ausgerechnet herein, damit Vorschau und
+        Export sich nicht auseinanderentwickeln koennen - die ffmpeg-Ausdruecke
+        wie "(W-w)-30" werden an einer Stelle ausgewertet, nicht an zweien.
+        """
+        neu = []
+        for ovl in overlays or []:
+            try:
+                start, ende = float(ovl["start"]), float(ovl["end"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if ende <= start or not ovl.get("image"):
+                continue
+            neu.append({
+                "start": start, "end": ende,
+                "fade_in": float(ovl.get("fade_in", 0) or 0),
+                "fade_out": float(ovl.get("fade_out", 0) or 0),
+                "image": ovl["image"],
+                "x": int(ovl.get("x", 0) or 0), "y": int(ovl.get("y", 0) or 0),
+                "w": int(ovl.get("w", 0) or 0), "h": int(ovl.get("h", 0) or 0),
+            })
+        neu.sort(key=lambda o: o["start"])
+        groesse = tuple(export_groesse) if export_groesse else None
+        if neu == self._overlays and groesse == self._overlay_export:
+            return True                  # nichts geaendert
+        self._overlays = neu
+        self._overlay_export = groesse
+        self._rebuild()
+        return True
+
+    def supports_overlays(self):
+        return True
+
+    def _overlays_einsetzen(self):
+        """Overlays auf die oberste Ebene legen, umgerechnet auf die Vorschau."""
+        for clip in list(self._ovl_layer.get_clips()):
+            self._ovl_layer.remove_clip(clip)
+        if not self._overlays or not self._keeps:
+            return 0
+
+        # Verhaeltnis Vorschau zu Export. Ohne bekannte Exportgroesse wird
+        # nicht skaliert - dann lieber unveraendert zeigen als falsch.
+        faktor = 1.0
+        if self._overlay_export and self._overlay_export[0] and self._preview_w:
+            faktor = self._preview_w / float(self._overlay_export[0])
+
+        gesetzt = 0
+        for ovl in self._overlays:
+            start_ns = self._raw_to_final(int(ovl["start"] * NS))
+            ende_ns = self._raw_to_final(int(ovl["end"] * NS))
+            if ende_ns <= start_ns:
+                continue                 # liegt komplett in einem Schnitt
+            try:
+                uri = GLib.filename_to_uri(os.path.abspath(ovl["image"]), None)
+                asset = GES.UriClipAsset.request_sync(uri)
+            except Exception as exc:
+                self._note(f"Overlay nicht ladbar ({ovl['image']}): {exc}")
+                continue
+            dauer_ns = ende_ns - start_ns
+            clip = self._ovl_layer.add_asset(asset, start_ns, 0, dauer_ns,
+                                             GES.TrackType.VIDEO)
+            if clip is None:
+                self._note(f"Overlay konnte nicht eingefuegt werden: {ovl['image']}")
+                continue
+
+            breite = max(1, int(round(ovl["w"] * faktor))) if ovl["w"] else 0
+            hoehe = max(1, int(round(ovl["h"] * faktor))) if ovl["h"] else 0
+            for el in clip.find_track_elements(None, GES.TrackType.VIDEO,
+                                               GES.VideoSource):
+                if breite and hoehe:
+                    el.set_child_property("width", breite)
+                    el.set_child_property("height", hoehe)
+                el.set_child_property("posx", int(round(ovl["x"] * faktor)))
+                el.set_child_property("posy", int(round(ovl["y"] * faktor)))
+                ein, aus = ovl["fade_in"], ovl["fade_out"]
+                if ein > 0 or aus > 0:
+                    quelle = GstController.InterpolationControlSource()
+                    quelle.props.mode = GstController.InterpolationMode.LINEAR
+                    el.set_control_source(quelle, "alpha", "direct")
+                    quelle.set(0, 0.0 if ein > 0 else 1.0)
+                    if ein > 0:
+                        quelle.set(min(int(ein * NS), dauer_ns), 1.0)
+                    if aus > 0:
+                        quelle.set(max(0, dauer_ns - int(aus * NS)), 1.0)
+                        quelle.set(dauer_ns, 0.0)
+                    else:
+                        quelle.set(dauer_ns, 1.0)
+            gesetzt += 1
+        return gesetzt
+
     def supports_view(self):
         return False
 

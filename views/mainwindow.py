@@ -861,47 +861,6 @@ class MainWindow(QMainWindow):
         action_backend_info.triggered.connect(self._on_show_player_backend)
         backend_menu.addAction(action_backend_info)
 
-        # --- Render-Engine: ffmpeg oder GES ---
-        # Zweiter Export-Weg, damit sich beide Ergebnisse vergleichen lassen.
-        # Faellt komplett weg, sobald managers/ges_encoder_manager.py geloescht
-        # wird: dann schlaegt der Import fehl, das Menue erscheint nicht, und
-        # der Export laeuft unveraendert ueber ffmpeg.
-        try:
-            from managers.ges_encoder_manager import (
-                SETTINGS_KEY as _ENGINE_KEY, ENGINE_FFMPEG, ENGINE_GES,
-                DEFAULT_ENGINE)
-        except ImportError:
-            _ENGINE_KEY = None
-        if _ENGINE_KEY is not None:
-            self._engine_key = _ENGINE_KEY
-            engine_menu = setup_menu.addMenu("Render Engine")
-            aktuelle_engine = QSettings("KVRouite", "KVRouite").value(
-                _ENGINE_KEY, DEFAULT_ENGINE, type=str)
-            engine_group = QActionGroup(self)
-            engine_group.setExclusive(True)
-
-            self.action_engine_ffmpeg = QAction("ffmpeg (default)", self,
-                                                checkable=True)
-            self.action_engine_ffmpeg.setStatusTip(
-                "Proven export: cut on keyframes, copy, re-encode only the fades.")
-            self.action_engine_ffmpeg.setChecked(aktuelle_engine != ENGINE_GES)
-            self.action_engine_ffmpeg.triggered.connect(
-                lambda: self._on_select_render_engine(ENGINE_FFMPEG))
-            engine_group.addAction(self.action_engine_ffmpeg)
-            engine_menu.addAction(self.action_engine_ffmpeg)
-
-            self.action_engine_ges = QAction("GStreamer / GES (experimental)",
-                                             self, checkable=True)
-            self.action_engine_ges.setStatusTip(
-                "Second path: renders the whole timeline in one pass, no ffmpeg.")
-            self.action_engine_ges.setChecked(aktuelle_engine == ENGINE_GES)
-            self.action_engine_ges.triggered.connect(
-                lambda: self._on_select_render_engine(ENGINE_GES))
-            engine_group.addAction(self.action_engine_ges)
-            engine_menu.addAction(self.action_engine_ges)
-
-        
-        
         temp_dir_menu = setup_menu.addMenu("Temp Directory")
 
         action_show_temp_dir = QAction("Show current Temp Directory", self)
@@ -1394,6 +1353,11 @@ class MainWindow(QMainWindow):
        
         self.cut_manager = VideoCutManager(self.video_editor, self.timeline, self)
         self._overlay_manager = OverlayManager(self.timeline, self)
+        # Overlays sofort in der Vorschau zeigen, wenn eines dazukommt,
+        # verschwindet oder geaendert wird. Sie werden nicht vorgerendert
+        # wie die Blenden, sondern live auf die oberste Ebene gelegt -
+        # es fehlte nur der Anstoss, dass sich etwas geaendert hat.
+        self._overlay_manager.overlaysChanged.connect(self._overlays_an_vorschau)
         
         
         self.end_manager = EndManager(
@@ -1644,35 +1608,6 @@ class MainWindow(QMainWindow):
         else:
             text = "The player will use mpv again after the next restart."
         QMessageBox.information(self, "Video Backend", text)
-
-    def _on_select_render_engine(self, name: str):
-        """Waehlt die Engine fuer den Export. Gilt sofort beim naechsten Lauf.
-
-        Anders als beim Wiedergabe-Backend ist kein Neustart noetig: welche
-        Engine laeuft, wird erst beim Druck auf Encode gelesen.
-        """
-        QSettings("KVRouite", "KVRouite").setValue(
-            getattr(self, "_engine_key", "encoder/engine"), name)
-        if name == "ges":
-            text = (
-                "The next export will be rendered with GStreamer / GES.\n"
-                "\n"
-                "This is the second export path, built so you can compare it\n"
-                "against the ffmpeg one on the same project. It renders the\n"
-                "whole timeline in a single pass: no merged.mp4, no keyframe\n"
-                "alignment, no concat - and the crossfades come out first\n"
-                "generation instead of second.\n"
-                "\n"
-                "Please note:\n"
-                "  - Experimental. Check length and picture before relying\n"
-                "    on it for real work.\n"
-                "  - Needs GStreamer. Without it the export fails and you\n"
-                "    have to switch back here.\n"
-                "  - Overlays work but are less tested than in the ffmpeg\n"
-                "    path.")
-        else:
-            text = "The next export will be rendered with ffmpeg again."
-        QMessageBox.information(self, "Render Engine", text)
 
     def _on_show_player_backend(self):
         running = self.video_editor.backend_name()
@@ -5238,6 +5173,7 @@ class MainWindow(QMainWindow):
             angereichert.append((cstart, cend, fade, pfad))
 
         ok = self.video_editor.set_preview_cuts(angereichert)
+        self._overlays_an_vorschau()
         print(f"[DEBUG] preview-cuts: uebernommen={ok}")
         offen = self._fade_renderer.request(list(self._fade_jobs.values()))
 
@@ -5257,6 +5193,75 @@ class MainWindow(QMainWindow):
             self._fade_dialog.show()
             self._fade_dialog.raise_()
             QApplication.processEvents()
+
+    def _overlays_an_vorschau(self):
+        """Overlays an die Vorschau geben, sofern das Backend sie zeigen kann."""
+        try:
+            if not self.video_editor.supports_preview_overlays():
+                return
+            liste, groesse = self._overlay_rechtecke()
+            self.video_editor.set_preview_overlays(liste, groesse)
+        except Exception as exc:
+            print(f"[WARN] Overlays fuer die Vorschau: {exc}")
+
+    def _overlay_rechtecke(self):
+        """Overlays mit Lage und Groesse in Pixeln der EXPORTaufloesung.
+
+        Rueckgabe: (liste, (export_breite, export_hoehe)) oder ([], None).
+
+        Warum hier und nicht im Player: die Overlay-Daten enthalten
+        ffmpeg-Ausdruecke wie "(W-w)-30". Die werden mit derselben Funktion
+        ausgewertet, die auch der Export benutzt - so kann die Vorschau gar
+        nicht anders rechnen als das fertige Video. Die Vorschau bekommt nur
+        noch fertige Rechtecke und skaliert sie auf ihre eigene Groesse.
+
+        Die Exporthoehe wird genauso bestimmt wie im Encoder: aus der
+        eingestellten Breite und dem Seitenverhaeltnis der ersten Quelldatei,
+        auf eine gerade Zahl gebracht. Sie steckt in Ausdruecken wie
+        "(H-h)-70" und muss deshalb stimmen.
+        """
+        try:
+            alle = self._overlay_manager.get_all_overlays()
+        except Exception:
+            return [], None
+        if not alle or not getattr(self, "playlist", None):
+            return [], None
+
+        s = QSettings("KVRouite", "KVRouite")
+        breite = int(s.value("encoder/res_w", 1280, type=int) or 1280)
+        daten = framerate.eckdaten(self.playlist[0]) or {}
+        qb, qh = daten.get("breite", 0), daten.get("hoehe", 0)
+        if qb > 0 and qh > 0:
+            hoehe = int(round(qh * breite / float(qb)))
+            if hoehe % 2:
+                hoehe += 1
+        else:
+            hoehe = int(s.value("encoder/res_h", 720, type=int) or 720)
+
+        from managers.ges_encoder_manager import _zahl
+        from PySide6.QtGui import QImage
+
+        liste = []
+        for ovl in alle:
+            bild = ovl.get("image") or ""
+            if not bild or not os.path.isfile(bild):
+                continue
+            groesse = QImage(bild).size()
+            bw, bh = groesse.width(), groesse.height()
+            faktor = float(ovl.get("scale", 1.0) or 1.0)
+            zw = max(1, int(round(bw * faktor))) if bw > 0 else 0
+            zh = max(1, int(round(bh * faktor))) if bh > 0 else 0
+            liste.append({
+                "start": float(ovl.get("start", 0.0)),
+                "end": float(ovl.get("end", 0.0)),
+                "fade_in": float(ovl.get("fade_in", 0) or 0),
+                "fade_out": float(ovl.get("fade_out", 0) or 0),
+                "image": bild,
+                "x": _zahl(ovl.get("x", 0), (breite, hoehe), (zw, zh)),
+                "y": _zahl(ovl.get("y", 0), (breite, hoehe), (zw, zh)),
+                "w": zw, "h": zh,
+            })
+        return liste, (breite, hoehe)
 
     def _make_fade_job(self, cstart, cend, fade):
         """
@@ -5367,6 +5372,7 @@ class MainWindow(QMainWindow):
 
         print(f"[DEBUG] Blenden fertig: {gefunden} von {len(self._fade_jobs)}")
         self.video_editor.set_preview_cuts(fertig)
+        self._overlays_an_vorschau()
         QTimer.singleShot(0, self._maybe_ask_index)
         
         
