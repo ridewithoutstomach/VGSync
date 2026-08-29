@@ -52,11 +52,16 @@ BACKEND_GES = "ges"
 DEFAULT_BACKEND = BACKEND_MPV
 
 
-def create_backend(window_id, log_handler=None, name=None):
+def create_backend(window_id, log_handler=None, name=None,
+                   frame_callback=None):
     """
     Baut das eingestellte Backend.
 
     Ohne `name` entscheidet QSettings["player/backend"], Vorgabe ist mpv.
+
+    `frame_callback` gilt nur fuer GES: ist er gesetzt, liefert GStreamer die
+    Bilder dorthin, statt selbst in das Fensterhandle zu zeichnen. mpv kennt
+    das nicht und bekommt weiterhin nur die Fenster-Kennung.
     Laesst sich GES nicht laden - Paket fehlt, keine Video-Senke -, wird das
     gemeldet und auf mpv zurueckgefallen, statt die App nicht starten zu
     lassen. Rueckgabe ist (backend, name, fehlermeldung_oder_None).
@@ -72,7 +77,8 @@ def create_backend(window_id, log_handler=None, name=None):
     if name == BACKEND_GES:
         try:
             from core.ges_backend import GesPlayerBackend
-            return GesPlayerBackend(window_id, log_handler), BACKEND_GES, None
+            return (GesPlayerBackend(window_id, log_handler, frame_callback),
+                    BACKEND_GES, None)
         except Exception as exc:
             return (MpvPlayerBackend(window_id, log_handler), BACKEND_MPV,
                     f"GES konnte nicht geladen werden, es laeuft mpv:\n{exc}")
@@ -129,6 +135,13 @@ class PlayerBackend:
 
         Backends, die das nicht koennen (mpv), tun nichts.
         """
+        return False
+
+    def set_frame_callback(self, rueckruf):
+        """Bilder an Qt liefern statt sie selbst anzuzeigen (nur GES)."""
+        return False
+
+    def supports_frame_callback(self):
         return False
 
     def supports_overlays(self):

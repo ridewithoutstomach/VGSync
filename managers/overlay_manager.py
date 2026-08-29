@@ -181,40 +181,30 @@ class OverlayManager(QObject):
     #      => wir rufen add_overlay(...) direkt => und schließen InsertOverlayDialog
     # -------------------------------------------------------------------------
     def ask_user_for_overlay(self, marker_s: float, parent=None):
-        dlg = self.InsertOverlayDialog(marker_s, self, parent)
-        if dlg.exec() == QDialog.Accepted:
-            # => falls user exist overlay 1..3 gewählt
-            chosen_id = dlg.chosen_overlay_id
-            duration_s= dlg.duration_s
-            fade_in_s = dlg.fade_in_s
-            fade_out_s= dlg.fade_out_s
-            if not chosen_id:
-                print("[OverlayManager] => user had no selection.")
-                return
-            # => start/end
-            start_s = marker_s
-            end_s   = marker_s + duration_s
+        """Overlay einfuegen: erst das Bild waehlen, dann die Zeitwerte.
 
-            # => QSettings auslesen
-            s = QSettings("KVRouite", "KVRouite")
-            image_val  = s.value(f"overlay/{chosen_id}/image", "", str)
-            scale_val  = s.value(f"overlay/{chosen_id}/scale", 1.0, float)
-            x_expr     = s.value(f"overlay/{chosen_id}/mapped_x", "0", str)
-            y_expr     = s.value(f"overlay/{chosen_id}/mapped_y", "0", str)
+        Frueher stand hier die Auswahl zwischen drei festen Plaetzen aus den
+        Einstellungen. Jetzt uebernimmt das der OverlayInsertDialog, der die
+        Bilder dieses Projekts, die Bibliothek und den Dateidialog in einer
+        Liste zusammenfasst.
 
-            ovl_dict = {
-                "start":    start_s,
-                "end":      end_s,
-                "fade_in":  fade_in_s,
-                "fade_out": fade_out_s,
-                "image":    image_val,
-                "scale":    scale_val,
-                "x":        x_expr,
-                "y":        y_expr
-            }
-            self.add_overlay(ovl_dict)
+        Die Pruefung gegen Schnitte und Blendenraender bleibt unveraendert in
+        add_overlay - sie ist der Grund, warum Vorschau und Export nicht
+        auseinanderlaufen koennen.
+
+        Der alte InsertOverlayDialog steht weiter unten unveraendert; wer
+        zurueck will, ersetzt hier nur die eine Zeile.
+        """
+        from views.overlay_insert_dialog import OverlayInsertDialog
+
+        dlg = OverlayInsertDialog(marker_s, self, parent)
+        if dlg.exec() == QDialog.Accepted and dlg.ergebnis:
+            self.add_overlay(dlg.ergebnis)
+        elif getattr(dlg, "bereits_hinzugefuegt", False):
+            # "Erweitert…" hat das Overlay selbst eingetragen.
+            pass
         else:
-            print("[OverlayManager] => user canceled InsertOverlayDialog")
+            print("[OverlayManager] => Einfuegen abgebrochen")
 
 
     # =========================================================================

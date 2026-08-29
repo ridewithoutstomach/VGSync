@@ -34,6 +34,7 @@ import platform
 import math
 
 from core.player_backend import create_backend
+from widgets.video_surface import VideoSurface
 
 from PySide6.QtWidgets import (
     QWidget, QGridLayout, QFrame, QLabel, QVBoxLayout
@@ -93,6 +94,16 @@ class VideoEditorWidget(QWidget):
         self.video_frame = QFrame(self)
         self.video_frame.setStyleSheet("background:black;")
         layout.addWidget(self.video_frame, 0, 0)
+
+        # Zeichenflaeche fuer den Fall, dass Qt die Bilder selbst malt (GES).
+        # Sie liegt in derselben Zelle ueber dem Frame und wird nur gezeigt,
+        # wenn das Backend Bilder liefert. mpv zeichnet weiterhin direkt in
+        # das Fensterhandle des Frames, dort bleibt sie unsichtbar.
+        # Wichtig ist die Reihenfolge: sie kommt VOR den Beschriftungen und
+        # dem Ablegebereich, damit die weiterhin darueber liegen.
+        self.video_surface = VideoSurface(self)
+        self.video_surface.hide()
+        layout.addWidget(self.video_surface, 0, 0)
         layout.setRowStretch(0, 1)
         layout.setColumnStretch(0, 1)
         # Overlay deckt die Fläche
@@ -166,7 +177,20 @@ class VideoEditorWidget(QWidget):
         self._backend, self._backend_name, backend_warning = create_backend(
             window_id=self.video_frame.winId(),
             log_handler=self._mpv_log_handler,
+            frame_callback=self.video_surface.bild_setzen,
         )
+        # Liefert das Backend wirklich Bilder, wird die Zeichenflaeche gezeigt.
+        #
+        # Die Stapelreihenfolge ist dabei entscheidend und war schon einmal
+        # falsch: mit raise_() lag die Flaeche ueber ALLEM und verdeckte die
+        # Zeiten, "Edit:ENC" und die uebrigen Einblendungen. Richtig ist
+        # zweimal lower(): danach liegt der Frame ganz unten, die Flaeche
+        # direkt darueber, und alle Beschriftungen bleiben obenauf - egal wie
+        # viele davon es gibt und in welcher Reihenfolge sie angelegt wurden.
+        if getattr(self._backend, "supports_frame_callback", lambda: False)():
+            self.video_surface.show()
+            self.video_surface.lower()
+            self.video_frame.lower()
         # Meldung merken; MainWindow zeigt sie nach dem Aufbau der Oberflaeche.
         self.backend_warning = backend_warning
         print(f"[PLAYER] Backend: {self._backend_name}")

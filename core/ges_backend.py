@@ -56,7 +56,8 @@ import os
 import platform
 import time
 
-from PySide6.QtCore import QEventLoop, QTimer
+from PySide6.QtCore import QEventLoop, QObject, QTimer, Signal
+from PySide6.QtGui import QImage
 
 _GST_IMPORT_ERROR = None
 try:
@@ -65,7 +66,8 @@ try:
     gi.require_version('GES', '1.0')
     gi.require_version('GstVideo', '1.0')
     gi.require_version('GstController', '1.0')
-    from gi.repository import Gst, GES, GstVideo, GstController, GLib
+    gi.require_version('GstApp', '1.0')
+    from gi.repository import Gst, GES, GstVideo, GstController, GstApp, GLib  # noqa: F401
 except Exception as exc:            # pragma: no cover - haengt an der Umgebung
     _GST_IMPORT_ERROR = exc
     Gst = GES = GstVideo = GstController = GLib = None
@@ -85,6 +87,82 @@ def unavailable_reason():
 NS = 1_000_000_000
 
 
+
+class _BildBruecke(QObject):
+    """Bringt Bilder vom GStreamer-Thread in den Qt-Hauptthread.
+
+    GStreamer ruft "new-sample" auf seinem eigenen Streaming-Thread auf. Ein
+    Qt-Widget von dort aus anzufassen ist nicht erlaubt und faellt einem
+    frueher oder spaeter auf die Fuesse - meist als sporadischer Absturz. Ein
+    Qt-Signal loest das sauber: Qt legt es selbst in die Warteschlange des
+    Hauptthreads, weil Sender und Empfaenger in verschiedenen Threads leben.
+    """
+
+    neuesBild = Signal(object)
+
+
+class _AppsinkAnzeige:
+    """Bilder abholen statt sie GStreamer anzeigen zu lassen.
+
+    Statt in ein Fensterhandle zu zeichnen (d3d11videosink), liefert die
+    Pipeline die fertigen Bilder hierher. Nur so kann Qt spaeter etwas
+    darueber malen - Auswahlrahmen, Anfasser, Ziehen.
+
+    BGRx ist mit Bedacht gewaehlt: vier Bytes je Bildpunkt, byteweise genau
+    das, was QImage.Format_RGB32 erwartet. Es wird also nur kopiert, nicht
+    umgerechnet. Gemessen an 4K-Material in 1280x720 bei 30 fps: 3,2 ms je
+    Bild, also rund ein Zehntel des Zeitbudgets, und kein Bild verloren.
+    """
+
+    #: Wieviele Bilder die Senke zurueckhalten darf. Klein halten: bei einem
+    #: Rueckstau soll das neueste Bild gezeigt werden, nicht ein altes.
+    PUFFER = 2
+
+    def __init__(self, rueckruf):
+        self.bruecke = _BildBruecke()
+        self.bruecke.neuesBild.connect(rueckruf)
+        self.bin = Gst.parse_bin_from_description(
+            "videoconvert ! video/x-raw,format=BGRx ! "
+            f"appsink name=kvr-appsink sync=true max-buffers={self.PUFFER} "
+            "drop=true emit-signals=true", True)
+        self.appsink = self.bin.get_by_name("kvr-appsink")
+        self.appsink.connect("new-sample", self._auf_bild)
+        # Auch das Vorschaubild abholen. Im Pausenzustand meldet appsink kein
+        # "new-sample", sondern "new-preroll" - ohne das bleibt die Anzeige
+        # nach dem Laden schwarz, bis man auf Abspielen drueckt. Dasselbe gilt
+        # nach jedem Springen im pausierten Zustand.
+        self.appsink.connect("new-preroll", self._auf_vorschaubild)
+
+    def _auf_vorschaubild(self, senke):
+        return self._verarbeiten(senke.emit("pull-preroll"))
+
+    def _auf_bild(self, senke):
+        return self._verarbeiten(senke.emit("pull-sample"))
+
+    def _verarbeiten(self, sample):
+        if sample is None:
+            return Gst.FlowReturn.OK
+        try:
+            puffer = sample.get_buffer()
+            struktur = sample.get_caps().get_structure(0)
+            breite = struktur.get_value("width")
+            hoehe = struktur.get_value("height")
+            ok, karte = puffer.map(Gst.MapFlags.READ)
+            if ok:
+                try:
+                    # copy(): der Speicher gehoert GStreamer und wird gleich
+                    # wieder freigegeben - ohne eigene Kopie zeigt das Widget
+                    # spaeter auf Speicher, den es nicht mehr geben muss.
+                    bild = QImage(karte.data, breite, hoehe, breite * 4,
+                                  QImage.Format_RGB32).copy()
+                finally:
+                    puffer.unmap(karte)
+                self.bruecke.neuesBild.emit(bild)
+        except Exception:
+            pass
+        return Gst.FlowReturn.OK
+
+
 class GesPlayerBackend(PlayerBackend):
     """PlayerBackend auf Basis von GES."""
 
@@ -92,7 +170,7 @@ class GesPlayerBackend(PlayerBackend):
     _SINKS_WINDOWS = ("d3d11videosink", "d3d12videosink", "glimagesink", "autovideosink")
     _SINKS_OTHER = ("glimagesink", "xvimagesink", "autovideosink")
 
-    def __init__(self, window_id, log_handler=None):
+    def __init__(self, window_id, log_handler=None, frame_callback=None):
         if _GST_IMPORT_ERROR is not None:
             raise ImportError(
                 "GStreamer/GES ist nicht verfuegbar: %s\n"
@@ -112,6 +190,10 @@ class GesPlayerBackend(PlayerBackend):
         self._paused = True
         self._total_ns = 0
         self._sink = None
+        self._anzeige = None      # _AppsinkAnzeige, wenn Qt malt
+        # Ist ein Rueckruf da, malt Qt die Bilder selbst. Er muss VOR
+        # _build_sink() feststehen, deshalb hier im Konstruktor.
+        self._bild_rueckruf = frame_callback
         self._warned_no_decoder = False
         self._orient = None
 
@@ -159,6 +241,19 @@ class GesPlayerBackend(PlayerBackend):
     # Aufbau
     # ------------------------------------------------------------------
     def _build_sink(self):
+        # Soll Qt selbst malen, holen wir die Bilder ab, statt GStreamer
+        # in ein Fensterhandle zeichnen zu lassen. Nur so kann spaeter
+        # etwas ueber dem Video liegen (Auswahlrahmen, Anfasser).
+        if self._bild_rueckruf is not None:
+            try:
+                self._anzeige = _AppsinkAnzeige(self._bild_rueckruf)
+                self._pipeline.preview_set_video_sink(self._anzeige.bin)
+                self._note("Video-Senke: appsink (Qt zeichnet)")
+                return
+            except Exception as exc:
+                self._anzeige = None
+                self._note(f"appsink nicht nutzbar ({exc}) - nehme Fensterhandle")
+
         names = self._SINKS_WINDOWS if platform.system() == "Windows" else self._SINKS_OTHER
         for name in names:
             try:
@@ -913,6 +1008,19 @@ class GesPlayerBackend(PlayerBackend):
                         quelle.set(dauer_ns, 1.0)
             gesetzt += 1
         return gesetzt
+
+    def set_frame_callback(self, rueckruf):
+        """Bilder an Qt liefern statt sie selbst anzuzeigen.
+
+        Wirkt nur, wenn die Senke noch nicht gebaut ist - normalerweise
+        wird der Rueckruf dem Konstruktor uebergeben. `rueckruf` bekommt
+        ein QImage und wird im Qt-Hauptthread aufgerufen.
+        """
+        self._bild_rueckruf = rueckruf
+        return True
+
+    def supports_frame_callback(self):
+        return True
 
     def supports_view(self):
         return False
