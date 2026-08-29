@@ -33,16 +33,14 @@ Stueck in die Timeline gelegt. Dann laeuft dort nur EIN Dekodierer auf einer
 wenige MB grossen Datei. Gemessen an 4K-Material: rund 2,8 s Rechenzeit und
 4 MB je Blende.
 
-Gerendert wird mit demselben ffmpeg-`xfade`-Filter, den auch der Export
-benutzt (crossfade_2 in managers/encoder_manager.py).
+Gerendert wird mit GES: eine Miniatur-Timeline mit A unten, B oben und einer
+Deckkraftrampe - dieselbe Konstruktion wie im GES-Encoder. Frueher lief das
+ueber ffmpegs `xfade`-Filter; ffmpeg wird in KVRouite nur noch fuer den
+Copy-Mode benutzt und kommt hier nicht mehr vor.
 
-ACHTUNG, Unterschied zum heutigen Export: Die Blende liegt hier MITTIG auf der
-Schnittkante - bei 2 s je 1 s davor und dahinter, wie in Schnittprogrammen
-ueblich. Der Export legt sie derzeit vollstaendig HINTER die Kante; nachgemessen
-an final_out_linux_encodermode_hard/xfade beginnt der Unterschied zwischen
-harter und weicher Fassung exakt am Schnittbild. Solange das dort nicht
-angeglichen ist, zeigt die Vorschau die Blende an einer anderen Stelle als das
-gerenderte Ergebnis.
+Die Blende liegt MITTIG auf der Schnittkante - bei 2 s je 1 s davor und
+dahinter, wie in Schnittprogrammen ueblich. Der Export macht es genauso, damit
+Vorschau und Ergebnis an derselben Stelle dasselbe zeigen.
 
 Die Dateien liegen im Instanz-Temp-Ordner (config.TMP_FADE_DIR) und
 verschwinden mit ihm. Der Name enthaelt einen Hash ueber alles, was das
@@ -51,9 +49,9 @@ Ergebnis bestimmt - aendert sich nichts, wird nicht neu gerendert.
 
 import hashlib
 import os
-import subprocess
+import time
 
-from PySide6.QtCore import QObject, QProcess, Signal
+from PySide6.QtCore import QObject, QTimer, Signal
 
 import config
 
@@ -64,7 +62,7 @@ _RENDER_VERSION = "2"
 _rotation_cache = {}
 
 
-def source_rotation(path, ffprobe="ffprobe"):
+def source_rotation(path, ffprobe=None):
     """
     Drehung aus dem Container, in Grad. 0, wenn keine hinterlegt ist.
 
@@ -81,18 +79,13 @@ def source_rotation(path, ffprobe="ffprobe"):
     if schluessel in _rotation_cache:
         return _rotation_cache[schluessel]
 
-    wert = 0
+    # Gelesen wird ueber core.framerate: dort fragt zuerst GStreamer
+    # ("image-orientation"), und nur wenn sich die Angabe nicht eindeutig
+    # zuordnen laesst, bleibt es bei 0. Die Vorschau ruft das beim
+    # Laden fuer jede Datei auf - ein Prozessstart weniger je Datei.
     try:
-        aus = subprocess.run(
-            [ffprobe, "-v", "error", "-select_streams", "v:0",
-             "-show_entries", "stream_side_data=rotation",
-             "-of", "default=nw=1:nk=1", path],
-            capture_output=True, text=True, timeout=30,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-        zeile = (aus.stdout or "").strip().splitlines()
-        if zeile:
-            wert = int(round(float(zeile[0])))
+        from core.framerate import drehung as _drehung
+        wert = int(_drehung(path, ffprobe))
     except Exception:
         wert = 0
     _rotation_cache[schluessel] = wert
@@ -134,28 +127,61 @@ class FadeRenderer(QObject):
     Rendert Blenden nacheinander im Hintergrund.
 
     Nacheinander und nicht parallel: die Quellen liegen oft auf derselben
-    Platte, und zwei ffmpeg-Laeufe wuerden sich beim Lesen gegenseitig
+    Platte, und zwei Renderlaeufe wuerden sich beim Lesen gegenseitig
     ausbremsen statt zu beschleunigen.
     """
+
+    #: Kommt die Pipeline so lange nicht voran, gilt der Lauf als haengend.
+    STILLSTAND_GRENZE_S = 30.0
+    #: Absolute Obergrenze je Blende, auch wenn es langsam vorangeht.
+    GESAMT_GRENZE_S = 180.0
+    #: Abstand der Protokollzeilen waehrend eines laufenden Auftrags.
+    MELDEN_ALLE_S = 10.0
 
     #: (fertig, gesamt) - fuer eine Fortschrittsanzeige
     progress = Signal(int, int)
     #: alle angeforderten Blenden liegen vor
     finished = Signal()
 
-    def __init__(self, ffmpeg="ffmpeg", ffprobe="ffprobe", parent=None):
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self._ffmpeg = ffmpeg
-        self._ffprobe = ffprobe
         self._queue = []
-        self._proc = None
         self._current = None
         self._done = 0
         self._total = 0
+        # Zustand des GES-Laufs. Der Bus wird per Zeitgeber abgefragt, damit
+        # die Oberflaeche waehrenddessen bedienbar bleibt - dasselbe, was
+        # ein eigener Prozess von sich aus erledigt haette.
+        self._ges_pipeline = None
+        self._ges_bus = None
+        self._ges_aus = False
+        self._ges_start_zeit = 0.0
+        self._ges_letzte_pos = -1
+        self._ges_still_seit = 0.0
+        self._ges_gemeldet = 0.0
+        # Wie oft ein Auftrag schon begonnen wurde. Ab dem dritten Anlauf
+        # wird aufgegeben - dann stimmt etwas nicht, und ein Fenster, das
+        # ewig bei 0/1 steht, ist das schlechteste Ergebnis.
+        self._anlaeufe = {}
+        self._ges_timer = QTimer(self)
+        self._ges_timer.timeout.connect(self._ges_puls)
 
     # ------------------------------------------------------------------
     def ready_path(self, job):
-        """Pfad der fertigen Datei, oder None wenn sie noch nicht existiert."""
+        """Pfad der FERTIGEN Datei, oder None.
+
+        Der gerade laufende Auftrag zaehlt ausdruecklich nicht: seine Datei
+        existiert bereits und waechst noch. Ohne diese Abfrage hielt eine
+        erneute Anforderung den halb geschriebenen Schnipsel fuer fertig -
+        die Pruefung war nur "Groesse > 0". Der Auftrag fiel dann aus der
+        Liste, cancel() loeschte die Datei wieder, und das Vorschau-Fenster
+        blieb bei 0/1 stehen, ohne Fehlermeldung. Genau so gesehen beim
+        Wechsel vom grossen zum kleinen Projekt, wo der Moduswechsel
+        OFF -> ENCODE zusaetzliche Anforderungen ausloest.
+        """
+        laeuft = self._current
+        if laeuft is not None and laeuft.key() == job.key():
+            return None
         p = job.path()
         try:
             if os.path.getsize(p) > 0:
@@ -168,10 +194,30 @@ class FadeRenderer(QObject):
         """
         Blenden anfordern. Bereits vorhandene werden uebersprungen.
 
+        Ein bereits LAUFENDER Auftrag wird weitergefuehrt, wenn er in der
+        neuen Anforderung wieder vorkommt. Das ist wichtig, weil die Vorschau
+        beim Laden mehrfach neu aufgebaut wird - unter anderem beim Wechsel
+        des Bearbeitungsmodus. Wurde bei jeder Anforderung neu begonnen, kam
+        derselbe Auftrag nie ans Ziel: das Fenster stand bei 0/1, waehrend im
+        Log dreimal hintereinander derselbe Renderlauf startete.
+
         Rueckgabe: Anzahl der Blenden, die noch gerendert werden muessen.
         """
-        self.cancel()
         offen = [j for j in jobs if self.ready_path(j) is None]
+        laeuft = self._current
+        if laeuft is not None and any(j.key() == laeuft.key() for j in offen):
+            self._queue = [j for j in offen if j.key() != laeuft.key()]
+            self._done = 0
+            self._total = len(offen)
+            print(f"[FADE] laufender Auftrag [{laeuft.key()[:8]}] wird "
+                  f"fortgefuehrt, {len(self._queue)} weitere(r) wartend")
+            self.progress.emit(0, self._total)
+            return self._total
+
+        if laeuft is not None:
+            print(f"[FADE] laufender Auftrag [{laeuft.key()[:8]}] wird verworfen, "
+                  f"angefordert: {[j.key()[:8] for j in offen]}")
+        self.cancel()
         self._queue = offen
         self._done = 0
         self._total = len(offen)
@@ -185,13 +231,7 @@ class FadeRenderer(QObject):
     def cancel(self):
         """Laufende und wartende Auftraege verwerfen."""
         self._queue = []
-        if self._proc is not None:
-            try:
-                self._proc.kill()
-                self._proc.waitForFinished(2000)
-            except Exception:
-                pass
-            self._proc = None
+        self._ges_stoppen()
         # Halb geschriebene Datei nicht liegen lassen - sie wuerde beim
         # naechsten Mal als "fertig" gelten.
         if self._current is not None:
@@ -210,60 +250,288 @@ class FadeRenderer(QObject):
     def _next(self):
         if not self._queue:
             self._current = None
-            self._proc = None
             self.finished.emit()
             return
 
         job = self._queue.pop(0)
         self._current = job
-        num, den = job.fps
-        d = job.duration
-        # Derselbe Filter wie im Export (crossfade_2): beide Seiten auf die
-        # Vorschaubreite skalieren, dann xfade mit offset 0 - die Segmente
-        # sind genau so lang wie die Blende.
-        flt = (f"[0:v]scale={job.width}:-2,fps={num}/{den},format=yuv420p[a];"
-               f"[1:v]scale={job.width}:-2,fps={num}/{den},format=yuv420p[b];"
-               f"[a][b]xfade=transition=fade:duration={d}:offset=0[v]")
+        schluessel = job.key()
+        self._anlaeufe[schluessel] = self._anlaeufe.get(schluessel, 0) + 1
 
-        # Drehung wie in der Quelle beibehalten, damit der Schnipsel in der
-        # GES-Timeline genauso behandelt wird wie das uebrige Material.
-        # Voraussetzung: beide Seiten kommen aus gleich gedrehten Dateien.
-        # Sonst wird die Drehung wie bisher ins Bild gerechnet.
-        rot_a = source_rotation(job.src_a, self._ffprobe)
-        rot_b = source_rotation(job.src_b, self._ffprobe)
-        roh = ["-noautorotate"] if (rot_a == rot_b and rot_a != 0) else []
-        # ffprobe meldet die Drehung mit umgekehrtem Vorzeichen zum Tag.
-        nach = (["-metadata:s:v:0", f"rotate={-rot_a}"]
-                if (rot_a == rot_b and rot_a != 0) else [])
-
-        args = (["-y", "-hide_banner", "-loglevel", "error"]
-                + roh + ["-ss", f"{job.in_a:.6f}", "-t", f"{d:.6f}", "-i", job.src_a]
-                + roh + ["-ss", f"{job.in_b:.6f}", "-t", f"{d:.6f}", "-i", job.src_b]
-                + ["-filter_complex", flt, "-map", "[v]",
-                   "-c:v", "libx264", "-crf", "23", "-preset", "veryfast", "-an"]
-                + nach + [job.path()])
-
-        self._proc = QProcess(self)
-        self._proc.finished.connect(self._on_finished)
-        self._proc.errorOccurred.connect(self._on_error)
-        self._proc.start(self._ffmpeg, args)
-
-    def _on_error(self, err):
-        print(f"[FADE] ffmpeg konnte nicht starten: {err}")
-        if self._current is not None:
-            self._verwerfen(self._current)
-        self._weiter()
-
-    def _on_finished(self, code, _status):
-        job = self._current
-        if code != 0 and job is not None:
-            print(f"[FADE] Rendern fehlgeschlagen (Code {code})")
+        # Ab dem dritten Anlauf desselben Auftrags wird aufgegeben. Frueher
+        # sprang hier ffmpeg ein; das gibt es nicht mehr - ffmpeg wird in
+        # KVRouite nur noch fuer den Copy-Mode benutzt. Ein Schnitt ohne
+        # Blende ist das kleinere Uebel gegenueber einem Fenster, das sich
+        # endlos dreht.
+        if self._anlaeufe[schluessel] >= 3:
+            print(f"[FADE] [{schluessel[:8]}] dritter Anlauf - aufgegeben, "
+                  f"dieser Schnitt bleibt ohne Blende")
             self._verwerfen(job)
+            self._weiter()
+            return
+
+        # _ges_bereit() legt nebenbei die GStreamer-Versionen fest
+        # (gi.require_version). Ohne diesen Aufruf importiert _ges_start()
+        # ungebunden und GStreamer meldet eine PyGIWarning.
+        if not self._ges_bereit():
+            print(f"[FADE] [{schluessel[:8]}] GStreamer nicht verfuegbar - "
+                  f"dieser Schnitt bleibt ohne Blende")
+            self._verwerfen(job)
+            self._weiter()
+            return
+
+        try:
+            if self._ges_start(job):
+                return
+            print(f"[FADE] [{schluessel[:8]}] Renderlauf nicht startbar")
+        except Exception as exc:
+            print(f"[FADE] [{schluessel[:8]}] Renderlauf gescheitert: {exc}")
+            self._ges_stoppen()
+        self._verwerfen(job)
         self._weiter()
+
+    # ------------------------------------------------------------------
+    # Rendern ueber GES
+    # ------------------------------------------------------------------
+    # Dasselbe Verfahren wie bisher: jede Blende wird einmal vorgerendert und
+    # als fertiger Clip in die Vorschau gelegt. Nur das Werkzeug wechselt -
+    # GES statt ffmpeg. Die Warteschlange, die Zwischenspeicher-Schluessel,
+    # die Signale und die Dateinamen sind dieselben geblieben.
+    #
+    # Aufbau der Miniatur-Timeline, gleich der im Encoder:
+    #
+    #     untere Ebene:  A, `duration` lang, ab in_a
+    #     obere Ebene:   B, `duration` lang, ab in_b, Deckkraft 0 -> 1
+    #
+    # NICHT gedreht wird dabei mit Absicht. Die Vorschau legt jedem Clip die
+    # Drehung des Quellmaterials auf, auch dem Schnipsel (siehe
+    # ges_backend._apply_orientation). Waere er schon aufgerichtet, stuende er
+    # anschliessend auf dem Kopf. Deshalb "video-direction = identity" - das
+    # Gegenstueck zu "-noautorotate" im ffmpeg-Aufruf.
+
+    def _ges_bereit(self):
+        if self._ges_aus:
+            return False
+        try:
+            import gi
+            gi.require_version("Gst", "1.0")
+            gi.require_version("GES", "1.0")
+            gi.require_version("GstPbutils", "1.0")
+            gi.require_version("GstController", "1.0")
+            gi.require_version("GstVideo", "1.0")
+            from gi.repository import Gst, GES
+            if not Gst.is_initialized():
+                Gst.init(None)
+            GES.init()
+            return Gst.ElementFactory.make("x265enc", None) is not None
+        except Exception as exc:
+            print(f"[FADE] GStreamer nicht verfuegbar: {exc}")
+            self._ges_aus = True
+            return False
+
+    def _ges_start(self, job):
+        """Baut die Timeline und startet den Render-Lauf. True, wenn er laeuft."""
+        import gi
+        from gi.repository import Gst, GES, GLib, GstPbutils, GstController, GstVideo
+
+        num, den = job.fps
+        ns = 1_000_000_000
+        # Ein Bild weniger als bestellt: GES rechnet die Endkante mit und
+        # liefert sonst ein Bild zu viel (gemessen 61 statt der bestellten 60
+        # bei 2 s und 29,97 fps). Die Vorschau richtet sich ohnehin nach der
+        # WIRKLICHEN Laenge des Schnipsels - siehe ges_backend._rebuild, wo
+        # "vorne = dauer - halb" gerechnet wird -, aber je naeher die Laenge
+        # an der Bestellung liegt, desto weniger verschiebt sich das
+        # Folgematerial gegenueber dem Export.
+        bilder = max(1, int(round(job.duration * num / den)) - 1)
+        dauer_ns = bilder * den * ns // num
+
+        try:
+            a = GES.UriClipAsset.request_sync(
+                GLib.filename_to_uri(os.path.abspath(job.src_a), None))
+            b = GES.UriClipAsset.request_sync(
+                GLib.filename_to_uri(os.path.abspath(job.src_b), None))
+        except Exception as exc:
+            print(f"[FADE] Quelle nicht ladbar: {exc}")
+            return False
+
+        # Zielhoehe aus dem ROHEN Bild, weil nicht gedreht wird.
+        hoehe = 0
+        try:
+            strom = a.get_info().get_video_streams()[0]
+            hoehe = int(round(strom.get_height() * job.width
+                              / float(strom.get_width())))
+            if hoehe % 2:
+                hoehe += 1
+        except Exception:
+            hoehe = 0
+        if hoehe <= 0:
+            print("[FADE] Bildgroesse der Quelle nicht lesbar")
+            return False
+
+        timeline = GES.Timeline.new_audio_video()
+        for track in timeline.get_tracks():
+            if track.get_property("track-type") == GES.TrackType.VIDEO:
+                track.set_restriction_caps(Gst.Caps.from_string(
+                    f"video/x-raw,width={job.width},height={hoehe},"
+                    f"framerate={num}/{den}"))
+        oben = timeline.append_layer()
+        unten = timeline.append_layer()
+        oben.set_auto_transition(False)
+        unten.set_auto_transition(False)
+
+        def ohne_drehung(clip):
+            for el in clip.find_track_elements(None, GES.TrackType.VIDEO,
+                                               GES.VideoSource):
+                el.set_child_property("video-direction",
+                                      GstVideo.VideoOrientationMethod.IDENTITY)
+            return clip
+
+        in_a = int(round(job.in_a * num / den)) * den * ns // num
+        in_b = int(round(job.in_b * num / den)) * den * ns // num
+
+        ohne_drehung(unten.add_asset(a, 0, in_a, dauer_ns, GES.TrackType.UNKNOWN))
+        clip_b = ohne_drehung(
+            oben.add_asset(b, 0, in_b, dauer_ns, GES.TrackType.UNKNOWN))
+        for el in clip_b.find_track_elements(None, GES.TrackType.VIDEO,
+                                             GES.VideoSource):
+            quelle = GstController.InterpolationControlSource()
+            quelle.props.mode = GstController.InterpolationMode.LINEAR
+            el.set_control_source(quelle, "alpha", "direct")
+            quelle.set(in_b, 0.0)
+            quelle.set(in_b + dauer_ns, 1.0)
+        timeline.commit_sync()
+
+        behaelter = GstPbutils.EncodingContainerProfile.new(
+            "KVRouite-Blende", None,
+            Gst.Caps.from_string("video/quicktime,variant=iso"), None)
+        # x265enc statt x264enc, und zwar aus einem gemessenen Grund:
+        # x264enc nimmt in seinem CRF-Modus den "quantizer" nicht an. Gemessen
+        # an 4 s echtem Material in 1280x720: mit quantizer 23 kamen 1,83 Mb/s
+        # heraus, mit 30 genau 1,82 - der Wert wirkte also gar nicht, und der
+        # Encoder blieb bei seiner Vorgabe (konstante Bitrate, 2048 kbit/s).
+        # Deshalb sahen die ersten GES-Blenden sichtbar schlechter aus als die
+        # von ffmpeg (1,52 gegen 14,14 Mb/s).
+        # Bei x265enc greift "option-string=crf=N" nachweislich (crf 18 gegen
+        # 35: 11,54 gegen 0,59 Mb/s), und das Quellmaterial ist ohnehin HEVC.
+        video = GstPbutils.EncodingVideoProfile.new(
+            Gst.Caps.from_string("video/x-h265"), None, None, 0)
+        video.set_preset_name("x265enc")
+        eig = Gst.Structure.new_empty("element-properties")
+        probe = Gst.ElementFactory.make("x265enc", None)
+        for name, wert in (("option-string", "crf=23"), ("speed-preset", "veryfast")):
+            try:
+                probe.set_property(name, wert)
+                eig.set_value(name, probe.get_property(name))
+            except Exception:
+                pass
+        video.set_element_properties(eig)
+        behaelter.add_profile(video)
+
+        # GES bricht hart ab, wenn der Zielordner fehlt ("Could not open file
+        # ... for writing"). ffmpeg tut das auch, faellt dort aber weniger auf.
+        try:
+            os.makedirs(os.path.dirname(os.path.abspath(job.path())), exist_ok=True)
+        except OSError:
+            pass
+
+        pipeline = GES.Pipeline()
+        pipeline.set_timeline(timeline)
+        if not pipeline.set_render_settings(
+                GLib.filename_to_uri(os.path.abspath(job.path()), None), behaelter):
+            print("[FADE] Render-Einstellungen abgelehnt")
+            return False
+        if not pipeline.set_mode(GES.PipelineFlags.RENDER):
+            print("[FADE] Render-Modus liess sich nicht setzen")
+            return False
+        if pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
+            print("[FADE] Pipeline startete nicht")
+            return False
+
+        self._ges_pipeline = pipeline
+        self._ges_bus = pipeline.get_bus()
+        self._ges_start_zeit = time.time()
+        self._ges_letzte_pos = -1
+        self._ges_still_seit = self._ges_start_zeit
+        self._ges_gemeldet = self._ges_start_zeit
+        print(f"[FADE] GES rendert {os.path.basename(job.src_a)}@{job.in_a:.2f}s + "
+              f"{os.path.basename(job.src_b)}@{job.in_b:.2f}s, {job.duration:.2f}s, "
+              f"{job.width}x{hoehe} @ {num}/{den} "
+              f"[{job.key()[:8]}, Anlauf {self._anlaeufe.get(job.key(), 1)}]")
+        self._ges_timer.start(50)
+        return True
+
+    def _ges_puls(self):
+        """Nachsehen, ob der Lauf fertig ist - ohne die Oberflaeche zu blockieren."""
+        import gi
+        gi.require_version("Gst", "1.0")
+        from gi.repository import Gst
+        if self._ges_bus is None:
+            self._ges_timer.stop()
+            return
+        msg = self._ges_bus.timed_pop_filtered(
+            0, Gst.MessageType.ERROR | Gst.MessageType.EOS)
+        if msg is None:
+            # Ueberwachung: ein Renderlauf darf die Oberflaeche nicht
+            # unbegrenzt blockieren. Kommt die Pipeline nicht voran, wird sie
+            # abgebrochen und der Auftrag verworfen. Ohne das haengt das
+            # Vorschau-Fenster bei 0/1, ohne Meldung und ohne Ausweg.
+            jetzt = time.time()
+            ok, pos = self._ges_pipeline.query_position(Gst.Format.TIME)
+            if ok and pos > self._ges_letzte_pos:
+                self._ges_letzte_pos = pos
+                self._ges_still_seit = jetzt
+            if jetzt - self._ges_gemeldet >= self.MELDEN_ALLE_S:
+                self._ges_gemeldet = jetzt
+                print(f"[FADE] laeuft seit {jetzt - self._ges_start_zeit:.0f}s, "
+                      f"Position {max(0, self._ges_letzte_pos) / 1e9:.2f}s")
+            stillstand = jetzt - self._ges_still_seit
+            gesamt = jetzt - self._ges_start_zeit
+            if stillstand > self.STILLSTAND_GRENZE_S or gesamt > self.GESAMT_GRENZE_S:
+                grund = ("kein Fortschritt seit "
+                         f"{stillstand:.0f}s" if stillstand > self.STILLSTAND_GRENZE_S
+                         else f"laenger als {self.GESAMT_GRENZE_S:.0f}s gelaufen")
+                print(f"[FADE] Renderlauf abgebrochen ({grund})")
+                job = self._current
+                self._ges_stoppen()
+                if job is not None:
+                    self._verwerfen(job)
+                    self._current = None
+                    self._next()
+                else:
+                    self._weiter()
+            return
+        fehler = None
+        if msg.type == Gst.MessageType.ERROR:
+            err, dbg = msg.parse_error()
+            fehler = f"{err.message} ({dbg})"
+        self._ges_stoppen()
+        if fehler:
+            print(f"[FADE] Rendern fehlgeschlagen: {fehler}")
+            if self._current is not None:
+                self._verwerfen(self._current)
+        elif self._current is not None:
+            p = self._current.path()
+            gr = os.path.getsize(p) if os.path.exists(p) else 0
+            print(f"[FADE] [{self._current.key()[:8]}] fertig, {gr} Bytes")
+        self._weiter()
+
+    def _ges_stoppen(self):
+        import gi
+        gi.require_version("Gst", "1.0")
+        from gi.repository import Gst
+        self._ges_timer.stop()
+        self._ges_bus = None
+        if self._ges_pipeline is not None:
+            try:
+                self._ges_pipeline.set_state(Gst.State.NULL)
+                self._ges_pipeline.get_state(5 * Gst.SECOND)
+            except Exception:
+                pass
+            self._ges_pipeline = None
 
     def _weiter(self):
         self._current = None
-        self._proc = None
         self._done += 1
         self.progress.emit(min(self._done, self._total), self._total)
         self._next()

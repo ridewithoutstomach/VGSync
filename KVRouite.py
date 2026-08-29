@@ -237,22 +237,6 @@ def center_mainwindow(window):
     window.move(frame_geo.topLeft())
 
 
-def check_ffmpeg_and_vlc_or_exit():
-    """
-    Ein simpler Check, ob ffmpeg und vlc in PATH vorhanden sind.
-    """
-    ffmpeg_path = shutil.which("ffmpeg")
-    vlc_path    = shutil.which("vlc")
-
-    if not ffmpeg_path or not os.path.exists(ffmpeg_path):
-        return False, "ffmpeg"
-    # Falls du VLC zwingend brauchst, kannst du hier checken.
-    # if not vlc_path or not os.path.exists(vlc_path):
-    #     return False, "vlc"
-
-    return True, ""
-
-
 def _file_arg_from_cli(argv):
     """Erste uebergebene existierende Datei aus der Kommandozeile.
 
@@ -292,32 +276,61 @@ def main():
     #path_manager.ensure_mpv_library(parent_widget=None, base_dir=base_dir)
     # dann erst mainwindow starten:
     
-    # ++ADD++: Windows/macOS Pfad-Check:
-    if current_os == "Windows":
-        if not path_manager.ensure_mpv(None):
-            QMessageBox.critical(None, "Missing MPV (Windows)", "MPV (libmpv-2.dll) wurde nicht gefunden.")
-            sys.exit(1)
-        if not path_manager.ensure_ffmpeg(None):
-            QMessageBox.critical(None, "Missing FFmpeg (Windows)", "FFmpeg wurde nicht gefunden.")
-            sys.exit(1)
-
-    elif current_os == "Darwin":
-        if not path_manager.ensure_mpv_mac(None):
-            QMessageBox.critical(None, "Missing MPV (macOS)", "libmpv.dylib wurde nicht gefunden.")
-            sys.exit(1)
-        if not path_manager.ensure_ffmpeg_mac(None):
-            QMessageBox.critical(None, "Missing FFmpeg (macOS)", "FFmpeg wurde nicht gefunden.")
-    elif current_os == "Linux":
-        if not path_manager.ensure_mpv_linux("/usr/lib/x86_64-linux-gnu/libmpv.so.2"):
-            QMessageBox.critical(None, "Missing MPV (Linux)", "libmpv.so.2 wurde nicht gefunden.\nInstalliere mit:\nsudo apt install libmpv-dev")
-            sys.exit(1)
-        # ffmpeg prüfen – z. B. nur ob im PATH
-        if not shutil.which("ffmpeg"):
-            QMessageBox.critical(None, "Missing FFmpeg", "FFmpeg ist nicht im PATH.")
-            sys.exit(1)  
-    else:
-        QMessageBox.critical(None, "Unsupported OS", f"Dein Betriebssystem ({current_os}) wird derzeit nicht unterstützt.")
+    # mpv und ffmpeg sind KEINE Startbedingungen mehr.
+    #
+    # Gebraucht werden sie nur noch fuer den mpv-Player, den Copy-Mode und die
+    # ffmpeg-Render-Engine. Wiedergabe und Vorschau samt Blenden, Bildraten,
+    # Laengen, Drehung, Hardware-Erkennung, GoPro-Telemetrie und der Export
+    # laufen ueber GStreamer. Beides wird deshalb nur noch GESUCHT und, wenn
+    # vorhanden, in den PATH gelegt. Fehlt es, gibt es eine Zeile im Log und
+    # sonst nichts.
+    #
+    # Bewusst NICHT ueber path_manager.ensure_mpv() / ensure_ffmpeg(): die
+    # oeffnen bei Misserfolg einen Ordner-Dialog. Genau das soll beim Start
+    # nicht mehr passieren.
+    if current_os not in ("Windows", "Darwin", "Linux"):
+        QMessageBox.critical(
+            None, "Unsupported OS",
+            f"Dein Betriebssystem ({current_os}) wird derzeit nicht unterstützt.")
         sys.exit(1)
+
+    if current_os == "Windows":
+        mpv_ordner = path_manager.find_mpv_folder()
+        if mpv_ordner and path_manager.is_valid_mpv_folder(mpv_ordner):
+            os.environ["MPV_LIBRARY_PATH"] = os.path.join(mpv_ordner, "libmpv-2.dll")
+            path_manager.add_to_process_path(mpv_ordner)
+            print("[DEBUG] MPV_LIBRARY_PATH =", os.environ["MPV_LIBRARY_PATH"])
+        else:
+            print("[WARN] libmpv nicht gefunden - der mpv-Player steht nicht "
+                  "zur Verfuegung, GES laeuft davon unabhaengig.")
+    elif current_os == "Darwin":
+        mpv_ordner = path_manager.find_mpv_folder_mac()
+        if mpv_ordner and path_manager.is_valid_mpv_folder_mac(mpv_ordner):
+            for name in ("libmpv.1.dylib", "libmpv.dylib"):
+                pfad = os.path.join(mpv_ordner, name)
+                if os.path.isfile(pfad):
+                    os.environ["MPV_LIBRARY_PATH"] = pfad
+                    break
+            path_manager.add_to_process_path(mpv_ordner)
+            print("[DEBUG] MPV_LIBRARY_PATH =", os.environ.get("MPV_LIBRARY_PATH"))
+        else:
+            print("[WARN] libmpv nicht gefunden - der mpv-Player steht nicht "
+                  "zur Verfuegung, GES laeuft davon unabhaengig.")
+    else:
+        if not path_manager.ensure_mpv_linux(
+                "/usr/lib/x86_64-linux-gnu/libmpv.so.2"):
+            print("[WARN] libmpv.so.2 nicht gefunden - der mpv-Player steht "
+                  "nicht zur Verfuegung (sudo apt install libmpv-dev).")
+
+    ffmpeg_ordner = (path_manager.find_ffmpeg_folder_mac()
+                     if current_os == "Darwin"
+                     else path_manager.find_ffmpeg_folder())
+    if ffmpeg_ordner and path_manager.is_ffmpeg_in_folder(ffmpeg_ordner):
+        path_manager.add_to_process_path(ffmpeg_ordner)
+        print("[DEBUG] ffmpeg gefunden in", ffmpeg_ordner)
+    elif not shutil.which("ffmpeg"):
+        print("[WARN] ffmpeg nicht gefunden - Copy-Mode und der ffmpeg-Export "
+              "stehen nicht zur Verfuegung.")
         ##
     # ++ADD++ Ende
     
@@ -344,22 +357,11 @@ def main():
     config.clear_temp_directories()
 
 
-    # Zusätzlicher Check
+    # Frueher stand hier eine zweite Pruefung, die ohne ffmpeg im PATH
+    # das Programm beendet hat. Sie ist weggefallen: ffmpeg ist keine
+    # Startbedingung mehr (siehe oben).
     parent_widget = QWidget()
     parent_widget.hide()
-    ok2, missing = check_ffmpeg_and_vlc_or_exit()
-    if not ok2:
-        msg_box = QMessageBox(parent_widget)
-        msg_box.setIcon(QMessageBox.Warning)
-        msg_box.setWindowTitle("Missing Dependency")
-        msg_box.setText(
-            f"Could not find '{missing}'!\n"
-            "Please install it (or provide it) and restart the program.\n\n"
-            "Be sure it's in your PATH-Variable."
-        )
-        msg_box.setStandardButtons(QMessageBox.Ok)
-        msg_box.exec()
-        sys.exit(0)
 
     # Disclaimer-Dialog (nur wenn nicht akzeptiert)
     

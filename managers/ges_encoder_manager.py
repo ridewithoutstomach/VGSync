@@ -577,15 +577,45 @@ def _profil(encoder, hw_encode, crf, preset, bitrate_mbps, log):
                          _cpu_eigenschaften(element, crf, preset), log)
 
 
+# Ein Deckel, der praktisch nie greift. x264enc benutzt seine
+# "bitrate"-Eigenschaft auch im Qualitaetsmodus als harte Obergrenze, und die
+# Vorgabe von 2048 kbit/s schneidet jede bessere Einstellung ab. Der
+# ffmpeg-Weg setzt fuer die CPU gar keine Obergrenze (die Bitrate aus den
+# Einstellungen gilt dort nur fuer die GPU), deshalb wird sie hier aus dem Weg
+# geraeumt statt uebernommen.
+_X264_KEIN_DECKEL = 200000      # kbit/s
+
+
 def _cpu_eigenschaften(element, crf, preset):
     """CRF und Preset wie auf der ffmpeg-Kommandozeile.
 
-    x264enc und x265enc reichen "option-string" unveraendert an die jeweilige
-    Bibliothek weiter - es ist dieselbe libx264/libx265, die auch ffmpeg
-    benutzt. "crf=25" bedeutet dort dasselbe wie ffmpegs "-crf 25".
+    Die beiden Encoder wollen das auf verschiedenen Wegen hoeren - gemessen an
+    4 s echtem Material in 1280x720:
+
+        x265enc:  "option-string=crf=N" wirkt (crf 18 gegen 35 ergab
+                  11,54 gegen 0,59 Mb/s).
+
+        x264enc:  "option-string" wird von den Rate-Einstellungen wieder
+                  ueberschrieben und bleibt wirkungslos (crf 23 ergab
+                  1,64 Mb/s, also die Vorgabe). Richtig ist "pass=qual" mit
+                  "quantizer", UND die Bitratengrenze muss aus dem Weg -
+                  sonst deckelt sie bei 2048 kbit/s:
+
+                      crf   x264enc     ffmpeg libx264
+                       15   36,63 Mb/s    32,70 Mb/s
+                       23   13,91 Mb/s    11,32 Mb/s
+                       30    4,23 Mb/s     3,44 Mb/s
+
+    Ohne diese Unterscheidung liefen alle CPU-Exporte mit Container x264 in
+    2048 kbit/s statt in der eingestellten Qualitaet.
     """
     werte = {}
-    if crf is not None:
+    if element == "x264enc":
+        if crf is not None:
+            werte["pass"] = 5                    # Constant Quality = CRF
+            werte["quantizer"] = int(crf)
+            werte["bitrate"] = _X264_KEIN_DECKEL
+    elif crf is not None:
         werte["option-string"] = f"crf={int(crf)}"
     if preset and str(preset).lower() in _SPEED_PRESET:
         werte["speed-preset"] = str(preset).lower()

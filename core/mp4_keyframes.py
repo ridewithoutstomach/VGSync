@@ -276,3 +276,260 @@ def _looks_sane(times, track_seconds):
         if times[-1] > track_seconds + 1.0:
             return False
     return True
+
+
+def video_duration_from_container(path):
+    """Laenge der VIDEOSPUR in Sekunden, direkt aus der MP4/MOV gelesen.
+
+    Warum nicht die Gesamtlaenge des Containers nehmen: die steht in der
+    'mvhd'-Box in der Zeitbasis des Films, und die ist oft nur 1000 (also
+    Millisekunden). GStreamers Discoverer liefert genau diesen gerundeten Wert
+    - gemessen an 1min_Nr2.mp4: 60.834 statt 60.833333, ein Rundungsfehler von
+    0,667 ms. Die 'mdhd'-Box der Videospur haelt Laenge und Zeitbasis der Spur
+    selbst (hier 15360), und daraus ergibt sich die Zahl exakt. Genau diesen
+    Wert meldet auch ffprobe.
+
+    Liefert None, wenn die Datei kein MP4/MOV ist, keine Videospur hat oder
+    irgendetwas unklar bleibt. Wer die Funktion aufruft, MUSS diesen Fall
+    abfangen und den bisherigen Weg gehen - so wie bei
+    keyframe_times_from_index() auch.
+    """
+    if not path or not os.path.isfile(path):
+        return None
+    try:
+        groesse = os.path.getsize(path)
+        with open(path, "rb") as f:
+            moov = _find(f, 0, groesse, ["moov"])
+            if not moov:
+                return None
+            for name, ts, te in _iter_boxes(f, moov[0], moov[1]):
+                if name != "trak":
+                    continue
+                hdlr = _find(f, ts, te, ["mdia", "hdlr"])
+                if not hdlr:
+                    continue
+                f.seek(hdlr[0] + 8)          # version/flags, vorbehalten
+                if f.read(4) != b"vide":
+                    continue
+                mdhd = _find(f, ts, te, ["mdia", "mdhd"])
+                if not mdhd:
+                    return None
+                f.seek(mdhd[0])
+                version = struct.unpack(">B", f.read(1))[0]
+                f.read(3)                    # flags
+                if version == 1:
+                    f.read(16)               # Erstell- und Aenderungszeit
+                    zeitbasis = struct.unpack(">I", f.read(4))[0]
+                    dauer = struct.unpack(">Q", f.read(8))[0]
+                else:
+                    f.read(8)
+                    zeitbasis = struct.unpack(">I", f.read(4))[0]
+                    dauer = struct.unpack(">I", f.read(4))[0]
+                if not zeitbasis or not dauer:
+                    return None
+                if dauer in (0xFFFFFFFF, 0xFFFFFFFFFFFFFFFF):
+                    return None              # unbekannte Laenge
+                return dauer / float(zeitbasis)
+    except Exception:
+        return None
+    return None
+
+
+def _stbl_tabellen(f, stbl_von, stbl_bis):
+    """Liest stsz, stsc und stco/co64 aus einer Sample-Tabelle.
+
+    Liefert (groessen, stsc, versaetze) oder None. `groessen` ist die Liste der
+    Sample-Groessen, `stsc` eine Liste (erster_chunk, samples_je_chunk) und
+    `versaetze` die Dateipositionen der Chunks.
+    """
+    stsz = _find(f, stbl_von, stbl_bis, ["stsz"])
+    if not stsz:
+        return None
+    f.seek(stsz[0] + 4)                         # version/flags
+    einheitlich, anzahl = struct.unpack(">II", f.read(8))
+    if anzahl <= 0:
+        return None
+    if einheitlich:
+        groessen = [einheitlich] * anzahl
+    else:
+        groessen = list(_read_u32(f, anzahl))
+
+    stsc = _find(f, stbl_von, stbl_bis, ["stsc"])
+    if not stsc:
+        return None
+    f.seek(stsc[0] + 4)
+    (n,) = struct.unpack(">I", f.read(4))
+    tabelle = []
+    for _ in range(n):
+        erster, je_chunk, _beschreibung = struct.unpack(">III", f.read(12))
+        tabelle.append((erster, je_chunk))
+    if not tabelle:
+        return None
+
+    box = _find(f, stbl_von, stbl_bis, ["stco"])
+    breit = False
+    if not box:
+        box = _find(f, stbl_von, stbl_bis, ["co64"])
+        breit = True
+    if not box:
+        return None
+    f.seek(box[0] + 4)
+    (n,) = struct.unpack(">I", f.read(4))
+    if breit:
+        roh = f.read(8 * n)
+        if len(roh) < 8 * n:
+            return None
+        versaetze = list(struct.unpack(">%dQ" % n, roh))
+    else:
+        versaetze = list(_read_u32(f, n))
+    if not versaetze:
+        return None
+    return groessen, tabelle, versaetze
+
+
+def _sample_positionen(groessen, stsc, versaetze):
+    """Rechnet aus den Tabellen die (position, groesse) jedes Samples aus."""
+    stellen = []
+    index = 0
+    anzahl_chunks = len(versaetze)
+    for i, (erster, je_chunk) in enumerate(stsc):
+        letzter = (stsc[i + 1][0] - 1) if i + 1 < len(stsc) else anzahl_chunks
+        for chunk in range(erster, letzter + 1):
+            if chunk < 1 or chunk > anzahl_chunks:
+                return None
+            pos = versaetze[chunk - 1]
+            for _ in range(je_chunk):
+                if index >= len(groessen):
+                    return stellen
+                stellen.append((pos, groessen[index]))
+                pos += groessen[index]
+                index += 1
+    return stellen
+
+
+def track_data_from_container(path, formatcode=b"gpmd"):
+    """Rohdaten einer Datenspur, direkt aus der MP4/MOV gelesen.
+
+    Ersetzt den Umweg ueber
+
+        ffprobe -show_streams            (welcher Strom ist "gpmd"?)
+        ffmpeg -codec copy -map 0:N -f rawvideo
+
+    Der ffmpeg-Aufruf dekodiert nichts: er nimmt die Samples der Spur, wie sie
+    im Container liegen, und schreibt sie hintereinander in eine Datei. Genau
+    das passiert hier - nur ohne Prozessstart und ohne Zwischendatei. Gesucht
+    wird die Spur, deren Eintrag in "stsd" den uebergebenen Formatcode traegt;
+    bei GoPro-Telemetrie ist das "gpmd".
+
+    Liefert die Rohdaten als bytes, oder None, wenn irgendetwas unklar bleibt.
+    Wer die Funktion aufruft, MUSS diesen Fall abfangen und den bisherigen Weg
+    gehen - so wie bei keyframe_times_from_index() auch.
+    """
+    if not path or not os.path.isfile(path):
+        return None
+    try:
+        groesse = os.path.getsize(path)
+        with open(path, "rb") as f:
+            moov = _find(f, 0, groesse, ["moov"])
+            if not moov:
+                return None
+            for name, ts, te in _iter_boxes(f, moov[0], moov[1]):
+                if name != "trak":
+                    continue
+                stbl = _find(f, ts, te, ["mdia", "minf", "stbl"])
+                if not stbl:
+                    continue
+                stsd = _find(f, stbl[0], stbl[1], ["stsd"])
+                if not stsd:
+                    continue
+                f.seek(stsd[0] + 4)
+                (eintraege,) = struct.unpack(">I", f.read(4))
+                passt = False
+                pos = stsd[0] + 8
+                for _ in range(eintraege):
+                    if pos + 8 > stsd[1]:
+                        break
+                    f.seek(pos)
+                    laenge, code = struct.unpack(">I4s", f.read(8))
+                    if code == formatcode:
+                        passt = True
+                        break
+                    if laenge < 8:
+                        break
+                    pos += laenge
+                if not passt:
+                    continue
+
+                tabellen = _stbl_tabellen(f, stbl[0], stbl[1])
+                if not tabellen:
+                    return None
+                stellen = _sample_positionen(*tabellen)
+                if not stellen:
+                    return None
+                # Aneinandergrenzende Samples in einem Zug lesen. Sie liegen
+                # innerhalb eines Chunks hintereinander, und einzeln gelesen
+                # waeren es bei einer GoPro-Datei rund 200.000 Zugriffe -
+                # gemessen 12,3 s gegen 1,0 s zusammengefasst.
+                laeufe = []
+                for versatz, laenge in stellen:
+                    if versatz < 0 or laenge < 0 or versatz + laenge > groesse:
+                        return None
+                    if laeufe and laeufe[-1][0] + laeufe[-1][1] == versatz:
+                        laeufe[-1][1] += laenge
+                    else:
+                        laeufe.append([versatz, laenge])
+                stuecke = []
+                for versatz, laenge in laeufe:
+                    f.seek(versatz)
+                    daten = f.read(laenge)
+                    if len(daten) != laenge:
+                        return None
+                    stuecke.append(daten)
+                return b"".join(stuecke)
+    except Exception:
+        return None
+    return None
+
+
+def creation_time_from_container(path):
+    """Aufnahmezeitpunkt aus der "mvhd"-Box, als datetime mit Zeitzone UTC.
+
+    Ersetzt "ffprobe -show_format" fuer das Feld creation_time. Im Container
+    steht dort die Sekundenzahl seit dem 01.01.1904, und ffprobe legt sie
+    genauso aus. An einer GoPro-Datei geprueft: ffprobe, GStreamer und diese
+    Funktion melden uebereinstimmend 2025-09-19T07:11:56Z; bei einer Datei
+    ohne Eintrag liefern alle drei nichts.
+
+    Liefert None, wenn nichts hinterlegt ist oder die Datei nicht gelesen
+    werden kann - dann geht der Aufrufer den bisherigen Weg.
+    """
+    if not path or not os.path.isfile(path):
+        return None
+    try:
+        groesse = os.path.getsize(path)
+        with open(path, "rb") as f:
+            moov = _find(f, 0, groesse, ["moov"])
+            if not moov:
+                return None
+            mvhd = _find(f, moov[0], moov[1], ["mvhd"])
+            if not mvhd:
+                return None
+            f.seek(mvhd[0])
+            version = struct.unpack(">B", f.read(1))[0]
+            f.read(3)                                    # flags
+            if version == 1:
+                sekunden = struct.unpack(">Q", f.read(8))[0]
+            else:
+                sekunden = struct.unpack(">I", f.read(4))[0]
+        if not sekunden:
+            return None
+        from datetime import datetime, timedelta, timezone
+        zeit = (datetime(1904, 1, 1, tzinfo=timezone.utc)
+                + timedelta(seconds=int(sekunden)))
+        # Unplausible Werte lieber gar nicht melden, als eine falsche
+        # Startzeit in die GPX-Kopplung zu tragen.
+        if not (2000 <= zeit.year <= 2100):
+            return None
+        return zeit
+    except Exception:
+        return None

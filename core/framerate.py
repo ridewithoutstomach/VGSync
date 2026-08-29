@@ -16,12 +16,13 @@ Deshalb gilt hier durchgehend:
 `als_text()` liefert die Form fuer die Einstellungen und die Export-
 Konfiguration, `anzeige()` die Form fuer die Oberflaeche.
 
-Beide Encoder-Wege verstehen den Bruch: ffmpeg nimmt "-r 30000/1001" direkt,
-GES rechnet ohnehin mit Zaehler und Nenner.
+Gelesen wird ueber GStreamer, ergaenzt um die Laenge direkt aus dem
+MP4/MOV-Container. ffmpeg kommt hier nicht mehr vor - es wird in KVRouite nur
+noch fuer den Copy-Mode gebraucht.
 """
 
+import json
 import os
-import subprocess
 
 # Die gebraeuchlichen NTSC-Raten mit den Namen, unter denen sie jeder kennt.
 _NTSC_NAMEN = {
@@ -33,6 +34,10 @@ _NTSC_NAMEN = {
 
 # Ganzzahlige Raten, die immer zur Auswahl stehen.
 _GANZE = (24, 25, 30, 50, 60, 120)
+
+# Gemerkte Eckdaten je Datei, damit dieselbe Datei nicht bei jedem
+# Neuaufbau der Zeitleiste erneut geoeffnet wird.
+_CACHE = {}
 
 
 def _kuerzen(num, den):
@@ -128,13 +133,33 @@ def auswahl(quelle, zusaetzlich=None):
     return gesehen
 
 
-def _lesen_gstreamer(pfad):
-    """Bildrate ueber GStreamer, ohne ffprobe.
+def _drehung_aus_tag(text):
+    """GStreamers "image-orientation" in die Zaehlweise von ffprobe.
 
-    Damit die Anwendung nicht an ffprobe haengt: sobald GStreamer da ist (und
-    das ist es, wenn das GES-Backend benutzt wird), kommt die Rate von dort.
-    Der Discoverer liest nur die Kopfdaten des Containers und liefert
-    denselben Bruch, den auch ffprobe als r_frame_rate meldet.
+    ffprobe meldet die Drehung als vorzeichenbehaftete Zahl in der
+    "rotation"-Zusatzangabe des Datenstroms; GStreamer nennt dasselbe
+    "rotate-180". Bei kopfueber aufgenommenem GoPro-Material stehen dort
+    "rotate-180" und -180 - an derselben Datei geprueft.
+
+    Nur 0 und 180 werden zugeordnet. Bei 90 und 270 gehen die Zaehlweisen
+    auseinander (Drehrichtung), und weil in dieser Anwendung ohnehin nur 0 und
+    180 behandelt werden, wird alles andere als "unbekannt" gemeldet - dann
+    wird alles andere als "unbekannt" gemeldet - GES wertet die
+    Kennzeichnung dann selbst aus.
+    """
+    return {"rotate-0": 0, "rotate-180": -180}.get(text)
+
+
+def _schluessel(pfad):
+    st = os.stat(pfad)
+    return (os.path.abspath(pfad), st.st_size, int(st.st_mtime))
+
+
+def _eckdaten_gstreamer(pfad):
+    """Bildrate, Laenge und Bildgroesse in einem Zug, ohne ffprobe.
+
+    Der Discoverer liest nur die Kopfdaten des Containers. Gemessen an einer
+    11,9-GB-Datei: 0,036 s, gegen 0,772 s fuer einen ffprobe-Start.
     """
     try:
         import gi
@@ -143,59 +168,120 @@ def _lesen_gstreamer(pfad):
         from gi.repository import Gst, GstPbutils, GLib
         if not Gst.is_initialized():
             Gst.init(None)
-        sucher = GstPbutils.Discoverer.new(10 * Gst.SECOND)
+        sucher = GstPbutils.Discoverer.new(30 * Gst.SECOND)
         info = sucher.discover_uri(
             GLib.filename_to_uri(os.path.abspath(pfad), None))
+        daten = {"fps": None, "dauer": 0.0, "breite": 0, "hoehe": 0,
+                 "drehung": None, "quelle": "gstreamer"}
+        # Merkt, ob ueberhaupt eine Drehungs-Kennzeichnung vorhanden war.
+        # Fehlt sie ganz, ist das Video nicht gedreht - dann muss nicht extra
+        # nichts weiter geprueft werden. Nur ein vorhandenes, aber nicht
+        # zuordenbares Tag (90 oder 270 Grad) bleibt "unbekannt".
+        gesehen = {"tag": False}
+        gesamt = info.get_duration()
+        if gesamt and gesamt > 0:
+            daten["dauer"] = gesamt / 1_000_000_000.0
         for strom in info.get_video_streams():
-            num = strom.get_framerate_num()
-            den = strom.get_framerate_denom()
-            if num and den:
-                return _kuerzen(num, den)
+            num, den = strom.get_framerate_num(), strom.get_framerate_denom()
+            if num and den and not daten["fps"]:
+                daten["fps"] = _kuerzen(num, den)
+            daten["breite"] = daten["breite"] or strom.get_width()
+            daten["hoehe"] = daten["hoehe"] or strom.get_height()
+            if daten["drehung"] is None and not gesehen["tag"]:
+                tags = strom.get_tags()
+                ok, text = (tags.get_string("image-orientation")
+                            if tags is not None else (False, None))
+                if ok:
+                    gesehen["tag"] = True
+                    daten["drehung"] = _drehung_aus_tag(text)
+        if not gesehen["tag"]:
+            daten["drehung"] = 0
+        return daten if (daten["fps"] or daten["dauer"]) else None
     except Exception:
         return None
-    return None
 
 
-def lesen(pfad, ffprobe="ffprobe"):
-    """Bildrate einer Videodatei als (zaehler, nenner), oder None.
+def eckdaten(pfad, ffprobe=None):
+    """Bildrate, Laenge und Bildgroesse einer Videodatei.
 
-    Zuerst ueber GStreamer, dann ueber ffprobe. Beide liefern denselben Bruch
-    aus dem Container ("30000/1001"), nicht die gerundete Kommazahl. Die
-    Reihenfolge ist Absicht: langfristig soll die Anwendung ohne ffmpeg
-    auskommen, und diese Stelle darf dem nicht im Weg stehen.
+    Gelesen ueber GStreamer, die Laenge zusaetzlich direkt aus dem Container.
+    Das Ergebnis wird gemerkt, solange Groesse und Aenderungszeit gleich bleiben - die
+    Zeitleiste wird nach jeder Aenderung der Wiedergabeliste neu gerechnet,
+    und ohne das Merken laeuft die Abfrage bei jeder Datei erneut.
+
+    Liefert None, wenn sich gar nichts lesen laesst.
     """
     if not pfad or not os.path.isfile(pfad):
         return None
-    ueber_gst = _lesen_gstreamer(pfad)
-    if ueber_gst:
-        return ueber_gst
-    cmd = [ffprobe, "-v", "error", "-select_streams", "v:0",
-           "-show_entries", "stream=r_frame_rate",
-           "-of", "default=noprint_wrappers=1:nokey=1", pfad]
     try:
-        roh = subprocess.run(
-            cmd, capture_output=True, text=True, check=True,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout.strip()
-    except Exception:
+        k = _schluessel(pfad)
+    except OSError:
         return None
-    if not roh or roh == "0/0":
-        return None
-    if "/" in roh:
-        n, d = roh.split("/", 1)
-        try:
-            n, d = int(n), int(d)
-        except ValueError:
-            return None
-        if d == 0:
-            return None
-        return _kuerzen(n, d)
+    if k in _CACHE:
+        return _CACHE[k]
+    daten = _eckdaten_gstreamer(pfad)
+
+    # Die Laenge kommt bevorzugt direkt aus dem Container. Grund: GStreamers
+    # Discoverer meldet die Gesamtlaenge aus der "mvhd"-Box, und deren
+    # Zeitbasis ist oft nur 1000 - bei 1min_Nr2.mp4 kamen so 60.834 statt
+    # 60.833333 heraus, 0,667 ms zu viel. Die "mdhd"-Box der Videospur haelt
+    # den Wert exakt; gemessen ueber vier Dateien: 0,0003 ms Abweichung
+    # gegenueber ffprobe, bei 0,001 s Laufzeit.
     try:
-        return parsen(roh)
+        from core.mp4_keyframes import video_duration_from_container
+        genau = video_duration_from_container(pfad)
     except Exception:
-        return None
+        genau = None
+    if genau and genau > 0:
+        if daten is None:
+            daten = {"fps": None, "dauer": genau, "breite": 0, "hoehe": 0,
+                     "quelle": "container"}
+        else:
+            daten = dict(daten)
+            daten["dauer"] = genau
+            daten["quelle"] = daten["quelle"] + "+container"
+
+    if daten:
+        _CACHE[k] = daten
+    return daten
 
 
-def liste_lesen(pfade, ffprobe="ffprobe"):
+def drehung(pfad, ffprobe=None):
+    """Drehung der Videospur in Grad, in der Zaehlweise von ffprobe.
+
+    0, wenn keine hinterlegt ist oder sich die Angabe nicht eindeutig zuordnen
+    laesst (90 oder 270 Grad) - diese Anwendung behandelt nur 0 und 180, alles
+    andere ueberlaesst sie GES.
+    """
+    daten = eckdaten(pfad, ffprobe)
+    if not daten:
+        return 0
+    if daten.get("drehung") is not None:
+        return daten["drehung"]
+    # Nicht zuordenbar (90 oder 270 Grad). Diese Anwendung behandelt ohnehin
+    # nur 0 und 180; alles andere ueberlaesst sie GES, das die Kennzeichnung
+    # selbst auswertet.
+    daten["drehung"] = 0
+    return 0
+
+
+def dauer(pfad, ffprobe=None):
+    """Laenge einer Videodatei in Sekunden, 0.0 wenn nicht lesbar."""
+    daten = eckdaten(pfad, ffprobe)
+    return float(daten["dauer"]) if daten else 0.0
+
+
+def lesen(pfad, ffprobe=None):
+    """Bildrate einer Videodatei als (zaehler, nenner), oder None.
+
+    Geliefert wird der Bruch aus dem Container ("30000/1001"), nicht die
+    gerundete Kommazahl.
+    """
+    daten = eckdaten(pfad, ffprobe)
+    return daten["fps"] if daten else None
+
+
+def liste_lesen(pfade, ffprobe=None):
     """Bildraten mehrerer Dateien: (raten_je_datei, alle_gleich)."""
     raten = [lesen(p, ffprobe) for p in pfade]
     bekannt = [r for r in raten if r]

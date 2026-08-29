@@ -721,6 +721,17 @@ class MainWindow(QMainWindow):
         self.off_action.triggered.connect(lambda: self._set_edit_mode("off"))
         self.copy_action.triggered.connect(lambda: self._set_edit_mode("copy"))
         self.encode_action.triggered.connect(lambda: self._set_edit_mode("encode"))
+
+        # Copy-Mode braucht ffmpeg: er schneidet an Keyframes mit "-c copy"
+        # und indiziert die Keyframes. Ohne ffmpeg im PATH ist er nicht
+        # benutzbar, also wird er gar nicht erst angeboten.
+        if not shutil.which("ffmpeg"):
+            self.copy_action.setEnabled(False)
+            self.copy_action.setStatusTip(
+                "Copy-Mode needs ffmpeg. It was not found in your PATH.")
+            self.copy_action.setToolTip(
+                "Copy-Mode needs ffmpeg. It was not found in your PATH.")
+            print("[INFO] Copy-Mode ist abgeschaltet: ffmpeg nicht gefunden.")
        
         
         
@@ -1124,7 +1135,7 @@ class MainWindow(QMainWindow):
         # Blenden fuer die Vorschau werden im Hintergrund vorgerendert.
         self._fade_jobs = {}
         self._fade_dialog = None
-        self._fade_renderer = FadeRenderer("ffmpeg", "ffprobe", self)
+        self._fade_renderer = FadeRenderer(self)
         self._fade_renderer.progress.connect(self._on_fades_progress)
         self._fade_renderer.finished.connect(self._on_fades_ready)
 
@@ -2148,6 +2159,14 @@ class MainWindow(QMainWindow):
         # Nach dem Wechsel die Vorschau nachziehen: Copy-Mode hat keine
         # Blenden, Encode-Mode schon.
         QTimer.singleShot(0, self._refresh_preview_timeline)
+        # Ein gespeichertes Projekt kann "copy" enthalten. Ohne ffmpeg geht das
+        # nicht, dann wird auf Encode ausgewichen statt in einen Modus zu
+        # schalten, der beim Export scheitert.
+        if new_mode == "copy" and not shutil.which("ffmpeg"):
+            print("[WARN] Copy-Mode nicht moeglich (ffmpeg fehlt) - "
+                  "schalte auf Encode-Mode.")
+            new_mode = "encode"
+
         old_mode = self._edit_mode
         if new_mode == old_mode:
             return  # Nichts geändert
@@ -4052,22 +4071,48 @@ class MainWindow(QMainWindow):
             along with this program. If not, see 
             <a href='https://www.gnu.org/licenses/'>https://www.gnu.org/licenses/</a>.<br><br>
             
-            <h3>Third-Party Libraries & Patent Notice</h3>
+            <h3>Third-Party Libraries &amp; Patent Notice</h3>
             This application includes and distributes open-source libraries:<br>
-            <b>1. FFmpeg</b> - <a href='https://ffmpeg.org'>ffmpeg.org</a> (GPL build)<br>
-            <b>2. mpv</b> - <a href='https://mpv.io'>mpv.io</a> (GPL build)<br><br>
-            Full license texts for these libraries are located in the <br>
-            "<code>_internal/ffmpeg</code> and <code>_internal/mpv</code> folders.<br>"            
-            The complete source code for these libraries as used in this software 
-            is available at 
-            <a href='http://KVRouite.com'>http://KVRouite.com</a>.<br><br>
-            
+            <b>1. FFmpeg 7.1</b> - <a href='https://ffmpeg.org'>ffmpeg.org</a>
+            (GPL build, GPL-2.0-or-later)<br>
+            <b>2. mpv 0.40.0 / libmpv</b> - <a href='https://mpv.io'>mpv.io</a>
+            (GPL build, GPL-2.0-or-later)<br>
+            <b>3. GStreamer 1.28.6</b>, incl. GStreamer Editing Services (GES) and
+            PyGObject -
+            <a href='https://gstreamer.freedesktop.org'>gstreamer.freedesktop.org</a>
+            (LGPL-2.1-or-later; the bundled x264 and x265 encoder plugins are
+            GPL-2.0-or-later)<br><br>
+
+            GStreamer is loaded only when the video backend is set to GES
+            (Config &rarr; Video Backend). On Linux it is not distributed with
+            KVRouite at all - it comes from your distribution's own packages.<br><br>
+
+            Full license texts are located in the <code>_internal/ffmpeg</code>,
+            <code>_internal/mpv</code> and <code>_internal/gstreamer</code> folders.<br>
+            The complete source code for FFmpeg and mpv as used in this software is
+            available at <a href='https://kvrouite.com/downloads/index.php'>kvrouite.com/downloads</a>.
+            The GStreamer binaries are the GStreamer Project's own, passed on unchanged;
+            their source is published by that project at
+            <a href='https://gstreamer.freedesktop.org/src/'>gstreamer.freedesktop.org/src</a>
+            - see <code>_internal/gstreamer/CORRESPONDING-SOURCE.txt</code>. Either way the
+            sources can be requested from
+            <a href='mailto:bernd@kvrouite.com'>bernd@kvrouite.com</a> for at least
+            three (3) years.<br><br>
+
             <b>Patent Encumbrance Notice:</b><br>
-            Some codecs (such as x265) may be patent-encumbered in certain jurisdictions. 
-            It is the user's responsibility to ensure compliance with all applicable 
+            Some codecs (such as x264, x265, AAC, MP3, AC-3, DTS) may be
+            patent-encumbered in certain jurisdictions.
+            It is the user's responsibility to ensure compliance with all applicable
             laws and regulations, and to obtain any necessary patent licenses.<br><br>
-            
-            <b>By clicking 'I Accept', you acknowledge that you have read and 
+
+            <b>Acknowledgements:</b><br>
+            GPS extraction for GoPro cameras is based on <i>gopro2gpx</i> by
+            Juan M. Casillas (GPL-3.0), modified.<br>
+            Parts of this release were developed with the assistance of
+            <i>Claude</i> (Anthropic). Copyright and responsibility for the code
+            remain with the author named above.<br><br>
+
+            <b>By clicking 'I Accept', you acknowledge that you have read and
             understood the GNU General Public License terms.</b><br><br>
             V: {vcount}  G: {gcount}
             
@@ -4359,10 +4404,13 @@ class MainWindow(QMainWindow):
             # Button Box
             btns = QDialogButtonBox()
 
-            # Add "Copy" button
-            btn_copy = QPushButton("Copy")
-            btns.addButton(btn_copy, QDialogButtonBox.YesRole)
-            btn_copy.clicked.connect(lambda: dlg.done(1))
+            # Add "Copy" button - nur wenn ffmpeg da ist. Copy-Mode schneidet
+            # an Keyframes mit "-c copy"; ohne ffmpeg fuehrt die Wahl nur in
+            # einen Modus, der beim Export scheitert.
+            if shutil.which("ffmpeg"):
+                btn_copy = QPushButton("Copy")
+                btns.addButton(btn_copy, QDialogButtonBox.YesRole)
+                btn_copy.clicked.connect(lambda: dlg.done(1))
 
             # Add "Encode" button
             btn_encode = QPushButton("Encode")
@@ -4843,7 +4891,7 @@ class MainWindow(QMainWindow):
         self.video_durations = []
         offset = 0.0
         for path in self.playlist:
-            dur = self.get_video_length_ffprobe(path)
+            dur = self.get_video_length(path)
             self.video_durations.append(dur)
             offset += dur
         self.real_total_duration = offset
@@ -4861,19 +4909,19 @@ class MainWindow(QMainWindow):
         self.cut_manager.set_video_durations(self.video_durations)
         self._update_gpx_overview()
 
-    def get_video_length_ffprobe(self, filepath):
-        cmd = [
-            "ffprobe", "-v", "quiet", "-of", "csv=p=0",
-            "-show_entries", "format=duration", filepath
-        ]
-        try:
-            out = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
-            val = float(out.strip())
-            if val > 0:
-                return val
-            return 0.0
-        except:
-            return 0.0
+    def get_video_length(self, filepath):
+        """Laenge einer Videodatei in Sekunden.
+
+        Kommt aus core.framerate: dort wird zuerst GStreamer gefragt und nur
+        dann ffprobe. Das ist ein Schritt weg von ffmpeg, und nebenbei
+        schneller - der Discoverer braucht keinen Prozessstart, und die
+        Eckdaten je Datei werden gemerkt. rebuild_timeline() laeuft nach jeder
+        Aenderung der Wiedergabeliste, ohne das Merken oeffnete die Anwendung
+        jedes Mal wieder jede Datei.
+
+        Hiess frueher get_video_length_ffprobe(); der Name stimmte nicht mehr.
+        """
+        return framerate.dauer(filepath)
 
     def run_merge(self, video_path, csv_file, temp_dir):
         print("[DEBUG] run_merge => direkt merge_keyframes_incremental aufrufen ...")
@@ -5252,13 +5300,13 @@ class MainWindow(QMainWindow):
                   f"Dateigrenze, bleibt harter Schnitt")
             return None
 
-        fps = (30000, 1001)
-        try:
-            f = self.video_editor.get_fps()
-            if f and f > 0:
-                fps = (int(round(f * 1000)), 1000)
-        except Exception:
-            pass
+        # Bildrate als exakter BRUCH, gelesen aus der Quelldatei der
+        # abgehenden Seite. Frueher stand hier (int(fps * 1000), 1000), also
+        # der Rueckweg aus einer Kommazahl - aus 29,97002997 wurde damit
+        # 29970/1000 statt 30000/1001. Der Schnipsel lief dann minimal zu
+        # langsam, und weil die Bildrate im Schluessel des Zwischenspeichers
+        # steckt, konnte derselbe Schnitt mehrfach gerendert werden.
+        fps = framerate.lesen(a[0]) or (30000, 1001)
         return FadeJob(a[0], a[1], b[0], b[1], float(fade),
                        self.video_editor.preview_width(), fps)
 
@@ -8423,7 +8471,11 @@ class MainWindow(QMainWindow):
         vbox.addWidget(QLabel("Select video edition mode"))
 
         btns = QDialogButtonBox()
-        b_copy = QPushButton("Copy");   btns.addButton(b_copy,  QDialogButtonBox.YesRole);    b_copy.clicked.connect(lambda: dlg.done(1))
+        # "Copy" nur anbieten, wenn ffmpeg vorhanden ist (siehe oben).
+        if shutil.which("ffmpeg"):
+            b_copy = QPushButton("Copy")
+            btns.addButton(b_copy, QDialogButtonBox.YesRole)
+            b_copy.clicked.connect(lambda: dlg.done(1))
         b_enc  = QPushButton("Encode"); btns.addButton(b_enc,   QDialogButtonBox.ActionRole); b_enc.clicked.connect(lambda: dlg.done(2))
         b_no   = QPushButton("No Edit");btns.addButton(b_no,    QDialogButtonBox.RejectRole); b_no.clicked.connect(lambda: dlg.reject())
         vbox.addWidget(btns)
