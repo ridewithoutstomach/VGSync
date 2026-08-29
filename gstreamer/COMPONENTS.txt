@@ -1,0 +1,100 @@
+================================================================================
+ GStreamer components distributed with KVRouite (Windows build)
+================================================================================
+
+Source of this list: the "gstreamer-bundle" 1.28.6 wheels as installed by pip.
+The license expressions below are reproduced verbatim from the "License:" field
+of each package's own METADATA. See CORRESPONDING-SOURCE.txt for where to obtain the matching sources.
+
+Nothing in this list is distributed on Linux - there GStreamer is installed
+from the distribution's own packages.
+
+--------------------------------------------------------------------------------
+gstreamer-bundle 1.28.6
+  Meta-package to install all GStreamer plugins and libraries
+  License: LGPL-2.1-or-later
+
+gstreamer-libs 1.28.6
+  GStreamer API Libraries (core, base, GES, GLib/GObject, cairo, pango,
+  harfbuzz, freetype, fontconfig, libpng, libjpeg-turbo, libtiff, librsvg,
+  libxml2, zlib, bzip2, OpenSSL, orc, dav1d, graphene)
+  License: Apache-2.0 AND Libpng AND LGPL-2.0-or-later AND bzip2-1.0.6 AND
+           libtiff AND LGPL-2.1-or-later AND BSD-3-Clause AND FTL AND
+           BSD-2-Clause AND MPL-1.1 AND GPL-2.0-or-later AND MPL-2.0 AND MIT
+           AND IJG AND Zlib AND BSD-3-Clause AND Zlib
+
+gstreamer-plugins 1.28.6
+  GStreamer plugins (base / good / bad, incl. gst-libav)
+  License: libtiff AND Misc AND MPL-1.1 AND GPL-2.0-or-later AND MPL-2.0 AND
+           MIT AND ISC AND Apache-2.0 AND LGPL-2.0-or-later AND
+           LGPL-2.1-or-later AND BSD-3-Clause AND curl AND BSD-3-Clause-Clear
+           AND LGPL-3.0-only AND blessing AND BSD-2-Clause AND
+           BSD-2-Clause-Patent
+
+gstreamer-plugins-libs 1.28.6
+  Third-party libraries used by the plugins. Contains among others FFmpeg 7.1
+  (libavcodec 61, libavformat 61, libavutil 59, libswscale, libswresample -
+  built WITHOUT --enable-gpl, i.e. the LGPL configuration), FLAC, libogg,
+  libvorbis, libtheora, libopus, mpg123, LAME, libass, libdv, openh264,
+  OpenJPEG, SVT-AV1, dav1d, libsoup, libcurl, libnice, libsrtp, SRT, speex,
+  spandsp, opencore-amr, wavpack, sqlite3, zbar
+  License: libtiff AND Misc AND MPL-1.1 AND GPL-2.0-or-later AND MPL-2.0 AND
+           MIT AND ISC AND Apache-2.0 AND LGPL-2.0-or-later AND
+           LGPL-2.1-or-later AND BSD-3-Clause AND curl AND BSD-3-Clause-Clear
+           AND LGPL-3.0-only AND blessing AND BSD-2-Clause AND
+           BSD-2-Clause-Patent
+
+gstreamer-plugins-restricted 1.28.6
+  GStreamer plugins that are known to be patent encumbered
+  (librtmp, vo-aacenc, vvdec)
+  License: Apache-2.0 AND LGPL-2.0-or-later AND LGPL-2.1-or-later AND
+           BSD-3-Clause AND BSD-3-Clause-Clear AND MIT
+
+gstreamer-plugins-gpl 1.28.6                                        [GPL]
+  GStreamer GPL/AGPL plugins (a52dec/liba52, dtsdec/libdca, dvdread, resindvd)
+  License: Apache-2.0 AND LGPL-2.0-or-later AND LGPL-2.1-or-later AND
+           BSD-3-Clause AND GPL-2.0-or-later AND MIT
+
+gstreamer-plugins-gpl-restricted 1.28.6                             [GPL]
+  GStreamer GPL/AGPL plugins that are known to be patent encumbered
+  (x264enc / libx264, x265enc / libx265)
+  --> REQUIRED by KVRouite: the GES encoder renders through x264enc/x265enc.
+  License: Apache-2.0 AND LGPL-2.1-or-later AND MIT AND GPL-2.0-or-later AND
+           LGPL-2.0-or-later AND BSD-3-Clause
+
+gstreamer-python 1.28.6
+  Python bindings and plugins for GStreamer (PyGObject, pycairo)
+  License: MIT AND LGPL-2.0-or-later AND MPL-1.1 AND LGPL-2.1-or-later AND
+           BSD-3-Clause
+
+gstreamer-gtk 1.28.6
+  gtk4paintablesink plugin and dependencies, including GTK4 itself
+  License: Apache-2.0 AND MIT AND LGPL-2.1-or-later AND BSD-3-Clause
+
+gstreamer-ext-runtime 1.28.6                                 [NOT open source]
+  Platform-specific runtime redistributables: the Microsoft Visual C++
+  runtime (vcruntime140, msvcp140, concrt140, vcomp140, vccorlib140,
+  vcamp140). These are Microsoft components redistributed under Microsoft's
+  own redistribution terms, not under the GPL or LGPL. They are System
+  Libraries in the sense of the GNU GPL.
+  License: LicenseRef-Proprietary
+
+Additionally, the GCC runtime libraries libgcc_s_seh-1.dll, libstdc++-6.dll
+and libwinpthread-1.dll are shipped inside gstreamer-libs. These are licensed
+under GPL-3.0-or-later WITH GCC-exception-3.1 (the GCC Runtime Library
+Exception), which permits their distribution with any program.
+--------------------------------------------------------------------------------
+
+Note on the two FFmpeg copies
+-----------------------------
+KVRouite ships FFmpeg twice, and the two are licensed differently:
+
+  1. "_internal/ffmpeg"  - the FFmpeg 7.1 full build (ffmpeg.exe / ffprobe.exe)
+                           used for cutting and rendering. GPL build (GPLv3).
+                           See _internal/ffmpeg/NOTICE.txt.
+
+  2. inside gstreamer-plugins-libs - the FFmpeg 7.1 shared libraries used by
+                           the GStreamer gst-libav plugin. LGPL build.
+                           Covered by this file and NOTICE.txt.
+
+================================================================================

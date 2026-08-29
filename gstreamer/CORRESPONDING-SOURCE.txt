@@ -1,0 +1,106 @@
+================================================================================
+ Corresponding source code - GStreamer 1.28.6
+ Where to get it, and why KVRouite does not host it
+================================================================================
+
+WHAT KVRouite DISTRIBUTES
+-------------------------
+The Windows build of KVRouite contains the prebuilt GStreamer binaries from the
+"gstreamer-bundle" 1.28.6 wheels on PyPI. Those wheels are published by the
+GStreamer Project itself (see the "Author: GStreamer Project" field in their
+package metadata); they are the same binaries the project ships in its official
+Windows and macOS installers.
+
+KVRouite does not compile, patch, rebuild or otherwise modify any of them. They
+are passed on byte for byte, exactly as pip installs them.
+
+This is different from the ffmpeg and mpv binaries in this application, and it
+is why the arrangement below is different too.
+
+WHY THERE IS NO SOURCE ARCHIVE ON kvrouite.com
+----------------------------------------------
+Every GPL component here is licensed GPL-2.0-or-later, and every LGPL component
+LGPL-2.1-or-later. The "or later" lets the distributor convey them under version
+3 of the respective license, and KVRouite - being GPL-3.0-or-later as a whole -
+does exactly that.
+
+GPL version 3, section 6(d) covers this case directly. When the object code is
+offered from a network server (for KVRouite: the GitHub Releases page), the
+Corresponding Source may sit on a different server, operated by a third party,
+as long as clear directions next to the object code say where to find it. This
+file, together with NOTICE.txt, is those directions. LGPL version 3 adopts the
+same conveyance terms.
+
+The Corresponding Source for these binaries is published by the GStreamer
+Project on its own servers, in the same version, and is therefore already
+available under exactly the conditions section 6(d) requires. Copying it onto
+kvrouite.com would add nothing.
+
+WHERE THE SOURCE IS
+-------------------
+Release tarballs, version 1.28.6, at https://gstreamer.freedesktop.org/src/ :
+
+  https://gstreamer.freedesktop.org/src/gstreamer/gstreamer-1.28.6.tar.xz
+  https://gstreamer.freedesktop.org/src/gst-plugins-base/gst-plugins-base-1.28.6.tar.xz
+  https://gstreamer.freedesktop.org/src/gst-plugins-good/gst-plugins-good-1.28.6.tar.xz
+  https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.28.6.tar.xz
+  https://gstreamer.freedesktop.org/src/gst-plugins-ugly/gst-plugins-ugly-1.28.6.tar.xz
+  https://gstreamer.freedesktop.org/src/gst-libav/gst-libav-1.28.6.tar.xz
+  https://gstreamer.freedesktop.org/src/gst-editing-services/gst-editing-services-1.28.6.tar.xz
+  https://gstreamer.freedesktop.org/src/gst-python/gst-python-1.28.6.tar.xz
+  https://gstreamer.freedesktop.org/src/gst-rtsp-server/gst-rtsp-server-1.28.6.tar.xz
+  https://gstreamer.freedesktop.org/src/gst-devtools/gst-devtools-1.28.6.tar.xz
+
+Each tarball is accompanied by a .sha256sum and a .asc signature file on the
+same server. The archive is a full historical one - it still carries releases
+going back to 2002 - so these links are expected to keep working.
+
+The scripts that turn these sources into the exact binaries in the wheels (the
+build recipes, toolchain and patches) are the "cerbero" build system, published
+by the GStreamer Project at https://gitlab.freedesktop.org/gstreamer/ .
+
+The wrapped third-party libraries listed in COMPONENTS.txt - x264, x265,
+FFmpeg 7.1, liba52, libdca, libdvdread, libdvdnav and the permissively licensed
+ones - are fetched from their own upstream projects by those same recipes,
+which name the exact version and checksum of each.
+
+IF THOSE LINKS EVER STOP WORKING
+--------------------------------
+Section 6(d) leaves the distributor responsible for the source staying
+available, even when a third party hosts it. KVRouite therefore keeps its own
+offline copy of the tarballs above. If you cannot reach the GStreamer servers,
+or if a future release removes version 1.28.6, request the sources from:
+
+  bernd@kvrouite.com
+
+You will receive them at no more than the cost of the transfer. This applies for
+at least three (3) years from the date you received this software and to anyone
+who receives the software.
+
+FOR MAINTAINERS
+---------------
+The offline copy is made with:
+
+    python tools/fetch_gstreamer_sources.py --out third-party-src/gstreamer-1.28.6
+
+For version 1.28.6 it has been made and verified (10 tarballs, ~22 MB, each
+checked against its published SHA256). It lives in third-party-src/ next to the
+ffmpeg and mpv sources and is excluded from git, like those - it is a local
+archive, not something to publish.
+
+Run it once per pinned version. When the version in requirements-ges.txt changes,
+run it again for the new version and update the version numbers in this file,
+in NOTICE.txt and in COMPONENTS.txt. The copy does not have to be published
+anywhere - it only has to exist, so that a request can be answered.
+
+Before publishing a Windows release that contains GStreamer:
+
+  [ ] requirements-ges.txt, NOTICE.txt, COMPONENTS.txt and this file all name
+      the same version.
+  [ ] An offline copy of that version's tarballs exists.
+  [ ] build_with_pyinstaller.py printed "GStreamer WIRD mit ausgeliefert" and
+      "Rechtstexte liegen in _internal/gstreamer - OK."
+  [ ] The build is not a single-file executable (LGPL section 6: the DLLs must
+      stay replaceable).
+
+================================================================================

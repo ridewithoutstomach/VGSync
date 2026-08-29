@@ -7,6 +7,65 @@ Versions up to and including 5.0 are documented in the GitHub releases only.
 
 ---
 
+## 6.0 – unreleased
+
+### Added
+
+**GStreamer / GES licensing and credits**
+
+The GES backend brings a third-party runtime with it, and on Windows KVRouite
+distributes that runtime. It is therefore documented like ffmpeg and mpv:
+
+- New folder `gstreamer/` with `NOTICE.txt` (notice, patent notice, LGPL
+  section 6 relinking note), `CORRESPONDING-SOURCE.txt`, `COMPONENTS.txt`
+  (every shipped package with the license expression the package itself
+  declares) and the full texts `COPYING.LGPL-2.1`, `COPYING.GPL-2`,
+  `COPYING.GPL-3`. The wheels ship no license text of their own, so these had
+  to be supplied.
+- Unlike ffmpeg and mpv, no GStreamer sources are copied to kvrouite.com. These
+  binaries are the GStreamer Project's own wheels, passed on unchanged, so the
+  Corresponding Source is that project's 1.28.6 release tarballs - which GPLv3
+  section 6(d) allows us to point at instead of rehosting, as long as clear
+  directions travel with the binaries. `CORRESPONDING-SOURCE.txt` is those
+  directions and explains the difference.
+- New `tools/fetch_gstreamer_sources.py` downloads and SHA256-verifies the
+  tarballs for the pinned version, so an offline copy exists should the
+  upstream links ever fail. That copy is kept, not published.
+- `build_with_pyinstaller.py` copies `gstreamer/` to `_internal/gstreamer` and
+  now reports whether the GStreamer runtime actually ended up in the build -
+  if it did, the license texts are mandatory; if it did not, the GES backend is
+  missing from the binary and that belongs in the release notes.
+- GStreamer, GES and PyGObject are named in the startup disclaimer, in
+  `installer/AGREEMENT.txt`, in the README and on the website, with the split
+  between the LGPL-2.1+ core and the GPL-2.0+ x264/x265 encoder plugins, and
+  with the note that Linux redistributes nothing.
+- The patent notice now also names x264, AAC, MP3, AC-3 and DTS, not only x265.
+
+### Fixed
+
+**mpv was documented under the wrong license**
+
+The README listed mpv as LGPLv2.1+. mpv is LGPL only when built without any
+GPL-only files; the `libmpv-2.dll` shipped here links libx264 and libx265 and
+is a GPL build. It is now documented as GPL-2.0-or-later everywhere, which is
+what the NOTICE always said.
+
+**Notice files were copies of each other**
+
+`ffmpeg/NOTICE.txt.txt` and `mpv/NOTICE.txt.txt` were byte-identical and each
+described both libraries. They are now one file per component, named
+`NOTICE.txt`, each describing only what is in its folder.
+
+**License texts were missing from the repository**
+
+`.gitignore` still had exceptions for `ffmpeg/VGSync_ffmpeg.txt` and
+`mpv/VGSync_mpv.txt` - names from before the rename. The guidance files the
+README points to, and the notice and license texts, were therefore not in the
+repository at all. The exceptions now match the actual file names and also
+cover `NOTICE.txt`, `LICENSE`, `LICENSE.GPL` and `Copyright`.
+
+---
+
 ## 5.01 – unreleased
 
 ### Added

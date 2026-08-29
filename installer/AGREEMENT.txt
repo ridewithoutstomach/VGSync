@@ -28,16 +28,44 @@ IS WITH YOU. SHOULD THE PROGRAM PROVE DEFECTIVE, YOU ASSUME THE COST OF ALL NECE
 SERVICING, REPAIR OR CORRECTION.
 
 Patent Encumbrance Notice:
-Some codecs (e.g., x265) may be patent-encumbered in certain jurisdictions.
-It is the user's responsibility to ensure compliance with all applicable laws and
-regulations and to obtain any necessary patent licenses.
+Some codecs (e.g., x264, x265, AAC, MP3, AC-3, DTS) may be patent-encumbered in certain
+jurisdictions. It is the user's responsibility to ensure compliance with all applicable
+laws and regulations and to obtain any necessary patent licenses.
 
 Third-Party Libraries
 ---------------------
 This application includes and distributes open-source libraries:
-- FFmpeg (GPL build) — https://ffmpeg.org
-- mpv (GPL build)    — https://mpv.io
 
-Full license texts for these libraries are located in the `_internal/ffmpeg`
-and `_internal/mpv` folders. Corresponding source code for FFmpeg and mpv, as
-used in this distribution, is available at: http://www.KVRouite.com
+- FFmpeg 7.1 (GPL build)
+  License: GPL-3.0-or-later - https://ffmpeg.org
+
+- mpv 0.40.0 / libmpv (GPL build)
+  License: GPL-2.0-or-later - https://mpv.io
+
+- GStreamer 1.28.6, including GStreamer Editing Services (GES) and PyGObject
+  License: LGPL-2.1-or-later. The bundled x264 and x265 encoder plugins, and the
+  a52dec/dtsdec/dvdread plugins, are GPL-2.0-or-later. Individual components are
+  additionally under MIT, BSD, Apache-2.0, MPL and other permissive licenses; the
+  Microsoft Visual C++ runtime redistributables included with the GStreamer wheels
+  are proprietary Microsoft components and are System Libraries in the sense of the
+  GNU GPL. https://gstreamer.freedesktop.org
+
+  GStreamer is only used when the video backend is switched to GES
+  (Config -> Video Backend). With the default mpv backend it is never loaded.
+
+Full license texts for these libraries are located in the `_internal/ffmpeg`,
+`_internal/mpv` and `_internal/gstreamer` folders. `_internal/gstreamer/COMPONENTS.txt`
+lists every GStreamer package shipped and its exact license.
+
+Corresponding source code for FFmpeg and mpv, as used in this distribution, is
+available at: https://kvrouite.com/downloads/index.php
+
+The GStreamer binaries are the GStreamer Project's own prebuilt binaries, passed on
+unchanged. Their corresponding source is published by that project, in the same
+version, at https://gstreamer.freedesktop.org/src/ - the exact tarball URLs are listed
+in `_internal/gstreamer/CORRESPONDING-SOURCE.txt`, as permitted by GNU GPL version 3,
+section 6(d).
+
+In either case you may request the sources from bernd@kvrouite.com. This offer is
+valid for at least three (3) years from the date you received this software and is
+extended to anyone who receives this software.

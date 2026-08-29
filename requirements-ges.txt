@@ -49,3 +49,44 @@ gstreamer-bundle==1.28.6
 # ffmpeg is still required on both platforms. The GES backend only previews;
 # rendering, and the pre-rendered crossfade snippets it shows, come from
 # ffmpeg exactly as before.
+#
+# ---------------------------------------------------------------------------
+# LICENSING - read this before you redistribute a build
+# ---------------------------------------------------------------------------
+# The wheels above are not license-neutral. They contain:
+#
+#   LGPL-2.1-or-later  GStreamer core, gst-plugins-base/good/bad, GES,
+#                      PyGObject, and an LGPL build of the FFmpeg libraries
+#                      used by gst-libav
+#   GPL-2.0-or-later   gstreamer-plugins-gpl-restricted (x264, x265 - the GES
+#                      encoder renders with these) and gstreamer-plugins-gpl
+#                      (a52dec, dtsdec, dvdread)
+#   permissive         MIT, BSD, Apache-2.0, MPL, ISC, Zlib and others
+#   proprietary        gstreamer-ext-runtime = the Microsoft Visual C++
+#                      redistributables (System Libraries per the GNU GPL)
+#
+# None of the wheels ship a license text of their own. KVRouite therefore keeps
+# them in gstreamer/ (NOTICE.txt, CORRESPONDING-SOURCE.txt, COMPONENTS.txt,
+# COPYING.LGPL-2.1, COPYING.GPL-2, COPYING.GPL-3), and build_with_pyinstaller.py
+# copies that folder into _internal/gstreamer of every Windows build.
+#
+# Merely INSTALLING these packages puts no obligation on you. DISTRIBUTING them
+# - which every Windows build does - does: the license texts must travel with
+# the binaries, and the source must be reachable.
+#
+# The source does NOT have to be hosted by us. These wheels are published by the
+# GStreamer Project itself and are passed on unchanged, so their corresponding
+# source is the project's own 1.28.6 release tarballs at
+# https://gstreamer.freedesktop.org/src/ . GPLv3 section 6(d) allows the source
+# to sit on a third-party server as long as clear directions accompany the
+# binaries; gstreamer/CORRESPONDING-SOURCE.txt is those directions. That is why
+# there is nothing to upload to kvrouite.com for GStreamer, unlike ffmpeg and
+# mpv.
+#
+# What does remain: we stay responsible for the source being reachable. Run
+#   python tools/fetch_gstreamer_sources.py --out <folder>
+# once per pinned version to keep an offline copy. It need not be published,
+# only kept. If the version above changes, run it again and update the version
+# in gstreamer/NOTICE.txt, CORRESPONDING-SOURCE.txt and COMPONENTS.txt.
+#
+# KVRouite is GPL-3.0-or-later, which is compatible with all of the above.

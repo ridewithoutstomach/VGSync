@@ -7,7 +7,7 @@ KVRouite
 
 ![Kinomap Logo](./doc/Kinomap_Logo.png)
 
-KVRouite is a Python-based desktop application designed to synchronize GPX data with video footage. Its a Video and GPX synchronising tool. It uses "mpv" for high-precision video playback and "ffmpeg" for media processing.
+KVRouite is a Python-based desktop application designed to synchronize GPX data with video footage. Its a Video and GPX synchronising tool. It uses "mpv" for high-precision video playback and "ffmpeg" for media processing. From version 6.0 on, the timeline can optionally be played through "GStreamer Editing Services (GES)" instead of mpv.
 
 ![KVRouite Main Window](./screenshots/mainwindow.png)
 
@@ -28,6 +28,8 @@ Python packages are split into two files:
 
 - "requirements.txt" - everything the application needs to run.
   The same list on Linux and Windows.
+- "requirements-ges.txt" - optional, Windows/macOS only: the GStreamer runtime
+  for the GES video backend. On Linux this comes from the distribution instead.
 - "requirements-build.txt" - additional packages needed only to build the
   Windows executable (PyInstaller and its dependencies).
 
@@ -135,6 +137,32 @@ python KVRouite.py
 
 ---
 
+#### Optional: GES video backend (6.0)
+
+On Windows the whole GStreamer runtime comes as pip wheels - no MSYS2, no
+system installation:
+
+```cmd
+pip install -r requirements-ges.txt
+```
+
+That installs `gstreamer-bundle` 1.28.6 (~80 MB in site-packages; uninstalling
+removes every file). mpv stays the default; switch under Config -> Video
+Backend, it takes effect after a restart.
+
+Licensing note: these wheels contain GPL- and LGPL-licensed binaries, among
+them the x264/x265 encoder plugins that the GES encoder renders with. **If you
+build and redistribute a Windows executable yourself, you are redistributing
+those binaries** and the obligations in `gstreamer/NOTICE.txt` apply to you.
+In practice that means shipping the license texts and keeping the directions to
+the sources next to them - not hosting sources yourself, since the binaries are
+the GStreamer Project's own and their sources are published by that project
+(see `gstreamer/CORRESPONDING-SOURCE.txt`). `build_with_pyinstaller.py` copies
+`gstreamer/` into the build for you and prints whether the GStreamer runtime
+actually ended up in it.
+
+---
+
 ### ❗ Important Notes
 
 - Always create and activate the virtual environment **inside** the `KVRouite` folder.
@@ -154,6 +182,11 @@ Download the following ZIP files from the latest KVRouite Release:
 - mpv.zip → extract into "mpv/" folder
 
 The "ffmpeg/" and "mpv/" folders include guidance files ("KVRouite_ffmpeg.txt" and "KVRouite_mpv.txt") describing the expected contents.
+
+There is no ZIP for GStreamer: it is installed with `pip install -r requirements-ges.txt`
+(see above). The "gstreamer/" folder in this repository contains no binaries - only the
+license texts, the component list and the source code offer, which the build process
+copies next to the runtime.
 
 -------------------------------------------------------------------------------
 
@@ -205,29 +238,80 @@ This project includes and relies on the following third-party components:
 
 FFmpeg
 - Version: 7.1-full_build
-- License: GPLv3
+- License: GPL-3.0-or-later (this build is configured with --enable-gpl)
 - Website: https://ffmpeg.org
 - Binaries provided in: "ffmpeg/"
-- Original source code included in: "third-party-src/FFmpeg-7.1-source.zip"
-- Release notes included in the source archive
+- Original source code included in: "third-party-src/ffmpeg-source_7.1.zip"
+- Notice and source code offer: "ffmpeg/NOTICE.txt"
 
-mpv
+mpv / libmpv
 - Version: 0.40.0
-- License: LGPLv2.1+
+- License: GPL-2.0-or-later. mpv is LGPLv2.1+ only when built without any
+  GPL-only files; the libmpv-2.dll shipped here links libx264 and libx265 and
+  is therefore a GPL build.
 - Website: https://mpv.io
 - Binaries provided in: "mpv/"
 - Original source code included in: "third-party-src/mpv-0.40.0-source.zip"
-- Release notes included in the source archive
+- Notice and source code offer: "mpv/NOTICE.txt"
+
+GStreamer / GStreamer Editing Services (GES)
+- Version: 1.28.6 on Windows (pip package "gstreamer-bundle", see
+  requirements-ges.txt); on Linux whatever the distribution ships
+- License: LGPL-2.1-or-later for GStreamer core, gst-plugins-base/good/bad,
+  GES and PyGObject. The bundled x264 and x265 encoder plugins - which the GES
+  encoder uses for rendering - and the a52dec/dtsdec/dvdread plugins are
+  GPL-2.0-or-later. Further components are under MIT, BSD, Apache-2.0, MPL and
+  other permissive licenses. The Microsoft Visual C++ runtime redistributables
+  contained in the wheels are proprietary Microsoft components and are System
+  Libraries in the sense of the GNU GPL.
+- Website: https://gstreamer.freedesktop.org
+- Binaries: **Windows only.** They are installed by pip and are placed into the
+  "_internal" folder of the Windows build. **On Linux nothing of this is
+  distributed with KVRouite** - GStreamer is installed from the distribution's
+  own packages, so KVRouite redistributes no GStreamer binary there.
+- Source code: the binaries are the GStreamer Project's own prebuilt wheels,
+  passed on unchanged. KVRouite compiles nothing here, so there is no KVRouite
+  build to publish - the Corresponding Source is the 1.28.6 release tarballs at
+  https://gstreamer.freedesktop.org/src/ plus the project's cerbero build
+  recipes. GPLv3 section 6(d) permits exactly this: source on a third-party
+  server, with clear directions next to the binaries. Those directions, the
+  individual tarball URLs and a fallback contact are in
+  "gstreamer/CORRESPONDING-SOURCE.txt".
+- Notice and per-package license list: "gstreamer/NOTICE.txt" and
+  "gstreamer/COMPONENTS.txt" (in the Windows build: "_internal/gstreamer/")
+- Note: KVRouite ships FFmpeg twice. The "ffmpeg/" folder holds the GPL
+  full build used for cutting and rendering; the GStreamer wheels contain an
+  independent LGPL build of the FFmpeg libraries used by the gst-libav plugin.
 
 GoPro GPS Extraction
 - Based on: gopro2gpx by Juan M. Casillas (https://github.com/juanmcasillas/gopro2gpx)
 - Modifications by: Bernd Eller
 - License: GNU GPL v3
 
-All third-party components are redistributed in accordance with their respective licenses.
-The complete and unmodified source code is included in the "third-party-src/" directory 
-and will be retained and made available for at least three (3) years in accordance with GPL and LGPL requirements.
+KVRouite as a whole is distributed under GPL-3.0-or-later. All of the above are
+compatible with that: GPL-2.0-or-later and LGPL-2.1-or-later both allow use
+under any later version of the respective license.
 
+All third-party components are redistributed in accordance with their respective
+licenses.
+
+For FFmpeg and mpv the complete and unmodified source code is included in the
+"third-party-src/" directory and offered at https://kvrouite.com/downloads/index.php.
+
+For GStreamer it is not, and does not need to be: those binaries are the
+GStreamer Project's own, redistributed unchanged, and their Corresponding Source
+is published by that project in the same version - see
+"gstreamer/CORRESPONDING-SOURCE.txt" for the exact URLs and the reasoning.
+
+Either way, sources will be made available for at least three (3) years in
+accordance with GPL and LGPL requirements. Requests can be sent to
+bernd@kvrouite.com.
+
+None of these components are modified by KVRouite. All libraries are loaded
+dynamically from separate files and can be replaced by your own builds
+(LGPL section 6): overwrite the corresponding DLL in the "_internal" folder and
+restart the application. The Windows build is deliberately not packed into a
+single-file executable, so that this stays possible.
 
 
 -------------------------------------------------------------------------------

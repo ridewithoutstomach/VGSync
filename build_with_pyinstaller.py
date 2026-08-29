@@ -38,6 +38,13 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LOCAL_FFMPEG = os.path.join(BASE_DIR, "ffmpeg")  # z.B. hier liegt dein ffmpeg/
 LOCAL_MPV    = os.path.join(BASE_DIR, "mpv")     # z.B. hier liegt dein mpv/
 
+# gstreamer/ enthaelt KEINE Binaries, nur die Rechtstexte (NOTICE, COMPONENTS,
+# COPYING.*). Die GStreamer-DLLs selbst kommen ueber die pip-Wheels
+# (gstreamer-bundle) und werden von PyInstaller aus dem venv eingesammelt.
+# Der Ordner muss trotzdem mit, sonst liefern wir GPL/LGPL-Binaries ohne die
+# zugehoerigen Lizenztexte aus - siehe check_gstreamer_payload().
+LOCAL_GSTREAMER = os.path.join(BASE_DIR, "gstreamer")
+
 def write_sha256(path: str) -> str:
     """
     Erzeugt neben <path> eine Datei <path>.sha256 mit Inhalt:
@@ -93,6 +100,59 @@ def ensure_license_txt():
 
     print("[INFO] LICENSE.txt wurde neu erstellt.")
     return license_path
+
+def check_gstreamer_payload(internal_dir):
+    """
+    Prueft, ob PyInstaller die GStreamer-Runtime tatsaechlich mit eingepackt hat.
+
+    Warum das hier steht: core/ges_backend.py macht "import gi" auf Modulebene,
+    deshalb zieht PyInstaller die Wheels aus dem venv automatisch mit - oder
+    eben nicht, je nachdem aus welchem venv gebaut wird. Beide Faelle sind
+    zulaessig, aber sie muessen unterschiedlich dokumentiert werden:
+
+      - DLLs vorhanden  -> wir verbreiten GPL/LGPL-Binaries. Die Rechtstexte in
+                           _internal/gstreamer und das Quellcode-Angebot darin
+                           sind dann Pflicht.
+      - DLLs fehlen     -> das GES-Backend laeuft im fertigen Build nicht. Das
+                           muss in den Release-Notes stehen, sonst waehlt der
+                           Anwender im Config-Menue ein Backend, das nicht da
+                           ist.
+
+    Die Funktion bricht nicht ab, sie sagt nur klar, welcher Fall vorliegt.
+    """
+    marker_dirs = [
+        d for d in os.listdir(internal_dir)
+        if d.startswith("gstreamer_") and os.path.isdir(os.path.join(internal_dir, d))
+    ]
+    gi_dir = os.path.isdir(os.path.join(internal_dir, "gi"))
+
+    gst_dlls = 0
+    for root, _dirs, files in os.walk(internal_dir):
+        # den reinen Lizenzordner nicht mitzaehlen
+        if os.path.basename(root) == "gstreamer":
+            continue
+        gst_dlls += sum(1 for f in files if f.lower().startswith("gst") and f.lower().endswith(".dll"))
+
+    print("-" * 70)
+    if marker_dirs or gi_dir or gst_dlls:
+        print("[LIZENZ] GStreamer WIRD mit ausgeliefert:")
+        print(f"         {gst_dlls} gst*.dll, Pakete: {', '.join(sorted(marker_dirs)) or '-'}"
+              f"{', gi' if gi_dir else ''}")
+        notice = os.path.join(internal_dir, "gstreamer", "NOTICE.txt")
+        if os.path.isfile(notice):
+            print("         Rechtstexte liegen in _internal/gstreamer - OK.")
+        else:
+            print("[FEHLER] _internal/gstreamer/NOTICE.txt FEHLT. So darf der Build "
+                  "nicht ausgeliefert werden (GPL/LGPL-Verstoss).")
+        x264 = os.path.isdir(os.path.join(internal_dir, "gstreamer_plugins_gpl_restricted"))
+        print(f"         x264/x265-Plugins (GPL-2.0-or-later): {'ja' if x264 else 'nein'}"
+              f"{'' if x264 else '  -> GES-Encoder kann nicht rendern!'}")
+    else:
+        print("[LIZENZ] GStreamer ist NICHT im Build enthalten.")
+        print("         Das GES-Backend ist im fertigen Programm nicht verfuegbar -")
+        print("         bitte in den Release-Notes erwaehnen.")
+    print("-" * 70)
+
 
 def load_app_version():
     config_path = os.path.join(BASE_DIR, "config.py")
@@ -219,6 +279,14 @@ def build_windows(build_setup: bool = False):
     copy_tree_all(LOCAL_FFMPEG, os.path.join(internal_dir, "ffmpeg"))
     print("[INFO] Kopiere mpv    →", os.path.join(internal_dir, "mpv"))
     copy_tree_all(LOCAL_MPV, os.path.join(internal_dir, "mpv"))
+    print("[INFO] Kopiere gstreamer (Lizenztexte) →", os.path.join(internal_dir, "gstreamer"))
+    if os.path.isdir(LOCAL_GSTREAMER):
+        copy_tree_all(LOCAL_GSTREAMER, os.path.join(internal_dir, "gstreamer"))
+    else:
+        print("[WARN] gstreamer/ fehlt – die GPL/LGPL-Lizenztexte fuer GStreamer "
+              "wuerden NICHT mit ausgeliefert.")
+
+    check_gstreamer_payload(internal_dir)
 
     # Taskbar-Icon zusätzlich in _internal/icon
     if os.path.isfile(icon_file):

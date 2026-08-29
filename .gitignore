@@ -32,16 +32,34 @@ ffmpeg/bin/ffmpeg.exe
 ffmpeg/bin/ffprobe.exe
 mpv/lib/libmpv-2.dll
 
-# Nur README.txt behalten, sonst alles ignorieren
+# Von ffmpeg/ und mpv/ nur die Hinweis- und Lizenztexte behalten, sonst alles
+# ignorieren. Die Binaries kommen aus den GitHub-Releases, die Rechtstexte
+# muessen aber im Repo liegen - sie sind Teil der GPL-Dokumentation.
 ffmpeg/*
 ffmpeg/**/*
 ffmpeg/doc/
 ffmpeg/doc/**
-!ffmpeg/VGSync_ffmpeg.txt
+!ffmpeg/KVRouite_ffmpeg.txt
+!ffmpeg/NOTICE.txt
+!ffmpeg/LICENSE
 
 mpv/*
 !mpv/
-!mpv/VGSync_mpv.txt
+!mpv/KVRouite_mpv.txt
+!mpv/NOTICE.txt
+!mpv/LICENSE.GPL
+!mpv/Copyright
+
+# gstreamer/ enthaelt keine Binaries, nur Lizenztexte - komplett ins Repo.
+
+# Quell-Tarballs in third-party-src/ bleiben lokal (wie die .zip/.7z dort).
+# Sie sind die Offline-Kopie fuer den Fall, dass die Upstream-Links ausfallen -
+# siehe gstreamer/CORRESPONDING-SOURCE.txt. Nachladen mit
+# tools/fetch_gstreamer_sources.py.
+third-party-src/gstreamer-*/
+*.tar.xz
+*.tar.xz.asc
+*.tar.xz.sha256sum
 config.js
 
 # interne Notizen, nicht ausliefern

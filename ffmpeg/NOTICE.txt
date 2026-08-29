@@ -1,0 +1,67 @@
+========================================
+ NOTICE & SOURCE CODE OFFER
+ FFmpeg
+========================================
+
+This folder contains binaries of:
+- FFmpeg 7.1 (full build, GPL configuration) - ffmpeg.exe, ffprobe.exe
+
+----------------------------------------
+ License
+----------------------------------------
+This FFmpeg build is configured with --enable-gpl and --enable-version3 and is
+therefore licensed under the terms of the GNU General Public License, version 3
+or later (GPL-3.0-or-later).
+
+The full license text is provided in this folder as "LICENSE". You can also
+view it at:
+https://www.gnu.org/licenses/gpl-3.0.en.html
+
+Note: KVRouite ships a second, independent copy of FFmpeg inside the GStreamer
+runtime (the shared libraries used by the gst-libav plugin). That copy is an
+LGPL build and is covered by "_internal/gstreamer/NOTICE.txt".
+
+----------------------------------------
+ Source Code Availability
+----------------------------------------
+We are distributing these binaries in accordance with the GPL. Therefore,
+we hereby offer the complete corresponding source code used to build them.
+
+You can download the source code from:
+  https://kvrouite.com/downloads/index.php
+
+Alternatively, you may request a copy from us directly by contacting:
+  bernd@kvrouite.com
+
+This offer is valid for at least three (3) years from the date you received
+this software, and is extended to anyone who receives this software.
+
+----------------------------------------
+ Modifications
+----------------------------------------
+KVRouite does not modify FFmpeg. The binaries are redistributed unchanged and
+are invoked as external processes on the command line.
+
+----------------------------------------
+ No Warranty & Liability
+----------------------------------------
+These libraries are provided under the GPL "AS IS," WITHOUT ANY WARRANTY;
+without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. Please refer to the GPL text for the full disclaimer.
+
+----------------------------------------
+ Patent Encumbrance Notice
+----------------------------------------
+Some codecs included in this build (e.g. x264, x265, AAC, MP3) may be patent-
+encumbered in certain jurisdictions. It is the user's responsibility to ensure
+compliance with all applicable laws and regulations and to obtain any necessary
+patent licenses.
+
+----------------------------------------
+ Official Website
+----------------------------------------
+- FFmpeg: https://ffmpeg.org
+
+========================================
+ End of NOTICE
+========================================
