@@ -467,7 +467,23 @@ class FadeRenderer(QObject):
         gi.require_version("Gst", "1.0")
         from gi.repository import Gst
         if self._ges_bus is None:
+            # Der Bus ist weg, der Auftrag gilt aber noch als laufend.
+            #
+            # Frueher wurde hier nur der Timer gestoppt und zurueckgekehrt.
+            # Damit stand die Zustandsmaschine still: "finished" kam nie,
+            # das Fortschrittsfenster wartete endlos, und der Wachhund
+            # weiter unten konnte nicht greifen - er lebt in genau dieser
+            # Methode, die dann nicht mehr aufgerufen wurde.
+            #
+            # Gemessen am 30.08.2026: Prozess untaetig (0,06 s CPU in 20 s),
+            # keine [FADE]-Zeile mehr nach "Anlauf 2", keine Blendendatei
+            # angelegt, Fenster bei 0/1.
             self._ges_timer.stop()
+            if self._current is not None:
+                print(f"[FADE] [{self._current.key()[:8]}] Renderlauf ohne Bus "
+                      f"- Auftrag verworfen")
+                self._verwerfen(self._current)
+                self._weiter()
             return
         msg = self._ges_bus.timed_pop_filtered(
             0, Gst.MessageType.ERROR | Gst.MessageType.EOS)

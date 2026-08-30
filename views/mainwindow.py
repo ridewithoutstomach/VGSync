@@ -4606,6 +4606,15 @@ class MainWindow(QMainWindow):
             if idx < len(self.video_durations):
                 self.video_durations.pop(idx)
 
+            # Der Keyframe-Index rechnet in globaler Zeit. Faellt ein Video
+            # heraus, verschiebt sich alles dahinter - die gespeicherten Zeiten
+            # stimmen dann fuer kein einziges Video mehr. Neu indiziert wird bei
+            # Bedarf ohnehin, aber nur im Copy-Mode (siehe _maybe_ask_index).
+            if self.global_keyframes:
+                print("[INFO] Keyframe-Index verworfen: die Playlist hat sich "
+                      "geaendert")
+                self.global_keyframes = []
+
             self.playlist_menu.removeAction(action)
             
             # STATT rebuild_vlc_playlist():
@@ -4694,8 +4703,20 @@ class MainWindow(QMainWindow):
                     pass
             new_kfs.sort()
 
-            self.global_keyframes.extend(new_kfs)
-            self.global_keyframes = sorted(set(self.global_keyframes))
+            # Setzen, nicht anhaengen.
+            #
+            # merged_keyframes.json ist bereits die vollstaendige Liste ueber
+            # alle bisher indizierten Videos - der Merge traegt jedes Video mit
+            # seinem Zeitversatz dort ein. Anhaengen war deshalb schon immer
+            # ueberfluessig und hat zwei Fehler gemacht: es schleppte die
+            # Keyframes frueher geladener Videos mit, und seit die Liste beim
+            # Projektladen direkt aus den Dateien abgeleitet wird, standen dort
+            # dieselben Zeiten in zwei Genauigkeiten nebeneinander - die CSV
+            # wird mit sechs Nachkommastellen geschrieben, die Ableitung
+            # rechnet mit voller Fliesskomma-Genauigkeit, und set() sieht darin
+            # zwei verschiedene Zahlen. Gemessen am 30.08.2026: aus 725 echten
+            # Keyframes wurden nach dem Indizieren 1208.
+            self.global_keyframes = sorted(set(new_kfs))
             print("[DEBUG] %d Keyframes global geladen (gesamt)." % len(self.global_keyframes))
 
         except Exception as e:
@@ -4907,7 +4928,7 @@ class MainWindow(QMainWindow):
         self._update_gpx_overview()
         self._refresh_preview_timeline()
 
-    def _refresh_preview_timeline(self, blockierend: bool = False):
+    def _refresh_preview_timeline(self):
         """
         Schnitte und Blenden an die Vorschau geben.
 
@@ -4921,6 +4942,24 @@ class MainWindow(QMainWindow):
         das, was hinterher herauskommt.
         """
         if not hasattr(self, "video_editor"):
+            return
+        # Waehrend ein Projekt geladen wird, hier nicht anfassen.
+        #
+        # Der Ladevorgang setzt den Bearbeitungsmodus erst am Ende. Wer vorher
+        # hereinruft, arbeitet noch mit dem Modus des VORIGEN Projekts - stand
+        # der auf "encode", wurden mitten im Laden Blenden gerendert, waehrend
+        # der Player noch seine Dateien oeffnete. Gemessen am 30.08.2026: drei
+        # Vorschau-Neuaufbauten und zwei Renderlaeufe desselben Auftrags
+        # innerhalb eines einzigen Ladevorgangs.
+        #
+        # Nach "New Project" stand der Modus auf "off", deshalb trat das dort
+        # nie auf - das war der ganze Unterschied zwischen den beiden Wegen.
+        #
+        # Dasselbe Muster benutzen _maybe_ask_index und _fps_nach_laden schon.
+        # Der Aufbau kommt gleich nach dem Laden von selbst: _set_edit_mode
+        # reiht dafuer ohnehin einen Aufruf ein.
+        if getattr(self, "_loading_project", False):
+            print("[DEBUG] preview-cuts: Projekt wird geladen => spaeter")
             return
         if not self.video_editor.supports_preview_cuts():
             print("[DEBUG] preview-cuts: Player kann das nicht "
@@ -6936,7 +6975,18 @@ class MainWindow(QMainWindow):
         project_data = {
             "playlist": self.playlist,
             "video_durations": self.video_durations,
-            "global_keyframes": self.global_keyframes,
+            # global_keyframes wird bewusst NICHT gespeichert.
+            #
+            # Der Index hat genau einen Abnehmer: den k-Schrittmodus, und der
+            # zeigt, wo Copy-Mode schneiden wuerde. Copy-Mode setzt ffmpeg und
+            # ffprobe auf dem System voraus - wo die Keyframes gebraucht
+            # werden, ist also immer auch das Werkzeug da, sie zu erzeugen.
+            # Beim Laden werden sie direkt aus den Videos gelesen (Millisekunden).
+            #
+            # Mitgespeichert waren sie ausserdem die Ursache falscher Daten:
+            # die Liste wurde nur bei "New Project" geleert und wanderte so aus
+            # einem Projekt ins naechste - gemessen an 1min.KVRouiteproj: 4948
+            # Keyframes bis Sekunde 4227 fuer ein Projekt von 121 Sekunden.
             "gpx_data": self.gpx_widget.gpx_list._gpx_data,
             "cut_intervals": self.cut_manager._cut_intervals,
             "hard_cuts": self.cut_manager.get_hard_cuts(),
@@ -7027,12 +7077,48 @@ class MainWindow(QMainWindow):
             # 1. Playlist und Videolängen
             self.playlist = project_data.get("playlist", [])
             self.video_durations = project_data.get("video_durations", [])
-            self.global_keyframes = project_data.get("global_keyframes", [])
-            if self.video_durations:
-                self.real_total_duration = sum(self.video_durations)
-            else:
-                self.real_total_duration = 0.0
-                
+            # Keyframes aus der Projektdatei uebernehmen, aber nur die, die
+            # ueberhaupt in dieses Projekt passen.
+            #
+            # Die Zeiten sind Positionen auf der GLOBALEN Zeitachse. Aeltere
+            # Projektdateien enthalten Zeiten von Videos, die beim Speichern
+            # laengst nicht mehr in der Playlist standen - gemessen an
+            # 1min.KVRouiteproj: 4948 Keyframes bis Sekunde 4227 fuer ein
+            # Projekt von 121 Sekunden. Alles jenseits der Gesamtdauer zeigt
+            # auf eine Zeitachse, die es nicht mehr gibt.
+            # Keyframes immer frisch aus den Videos lesen, nie aus der
+            # Projektdatei. keyframe_times_from_index holt die Tabelle direkt
+            # aus dem MP4-Container - gemessen 0,002 s fuer zwei Dateien, laut
+            # Messung im Indexer 0,006 s bei 11,9 GB.
+            #
+            # Gibt eine Datei den Schnellweg nicht her (kein MP4/MOV,
+            # B-Frames, fragmentiert - siehe core/mp4_keyframes.py), bleibt die
+            # Liste leer. Das ist richtig so: gebraucht wird sie nur im
+            # Copy-Mode, und dort bietet die Anwendung das Indizieren ohnehin
+            # an (_maybe_ask_index).
+            self.global_keyframes = []
+            dauern = project_data.get("video_durations", []) or []
+            versatz, gesammelt = 0.0, []
+            for nr, pfad in enumerate(self.playlist):
+                zeiten = None
+                try:
+                    if os.path.exists(pfad):
+                        zeiten = keyframe_times_from_index(pfad)
+                except Exception:
+                    zeiten = None
+                if not zeiten:
+                    gesammelt = []
+                    print("[INFO] Keyframe-Index nicht direkt lesbar fuer %s - "
+                          "er wird bei Bedarf im Copy-Mode erzeugt."
+                          % os.path.basename(pfad))
+                    break
+                gesammelt.extend(t + versatz for t in zeiten)
+                versatz += dauern[nr] if nr < len(dauern) else 0.0
+            if gesammelt:
+                self.global_keyframes = sorted(set(gesammelt))
+                print("[DEBUG] %d Keyframes aus den Videos gelesen."
+                      % len(self.global_keyframes))
+
             self.video_durations = project_data.get("video_durations", [])
             self.rebuild_timeline()
 
@@ -7101,7 +7187,7 @@ class MainWindow(QMainWindow):
             # Zielformat und baut die Timeline ohnehin neu auf.
             self._blick360_laden(project_data)
 
-            self._refresh_preview_timeline(blockierend=True)
+            self._refresh_preview_timeline()
 
             if self.video_durations:
                 total_duration = sum(self.video_durations)
@@ -7161,6 +7247,16 @@ class MainWindow(QMainWindow):
                 ladefenster.deleteLater()
             except Exception:
                 pass
+
+            # Die Vorschau JETZT aufbauen, nachdem die Fahne gefallen ist.
+            #
+            # Verlassen kann man sich dabei nicht auf die Aufrufe, die
+            # _set_edit_mode einreiht: das Ladefenster ruft in schritt()
+            # QApplication.processEvents() auf (views/dialogs.py), und dabei
+            # werden sie noch WAEHREND des Ladens abgearbeitet - also zu einem
+            # Zeitpunkt, an dem _refresh_preview_timeline noch aussteigt.
+            # Ohne diese Zeile blieben Schnitte und Blenden danach ganz aus.
+            QTimer.singleShot(0, self._refresh_preview_timeline)
             QTimer.singleShot(0, self._fragen_nach_dem_laden)
 
             
@@ -8324,6 +8420,9 @@ class MainWindow(QMainWindow):
         self.video_durations = []
         self.view360_views = []
         self._360_aus_projekt = False
+        # Keyframes sind Positionen auf der globalen Zeitachse. Ohne Playlist
+        # gibt es diese Achse nicht mehr.
+        self.global_keyframes = []
         try:
             self.video_editor.set_playlist([])   # Playlist leeren
         except Exception:
