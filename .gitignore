@@ -32,23 +32,20 @@ ffmpeg/bin/ffmpeg.exe
 ffmpeg/bin/ffprobe.exe
 mpv/lib/libmpv-2.dll
 
-# Von ffmpeg/ und mpv/ nur die Hinweis- und Lizenztexte behalten, sonst alles
-# ignorieren. Die Binaries kommen aus den GitHub-Releases, die Rechtstexte
-# muessen aber im Repo liegen - sie sind Teil der GPL-Dokumentation.
+# ffmpeg/ und mpv/ vollstaendig ignorieren, Rechtstexte eingeschlossen.
+#
+# KVRouite liefert beides nicht mehr aus: die Wiedergabe laeuft ueber
+# GStreamer, und der Copy-Mode ruft das ffmpeg des Anwenders auf. Was nicht
+# ausgeliefert wird, braucht hier auch keine Lizenzdokumentation - die
+# Rechtstexte fuer GStreamer stehen in gstreamer/ und gehen mit in den Build.
+#
+# Die beiden Ordner bleiben trotzdem im Arbeitsbaum: die 5.x-Zweige bauen
+# daraus und liefern beides aus. Dort haengen die Rechtstexte an den eigenen
+# Auslieferungen, nicht an diesem Zweig.
 ffmpeg/*
 ffmpeg/**/*
-ffmpeg/doc/
-ffmpeg/doc/**
-!ffmpeg/KVRouite_ffmpeg.txt
-!ffmpeg/NOTICE.txt
-!ffmpeg/LICENSE
-
 mpv/*
-!mpv/
-!mpv/KVRouite_mpv.txt
-!mpv/NOTICE.txt
-!mpv/LICENSE.GPL
-!mpv/Copyright
+mpv/**/*
 
 # gstreamer/ enthaelt keine Binaries, nur Lizenztexte - komplett ins Repo.
 
