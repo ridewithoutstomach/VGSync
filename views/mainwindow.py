@@ -30,7 +30,6 @@ import config
 import path_manager  # your module above
 from path_manager import (COPY_MODE_FEHLT, copy_mode_fehlgrund,
                           copy_mode_moeglich)
-import urllib.request
 import copy
 import tempfile
 import datetime
@@ -38,7 +37,6 @@ import math
 import platform
 import subprocess
 import re
-import uuid
 import hashlib
 import statistics
 import fitparse
@@ -499,13 +497,11 @@ class MainWindow(QMainWindow):
         
         super().__init__()
         
-        self._counter_url = "http://www.KVRouite.com/project/counter.php"
         self._undo_stack = []
         
         self._maptiler_key = ""
         self._bing_key     = ""
         self._mapbox_key   = ""
-        self._mapillary_key   = ""
         
         self._load_map_keys_from_settings()
         
@@ -667,13 +663,6 @@ class MainWindow(QMainWindow):
         
         view_menu = menubar.addMenu("View")
 
-        classic_view_action = view_menu.addAction("Edit mode")
-        classic_view_action.setStatusTip("Activate the standard Edit-Mode.")
-        classic_view_action.triggered.connect(self._set_classic_view)
-
-        gpx_create_mode_action = view_menu.addAction("Create mode")
-        gpx_create_mode_action.setStatusTip("Activate the Create-Mode to build GPX from scratch.")
-        gpx_create_mode_action.triggered.connect(self._set_map_video_view)
         
         self.action_toggle_video = QAction("Video (detach)", self)
         self.action_toggle_video.setStatusTip("Detach/Attach the Video-Editor.")
@@ -912,10 +901,6 @@ class MainWindow(QMainWindow):
         action_set_mapbox_key.triggered.connect(self._on_set_mapbox_key)
         mapviews_menu.addAction(action_set_mapbox_key)
 
-        # --> Set Mapillary Key
-        action_set_mapillary_key = QAction("Set Mapillary Key...", self)
-        action_set_mapillary_key.triggered.connect(self._on_set_mapillary_key)
-        mapviews_menu.addAction(action_set_mapillary_key)
         
         self.action_new_pts_video_time = QAction("Sync all with video", self)
         self.action_new_pts_video_time.setStatusTip("If activates we automatically sync the video to a select gpx point without using V-Sync-Button")
@@ -988,6 +973,14 @@ class MainWindow(QMainWindow):
         tutorials_action.setStatusTip("Open KVRouite YouTube channel with tutorials")
         tutorials_action.triggered.connect(self._on_open_tutorials)
         help_menu.addAction(tutorials_action)
+
+        # Der Datenschutztext steht im erzwungenen Disclaimer, den der
+        # Anwender aber nur einmal je Version sieht. Ohne diesen Menuepunkt
+        # waere er danach nicht mehr auffindbar.
+        privacy_action = QAction("Privacy", self)
+        privacy_action.setStatusTip("What KVRouite sends over the network, and when")
+        privacy_action.triggered.connect(self._on_show_privacy)
+        help_menu.addAction(privacy_action)
         
         #updatecheck
         # --- Updates (GitHub Releases) ---
@@ -1507,6 +1500,25 @@ class MainWindow(QMainWindow):
     def _compute_final_time(self, g_s: float) -> float:
         return self.get_final_time_for_global(g_s)    
         
+    def _on_show_privacy(self):
+        """Zeigt denselben Datenschutztext wie der Disclaimer beim ersten Start.
+
+        Der Wortlaut kommt aus views/disclaimer_dialog.NETWORK_HTML - bewusst
+        nicht kopiert, sonst beschreiben die beiden Texte irgendwann
+        verschiedene Programme.
+        """
+        from views.disclaimer_dialog import NETWORK_HTML
+
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Privacy")
+        msg.setTextFormat(Qt.RichText)
+        msg.setText(NETWORK_HTML)
+        msg.setTextInteractionFlags(Qt.TextBrowserInteraction
+                                    | Qt.LinksAccessibleByMouse)
+        msg.setStandardButtons(QMessageBox.Ok)
+        msg.exec()
+
+
     def _on_show_documentation(self):
         # Pfad zum PDF ermitteln
         base_dir = os.path.dirname(os.path.dirname(__file__))
@@ -1520,92 +1532,7 @@ class MainWindow(QMainWindow):
         
 
         QDesktopServices.openUrl(QUrl.fromLocalFile(pdf_path))    
-    
-    def _set_classic_view(self):
-        self.left_v_layout.addWidget(self.map_widget, stretch=1)
-        self.map_widget.setParent(self.left_v_layout.parentWidget())
-        self.map_widget.show()
 
-        self.chart.show()
-        self.bottom_right_widget.show()
-
-        self.map_widget.view.page().runJavaScript("enableVideoMapMode(false);")
-
-        # Update the check state and call handler of "sync all with video" and "directions"
-        self.action_new_pts_video_time.setChecked(False)
-        self._on_sync_point_video_time_toggled(False)
-        self.action_map_directions.setChecked(False)
-        self._on_map_directions_toggled(False)
-
-
-    def _set_map_video_view(self):
-        self.right_v_layout.removeWidget(self.chart)
-        self.chart.hide()
-
-        self.right_v_layout.removeWidget(self.bottom_right_widget)
-        self.bottom_right_widget.hide()
-
-        self.right_v_layout.addWidget(self.map_widget, stretch=1)
-        self.map_widget.view.page().runJavaScript("enableVideoMapMode(true);")
-        self.right_v_layout.update()
-
-        # Update the check state and call handler of "sync all with video" and "directions"
-        self.action_new_pts_video_time.setChecked(True)
-        self._on_sync_point_video_time_toggled(True)
-        self.action_map_directions.setChecked(True)
-        self._on_map_directions_toggled(True)
-        
-    def _increment_counter_on_server(self, mode: str):
-        """
-        Erhöht den Zähler auf dem Server (mode='video' oder 'gpx').
-        Ruft z. B. https://.../counter.php?action=increment_video auf
-        und gibt das Ergebnis (videoCount, gpxCount) als Tupel zurück.
-        Bei Fehler -> None.
-        """
-        if mode not in ("video", "gpx"):
-            print("[WARN] _increment_counter_on_server: Ungültiger mode=", mode)
-            return None
-
-        action = "increment_video" if mode == "video" else "increment_gpx"
-        url = f"{self._counter_url}?action={action}"
-        print("[DEBUG] increment request =>", url)
-        
-        try:
-            with urllib.request.urlopen(url, timeout=5) as resp:
-                data = resp.read().decode("utf-8")
-                counts = json.loads(data)
-                return (counts.get("video", 0), counts.get("gpx", 0))
-        except Exception as e:
-            print("[WARN] Fehler beim Serveraufruf increment:", e)
-            return None
-
-    def _fetch_counters_from_server(self):
-        """
-        Liest die aktuellen Zählerstände ohne Hochzählen.
-        Ruft also https://.../counter.php auf (ohne action).
-        Gibt bei Erfolg ein Dict { 'video': number, 'gpx': number } zurück,
-        sonst None.
-        """
-        url = self._counter_url  # ohne ?action
-        #print("[DEBUG] fetch counters =>", url)
-        
-        try:
-            with urllib.request.urlopen(url, timeout=5) as resp:
-                data = resp.read().decode("utf-8")
-                counts = json.loads(data)
-                
-                # Angepasst für neue JSON-Struktur mit 'total' Key
-                if 'total' in counts and isinstance(counts['total'], dict):
-                    # Neue Struktur: {"total": {"video": X, "gpx": Y}}
-                    return counts['total']
-                else:
-                    # Fallback für alte Struktur oder Fehlerfall
-                    return counts
-        except Exception as e:
-            print("[WARN] Fehler beim Serveraufruf fetch:", e)
-            return None
-
-        
     def _load_map_keys_from_settings(self):
         """
         Liest aus QSettings:
@@ -1627,12 +1554,10 @@ class MainWindow(QMainWindow):
         enc_mt = s.value("mapTiler/key", "", str)
         enc_bi = s.value("bing/key", "", str)
         enc_mb = s.value("mapbox/key", "", str)
-        enc_ma = s.value("mapillary/key", "", str)
 
         self._maptiler_key = decode(enc_mt)
         self._bing_key     = decode(enc_bi)
         self._mapbox_key   = decode(enc_mb)
-        self._mapillary_key   = decode(enc_ma)
     
     def _save_map_key_to_settings(self, provider: str, plain_key: str):
         """
@@ -1650,9 +1575,6 @@ class MainWindow(QMainWindow):
         elif provider == "mapbox":
             s.setValue("mapbox/key", enc)
             self._mapbox_key = plain_key
-        elif provider == "mapillary":
-            s.setValue("mapillary/key", enc)
-            self._mapillary_key = plain_key
 
         # Jetzt sofort updaten => an map_page.html schicken
         self._update_map_page_keys()    
@@ -1676,8 +1598,6 @@ class MainWindow(QMainWindow):
         js_mb = f"setMapboxKey('{self._mapbox_key}')"
         page.runJavaScript(js_mb)
 
-        if self._mapillary_key:
-            page.runJavaScript(f"setMapillaryKey('{self._mapillary_key}')")   
 
 
     def _on_set_maptiler_key(self):
@@ -1685,9 +1605,6 @@ class MainWindow(QMainWindow):
     
     def _on_set_mapbox_key(self):
         self._show_key_dialog("mapbox", self._mapbox_key)
-
-    def _on_set_mapillary_key(self):
-        self._show_key_dialog("mapillary", self._mapillary_key)
 
     def _show_key_dialog(self, provider_name: str, current_val: str):
         """
@@ -1739,7 +1656,6 @@ class MainWindow(QMainWindow):
             "<ul>"
             "<li><b>MapTiler:</b> <a href='https://www.maptiler.com/'>maptiler.com</a></li>"
             "<li><b>Mapbox:</b> <a href='https://www.mapbox.com/'>mapbox.com</a></li>"
-            "<li><b>Mapillary:</b> <a href='https://www.mapillary.com/dashboard/developers'>mapillary.com</a></li>"
             "</ul>"
             "<p>Please ensure you comply with each provider's usage policies.</p>"
         )
@@ -2586,8 +2502,6 @@ class MainWindow(QMainWindow):
                     }
                     gpx_data.append(new_pt)
                     insert_pos=0
-                    if self.playlist_counter > 0 :
-                        self.askSwitchCreateMode()
                 else:
                     last_pt = gpx_data[-1]
                     t_last = last_pt.get("time")
@@ -2625,8 +2539,6 @@ class MainWindow(QMainWindow):
                     }
                     gpx_data.append(new_pt)
                     insert_pos=0
-                    if self.playlist_counter > 0 :
-                        self.askSwitchCreateMode()
                 else:
                     base_pt = gpx_data[idx]
                     t_base = base_pt.get("time")
@@ -2675,19 +2587,7 @@ class MainWindow(QMainWindow):
         
 
         print(f"[INFO] Inserted new GPX point (DirectionsEnabled={self._directions_enabled}); total now {len(gpx_data)} pts.")
-        
-    def askSwitchCreateMode(self):
-        answer = QMessageBox.question(
-            self,
-            "Switch to Create Mode?",
-            "New point creation is easier in 'creation' mode. Their time will be equal to current video position.\n"
-            "Switch to it now?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.Yes
-        )
-        if answer == QMessageBox.Yes:
-            self._set_map_video_view()
-        
+
     def _restore_gpx_data(self, gpx_snapshot):
         self._gpx_data = copy.deepcopy(gpx_snapshot)
         self.gpx_widget.set_gpx_data(self._gpx_data)
@@ -3863,12 +3763,6 @@ class MainWindow(QMainWindow):
         import os
         import base64
 
-        counts = self._fetch_counters_from_server()
-        if counts:
-            vcount = counts.get("video", 0)
-            gcount = counts.get("gpx", 0)
-        else:
-            vcount, gcount = 0, 0
     
         msg = QMessageBox(self)
         msg.setWindowTitle("Copyright")
@@ -3940,10 +3834,11 @@ class MainWindow(QMainWindow):
             The GStreamer binaries are the GStreamer Project's own, passed on unchanged;
             their source is published by that project at
             <a href='https://gstreamer.freedesktop.org/src/'>gstreamer.freedesktop.org/src</a>
-            - see <code>_internal/gstreamer/CORRESPONDING-SOURCE.txt</code>. Either way the
-            sources can be requested from
-            <a href='mailto:bernd@kvrouite.com'>bernd@kvrouite.com</a> for at least
-            three (3) years.<br><br>
+            - see <code>_internal/gstreamer/CORRESPONDING-SOURCE.txt</code>.
+            KVRouite compiles none of these binaries. If one of those links ever
+            stops working, write to
+            <a href='mailto:bernd@kvrouite.com'>bernd@kvrouite.com</a> and you will
+            be pointed at a working source for the version you received.<br><br>
 
             <b>Patent Encumbrance Notice:</b><br>
             Some codecs (such as x264, x265, AAC, MP3, AC-3, DTS) may be
@@ -3960,7 +3855,6 @@ class MainWindow(QMainWindow):
 
             <b>By clicking 'I Accept', you acknowledge that you have read and
             understood the GNU General Public License terms.</b><br><br>
-            V: {vcount}  G: {gcount}
             
             <div style='text-align: center; margin-top: 20px;'>
                 <img src='data:image/png;base64,{logo_base64}' width='200' style='max-width: 200px;'>
@@ -5587,12 +5481,6 @@ class MainWindow(QMainWindow):
         # Ggf. könntest du ein "if dlg.result() == QDialog.Accepted" => print("OK!") etc.
         if dlg.result() == QDialog.Accepted:
             print("Export was successful!")
-            ret = self._increment_counter_on_server("video")
-            if ret is not None:
-                vcount, gcount = ret
-                print(f"[INFO] Server-Counter nun: Video={vcount}, GPX={gcount}")
-            else:
-                print("[WARN] Konnte Video-Zähler nicht hochsetzen.")
         else:
             print("Export canceled or error.")
 
@@ -7411,12 +7299,6 @@ class MainWindow(QMainWindow):
         if not getattr(self, "playlist", None):
             self._save_gpx_to_file(gpx_data, out_path)
 
-            ret = self._increment_counter_on_server("gpx")
-            if ret is not None:
-                vcount, gcount = ret
-                print(f"[INFO] Server-Counter nun: Video={vcount}, GPX={gcount}")
-            else:
-                print("[WARN] Konnte GPX-Zähler nicht hochsetzen.")
 
             QMessageBox.information(
                 self, "Done",
@@ -7539,14 +7421,7 @@ class MainWindow(QMainWindow):
         # --- 8) Speichern (NUR die gekürzte & interpolierte Liste) ---
         self._save_gpx_to_file(final_truncated, out_path)
 
-        # --- 9) Counter + Info ---
-        ret = self._increment_counter_on_server("gpx")
-        if ret is not None:
-            vcount, gcount = ret
-            print(f"[INFO] Server-Counter nun: Video={vcount}, GPX={gcount}")
-        else:
-            print("[WARN] Konnte GPX-Zähler nicht hochsetzen.")
-
+        # --- 9) Fertigmeldung ---
         QMessageBox.information(self, "Done", f"GPX saved as '{out_path}'.")
 
                 

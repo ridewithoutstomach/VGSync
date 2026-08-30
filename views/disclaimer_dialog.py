@@ -21,10 +21,46 @@
 # views/disclaimer_dialog.py
 
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QLabel, QCheckBox, QDialogButtonBox
+    QDialog, QVBoxLayout, QLabel, QCheckBox, QDialogButtonBox, QScrollArea
 )
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
+
+# Was die Anwendung an Verbindungen aufbaut - Wortlaut fuer den erzwungenen
+# Disclaimer und fuer "Help -> Privacy". Bewusst nur eine Stelle: sonst
+# beschreiben die beiden Texte irgendwann verschiedene Programme.
+#
+# Der Inhalt ist gemessen, nicht angenommen (30.08.2026): vollstaendige
+# Aufzaehlung aller ausgehenden Adressen in core/, managers/, views/, widgets/
+# und map_page.html. Wer ihn aendert, misst vorher nach.
+NETWORK_HTML = (
+    "<b>Network use and data</b><br><br>"
+    "KVRouite does not collect usage statistics. No information about you, "
+    "your videos<br>or your routes is sent to the author of this program."
+    "<br><br>"
+    "Connections to other services are made only in these situations:"
+    "<ul>"
+    "<li><b>Map display.</b> While the map is shown, map tiles are loaded "
+    "from OpenStreetMap (<code>tile.openstreetmap.org</code>). After you load "
+    "a GPX file the map centres on your track, so the tile server can infer "
+    "the area you are working in.</li>"
+    "<li><b>Update check.</b> A few seconds after start, KVRouite asks "
+    "<code>api.github.com</code> whether a newer release exists. Only the "
+    "program version is sent. You can switch this off under "
+    "<i>Help &rarr; Auto Check for Updates</i>.</li>"
+    "<li><b>Optional map services.</b> Satellite imagery (MapTiler, Mapbox) "
+    "and route calculation and elevation lookup (Mapbox) are contacted "
+    "<b>only when you use them</b>, and only after you have entered your own "
+    "API key. Route calculation and elevation lookup transmit the coordinates "
+    "of the section of your track concerned. Your keys are stored on your "
+    "computer and are sent only to the service they belong to.</li>"
+    "</ul>"
+    "Everything else - playing, cutting, rendering, and reading and writing "
+    "GPX files -<br>happens entirely on your computer. No other connections "
+    "are made.<br><br>"
+    "See <a href='https://kvrouite.com/privacy.html'>kvrouite.com/privacy.html</a>."
+)
+
 
 class DisclaimerDialog(QDialog):
     """
@@ -101,12 +137,15 @@ class DisclaimerDialog(QDialog):
             "unchanged; their source is published by that project at "
             "<a href='https://gstreamer.freedesktop.org/src/'>gstreamer.freedesktop.org/src</a><br>"
             "in the same version - see <code>_internal/gstreamer/CORRESPONDING-SOURCE.txt</code>.<br>"
-            "Either way you may request the sources from "
-            "<a href='mailto:bernd@kvrouite.com'>bernd@kvrouite.com</a><br>"
-            "for at least three (3) years.<br><br>"
+            "KVRouite compiles none of these binaries. If one of those links "
+            "ever stops<br>working, write to "
+            "<a href='mailto:bernd@kvrouite.com'>bernd@kvrouite.com</a> and you "
+            "will be pointed at a<br>working source for the version you "
+            "received.<br><br>"
             
             
             "</p>"
+            "<p>" + NETWORK_HTML + "</p>"
 )
 
 
@@ -115,7 +154,13 @@ class DisclaimerDialog(QDialog):
         self.label_info.setOpenExternalLinks(False)  # Wir handeln das selbst
         self.label_info.setTextInteractionFlags(Qt.TextBrowserInteraction | Qt.LinksAccessibleByMouse)
         self.label_info.setText(disclaimer_html)
-        layout.addWidget(self.label_info)
+        self.label_info.setWordWrap(True)
+
+        bereich = QScrollArea(self)
+        bereich.setWidget(self.label_info)
+        bereich.setWidgetResizable(True)
+        bereich.setMinimumSize(700, 520)
+        layout.addWidget(bereich)
 
         # (2) Signal abfangen ⇒ Linkklick
         self.label_info.linkActivated.connect(self._on_link_clicked)

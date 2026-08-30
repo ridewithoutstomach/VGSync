@@ -32,7 +32,6 @@ import subprocess
 import tempfile
 import shutil
 import contextlib
-import urllib.request
 import builtins, contextlib, sys
 
 from PySide6.QtCore import Qt, QSettings
@@ -413,7 +412,6 @@ if __name__ == "__main__":
 #-----------------------------------------------------------------
 
 class EncoderDialog(QDialog):
-    _counter_url = "http://www.KVRouite.com/project/counter.php"
     """
     Dieses QFenster zeigt den gesamten ffmpeg-Output,
     den dein xfade6_2.py generiert (also Keyframe-Indexing, etc.),
@@ -434,26 +432,6 @@ class EncoderDialog(QDialog):
 
         self.setLayout(layout)
         self.resize(800, 600)
-        
-    def _increment_counter_on_server(self, mode: str):
-        """
-        Erhöht den Zähler auf dem Server (mode='video' oder 'gpx')
-        """
-        if mode not in ("video", "gpx"):
-            print("[WARN] Ungültiger mode für Counter:", mode)
-            return None
-
-        action = "increment_video" if mode == "video" else "increment_gpx"
-        url = f"{self._counter_url}?action={action}"
-        
-        try:
-            with urllib.request.urlopen(url, timeout=5) as resp:
-                data = resp.read().decode("utf-8")
-                return json.loads(data)
-        except Exception as e:
-            print(f"[ERROR] Counter-Update fehlgeschlagen: {str(e)}")
-            return None    
-
 
     def run_encoding(self, json_path: str):
         """
@@ -509,7 +487,6 @@ class EncoderDialog(QDialog):
                 # eigenen Weg in mainwindow.on_render_clicked().
                 from managers.ges_encoder_manager import ges_xfade_main
                 ges_xfade_main(temp_cfg)
-                result = self._increment_counter_on_server("video")
                 
                     
                 QMessageBox.information(

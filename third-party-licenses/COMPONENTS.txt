@@ -54,9 +54,6 @@ ffmpeg and ffprobe are NOT part of this distribution. Copy mode calls whatever
 is installed on the user's own system, and stays disabled when they are absent.
 Nothing of ffmpeg is installed by KVRouite.
 
-Mapillary-JS 4.1.2 (MIT) is not distributed either. The map page loads it from
-the unpkg CDN at run time, so it never becomes part of this download.
-
 The map tiles themselves come from online services (MapTiler, Mapbox) and from
 OpenStreetMap data. They are not part of this distribution; their own terms of
 use and attribution requirements apply to the data shown on the map.
