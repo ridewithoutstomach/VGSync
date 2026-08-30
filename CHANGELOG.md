@@ -121,9 +121,6 @@ distributes that runtime. It is therefore documented like ffmpeg:
   section 6(d) allows us to point at instead of rehosting, as long as clear
   directions travel with the binaries. `CORRESPONDING-SOURCE.txt` is those
   directions and explains the difference.
-- New `tools/fetch_gstreamer_sources.py` downloads and SHA256-verifies the
-  tarballs for the pinned version, so an offline copy exists should the
-  upstream links ever fail. That copy is kept, not published.
 - `build_with_pyinstaller.py` copies `gstreamer/` to `_internal/gstreamer` and
   now reports whether the GStreamer runtime actually ended up in the build -
   if it did, the license texts are mandatory; if it did not, the build will not

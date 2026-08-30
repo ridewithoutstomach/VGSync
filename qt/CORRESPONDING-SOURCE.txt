@@ -41,29 +41,31 @@ shiboken6 6.11.2.
     (the .tar.gz "source distribution" next to the wheels)
 
   Qt's own overview of the licenses used inside Qt, including the third-party
-  code in Qt WebEngine
+  code in Qt WebEngine - the licenses of that code are listed in
+    CHROMIUM-THIRD-PARTY.txt, their full texts live in
+    src/3rdparty/chromium of this source tree
     https://doc.qt.io/qt-6/licenses-used-in-qt.html
 
 All URLs were checked and reachable when this file was written.
 
-WHAT WE STAY RESPONSIBLE FOR
-----------------------------
-Directions are only worth something while they lead somewhere. If the Qt
-Project ever takes those files down, we have to supply the source ourselves.
-Keeping an offline copy is therefore not optional bookkeeping but the fallback.
+WHY POINTING IS ENOUGH HERE
+---------------------------
+KVRouite uses Qt under LGPL-3.0-only, and the GNU LGPL version 3 incorporates
+GNU GPL version 3 section 6(d): the Corresponding Source may sit on a different
+server, operated by a third party, as long as clear directions next to the
+object code say where to find it. Those directions are this file.
 
-Note that the Qt sources are large - the single archive of one Qt 6 release is
-several gigabytes, mostly Qt WebEngine. Plan for that before fetching it. The
-copy does not have to be published anywhere; it only has to exist, so that a
-request can be answered.
+KVRouite compiles nothing of Qt. The libraries are the Qt Project's own PySide6
+wheels from PyPI, redistributed byte for byte, so the Corresponding Source is
+that project's own published release.
 
-You may also request the sources from bernd@kvrouite.com. This offer is valid
-for at least three (3) years from the date you received this software and is
-extended to anyone who receives this software.
+What section 6(d) does ask of us is that the directions keep leading somewhere.
+If a link above no longer works, write to bernd@kvrouite.com and you will be
+pointed at a working source for the version you received.
 
 CHECKLIST WHEN THE VERSION CHANGES
 ----------------------------------
   [ ] requirements.txt, NOTICE.txt, COMPONENTS.txt and this file all name the
       same version.
   [ ] The download links above point at that version.
-  [ ] An offline copy of that version's sources exists.
+  [ ] The download links above still resolve.

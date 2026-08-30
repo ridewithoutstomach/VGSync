@@ -1,0 +1,262 @@
+Third-party code inside Qt WebEngine (Chromium)
+===============================================
+
+KVRouite displays its map in a Qt WebEngine view. Qt WebEngine embeds a
+Chromium-derived browser engine; on Windows it is the file
+_internal/PySide6/Qt6WebEngineCore.dll, by far the largest single file of this
+distribution.
+
+Chromium's own code is under the 3-clause BSD license. That text is in
+"LICENSE.chromium" next to this file, reproduced unchanged, which is what the
+BSD license asks of anyone passing the binaries on.
+
+Chromium in turn contains code from the projects listed below, each under its
+own license. The Qt Company publishes this list for the exact version shipped
+here; it is reproduced unchanged.
+
+  Qt version        6.11.2
+  Chromium version  140.0.7339.225
+                    (read out of Qt6WebEngineCore.dll of this build)
+  Source            https://doc.qt.io/qt-6.11/qtwebengine-licensing.html
+  Retrieved         2026-08-30
+
+The Qt Company states that of all licenses occurring in the Chromium part, the
+most restrictive is the GNU Lesser General Public License version 2.1, and that
+the GPL-licensed parts listed below are only used to reach Linux system
+resources - Qt WebEngine neither links to nor distributes GPL binary code.
+
+The full text of every license below travels with the corresponding source of
+Qt WebEngine, in "src/3rdparty/chromium" of the Qt WebEngine sources. Where to
+obtain those sources is written in "CORRESPONDING-SOURCE.txt" next to this file.
+
+Licenses occurring in this list (39):
+
+  3-clause BSD
+  Alliance-for-Open-Media-Patent, BSD-2-Clause
+  Apache
+  Apache License 2.0
+  Apache-2.0
+  BSD
+  BSD 3-clause &quot;New&quot; or &quot;Revised&quot; License
+  BSD and LGPL v2 and LGPL v2.1
+  BSD-2-Clause
+  BSD-2-Clause, MIT
+  BSD-3-Clause
+  BSD-3-Clause, CC-BY-4.0, MIT, CC-BY-3.0
+  BSD-3-Clause, MIT
+  BSD-3-Clause, Patent
+  BSD-3-Clause, WebM-Project-Patent
+  BSL-1.0
+  Custom license
+  ISC
+  Ignorable
+  JsonCPP
+  LGPL 2.1
+  LGPL-2.1
+  LZMA-SDK-9.22
+  Libpng-2.0, Libpng
+  LicenseRef-takuya-ooura
+  MIT
+  MIT, BSD-3-Clause, OpenSSL, ISC, SSLeay
+  MIT-Modern-Variant
+  MPL-1.1
+  Opus-Patent-BSD-3-Clause
+  SGI-B-2.0
+  SPL-SQRT-FLOOR
+  SunPro
+  X11
+  Zlib
+  blessing
+  blessing, BSD-3-Clause, Apache-2.0
+  pffft
+  public-domain-md5, MIT-Modern-Variant, HPND-sell-variant, MIT
+
+Components (187 entries, as listed by The Qt Company):
+
+  @puppeteer/replay                                                                                                                               Apache-2.0
+  @vscode/web-custom-data                                                                                                                         MIT
+  Abseil                                                                                                                                          Apache-2.0
+  Abseil                                                                                                                                          Apache-2.0
+  Acorn, a tiny, fast JavaScript parser written in JavaScript.                                                                                    MIT
+  Alliance for Open Media Video Codec                                                                                                             Alliance-for-Open-Media-Patent, BSD-2-Clause
+  Alliance for Open Media Video Codec                                                                                                             Alliance-for-Open-Media-Patent, BSD-2-Clause
+  Almost Native Graphics Layer Engine                                                                                                             BSD
+  Android Explicit Synchronization                                                                                                                Apache-2.0
+  Android Explicit Synchronization                                                                                                                Apache-2.0
+  BoringSSL                                                                                                                                       MIT, BSD-3-Clause, OpenSSL, ISC, SSLeay
+  BoringSSL                                                                                                                                       MIT, BSD-3-Clause, OpenSSL, ISC, SSLeay
+  Brotli                                                                                                                                          MIT
+  Brotli                                                                                                                                          MIT
+  C++ Signal/Slot Library                                                                                                                         Ignorable
+  C++ Signal/Slot Library                                                                                                                         Ignorable
+  CRC32C                                                                                                                                          BSD-3-Clause
+  CRC32C                                                                                                                                          BSD-3-Clause
+  CSP Evaluator Core Library, a tool that allows developers to check if a Content Security Policy (CSP) serves as mitigation against XSS attacks  Apache-2.0
+  Chromium License                                                                                                                                BSD
+  CityHash                                                                                                                                        MIT
+  CityHash                                                                                                                                        MIT
+  CodeMirror 5                                                                                                                                    MIT
+  CodeMirror 6                                                                                                                                    MIT
+  Compact Encoding Detection                                                                                                                      Apache-2.0
+  Compact Encoding Detection                                                                                                                      Apache-2.0
+  Compact Language Detector v3                                                                                                                    Apache-2.0
+  Crashpad                                                                                                                                        Apache-2.0
+  Crashpad                                                                                                                                        Apache-2.0
+  Dawn                                                                                                                                            BSD-3-Clause
+  Devtools-Frontend                                                                                                                               BSD-3-Clause
+  Emoji Segmenter                                                                                                                                 Apache-2.0
+  Expat XML Parser                                                                                                                                MIT
+  Expat XML Parser                                                                                                                                MIT
+  FP16                                                                                                                                            MIT
+  Fiat-Crypto: Synthesizing Correct-by-Construction Code for Cryptographic Primitives                                                             Apache-2.0
+  Fiat-Crypto: Synthesizing Correct-by-Construction Code for Cryptographic Primitives                                                             Apache-2.0
+  FlatBuffers                                                                                                                                     Apache-2.0
+  FlatBuffers                                                                                                                                     Apache-2.0
+  General Purpose FFT (Fast Fourier/Cosine/Sine Transform) Package                                                                                LicenseRef-takuya-ooura
+  General Purpose FFT (Fast Fourier/Cosine/Sine Transform) Package                                                                                LicenseRef-takuya-ooura
+  Google Double Conversion                                                                                                                        BSD-3-Clause
+  Google Double Conversion                                                                                                                        BSD-3-Clause
+  Headers for the Windows 10 WebAuthn API (webauthn.dll)                                                                                          MIT
+  Highway: C++ library for SIMD                                                                                                                   Apache-2.0
+  Implementation of WebDriver BiDi standard                                                                                                       Apache-2.0
+  In line A-law and u-law conversion routines                                                                                                     Custom license
+  In line A-law and u-law conversion routines                                                                                                     Custom license
+  Ink                                                                                                                                             Apache-2.0
+  Ink Stroke Modeler                                                                                                                              Apache-2.0
+  LZMA SDK                                                                                                                                        LZMA-SDK-9.22
+  LevelDB: A Fast Persistent Key-Value Store                                                                                                      BSD-3-Clause
+  Libtess2                                                                                                                                        SGI-B-2.0
+  Lighthouse                                                                                                                                      Apache License 2.0
+  Lighthouse i18n.js                                                                                                                              Apache-2.0
+  Lit                                                                                                                                             BSD-3-Clause
+  Lit                                                                                                                                             BSD-3-Clause
+  Lit                                                                                                                                             BSD-3-Clause
+  Marked                                                                                                                                          BSD-3-Clause, MIT
+  Material color utilities                                                                                                                        Apache-2.0
+  Metrics Protos                                                                                                                                  BSD-3-Clause
+  Metrics Protos                                                                                                                                  BSD-3-Clause
+  NVidia Control X Extension Library                                                                                                              MIT
+  OTS (OpenType Sanitizer)                                                                                                                        BSD-3-Clause
+  One Euro Filter                                                                                                                                 BSD-3-Clause
+  PDFium                                                                                                                                          BSD
+  PFFFT: a pretty fast FFT.                                                                                                                       pffft
+  PFFFT: a pretty fast FFT.                                                                                                                       pffft
+  Paul Hsieh&#x27;s SuperFastHash                                                                                                                 BSD-3-Clause
+  Paul Hsieh&#x27;s SuperFastHash                                                                                                                 BSD-3-Clause
+  Perfetto                                                                                                                                        blessing, BSD-3-Clause, Apache-2.0
+  Perfetto                                                                                                                                        blessing, BSD-3-Clause, Apache-2.0
+  Polymer                                                                                                                                         BSD-3-Clause
+  Polymer                                                                                                                                         BSD-3-Clause
+  Private Join and Compute subset                                                                                                                 Apache-2.0
+  Private Join and Compute subset                                                                                                                 Apache-2.0
+  Protocol Buffers                                                                                                                                BSD-3-Clause
+  Protocol Buffers                                                                                                                                BSD-3-Clause
+  Protocol Buffers (javascript)                                                                                                                   BSD-3-Clause
+  Protocol Buffers (javascript)                                                                                                                   BSD-3-Clause
+  Puppeteer Core                                                                                                                                  Apache-2.0
+  QUICHE                                                                                                                                          BSD-3-Clause
+  QUICHE                                                                                                                                          BSD-3-Clause
+  Recurrent neural network for audio noise reduction                                                                                              BSD-3-Clause
+  Recurrent neural network for audio noise reduction                                                                                              BSD-3-Clause
+  SPIR-V Headers                                                                                                                                  Apache-2.0
+  SPIR-V Tools                                                                                                                                    Apache-2.0
+  Search Engines resources                                                                                                                        BSD-3-Clause
+  Selenium Atoms                                                                                                                                  Apache-2.0
+  Sizzle                                                                                                                                          MIT
+  Snappy: A fast compressor/decompressor                                                                                                          BSD-3-Clause, CC-BY-4.0, MIT, CC-BY-3.0
+  Snappy: A fast compressor/decompressor                                                                                                          BSD-3-Clause, CC-BY-4.0, MIT, CC-BY-3.0
+  Speech Dispatcher                                                                                                                               LGPL-2.1
+  The Chromium Project                                                                                                                            BSD 3-clause &quot;New&quot; or &quot;Revised&quot; License
+  The Chromium Project                                                                                                                            BSD 3-clause &quot;New&quot; or &quot;Revised&quot; License
+  The Diff Match and Patch libraries offer robust algorithms to perform the operations required for synchronizing plain text.                     Apache-2.0
+  The ITU G.722 codec, encode and decode part.                                                                                                    Custom license
+  The ITU G.722 codec, encode and decode part.                                                                                                    Custom license
+  URI Template Parser                                                                                                                             Apache-2.0
+  URI Template Parser                                                                                                                             Apache-2.0
+  URL Pattern Library                                                                                                                             MIT
+  URL Pattern Library                                                                                                                             MIT
+  V8 fork of fdlibm                                                                                                                               SunPro
+  Volk Meta loader for Vulkan API                                                                                                                 MIT
+  Vulkan API headers                                                                                                                              Apache-2.0
+  Vulkan API headers                                                                                                                              Apache-2.0
+  Vulkan Loader Components                                                                                                                        Apache-2.0
+  VulkanMemoryAllocator                                                                                                                           MIT
+  Wasmparser                                                                                                                                      Apache-2.0
+  Web Vitals                                                                                                                                      Apache-2.0
+  WebKit                                                                                                                                          BSD and LGPL v2 and LGPL v2.1
+  WebKit                                                                                                                                          BSD and LGPL v2 and LGPL v2.1
+  WebM container parser and writer.                                                                                                               BSD-3-Clause, Patent
+  WebP image encoder/decoder                                                                                                                      BSD-3-Clause, Patent
+  WebP image encoder/decoder                                                                                                                      BSD-3-Clause, Patent
+  WebRTC                                                                                                                                          BSD
+  WebRTC                                                                                                                                          BSD
+  Wicked Good XPath                                                                                                                               MIT
+  Wuffs (Wrangling Untrusted File Formats Safely)                                                                                                 Apache-2.0
+  Wuffs (Wrangling Untrusted File Formats Safely)                                                                                                 Apache-2.0
+  Zstandard                                                                                                                                       BSD-3-Clause
+  Zstandard                                                                                                                                       BSD-3-Clause
+  cpuinfo                                                                                                                                         BSD-2-Clause
+  d3                                                                                                                                              ISC
+  d3                                                                                                                                              ISC
+  dav1d is an AV1 decoder :)                                                                                                                      BSD-2-Clause
+  dav1d is an AV1 decoder :)                                                                                                                      BSD-2-Clause
+  dragonbox                                                                                                                                       BSL-1.0
+  fast_float                                                                                                                                      MIT
+  ffmpeg                                                                                                                                          LGPL 2.1
+  fft                                                                                                                                             Custom license
+  fft                                                                                                                                             Custom license
+  flac                                                                                                                                            BSD
+  fontconfig                                                                                                                                      public-domain-md5, MIT-Modern-Variant, HPND-sell-variant, MIT
+  fontconfig                                                                                                                                      public-domain-md5, MIT-Modern-Variant, HPND-sell-variant, MIT
+  google-glog&#x27;s symbolization library                                                                                                        BSD-3-Clause
+  google-glog&#x27;s symbolization library                                                                                                        BSD-3-Clause
+  harfbuzz                                                                                                                                        MIT-Modern-Variant
+  harfbuzz                                                                                                                                        MIT-Modern-Variant
+  hunspell                                                                                                                                        MPL-1.1
+  icu                                                                                                                                             MIT
+  icu                                                                                                                                             MIT
+  inspector protocol                                                                                                                              BSD-3-Clause
+  inspector protocol                                                                                                                              BSD-3-Clause
+  intl-messageformat                                                                                                                              BSD-3-Clause
+  ipcz                                                                                                                                            BSD
+  ipcz                                                                                                                                            BSD
+  json5                                                                                                                                           MIT
+  jsoncpp                                                                                                                                         JsonCPP
+  jsoncpp                                                                                                                                         JsonCPP
+  legacy-javascript                                                                                                                               Apache
+  libaddressinput                                                                                                                                 Apache-2.0
+  libavif - Library for encoding and decoding .avif files                                                                                         BSD-2-Clause, MIT
+  libgav1                                                                                                                                         Apache-2.0
+  libpng                                                                                                                                          Libpng-2.0, Libpng
+  libpng                                                                                                                                          Libpng-2.0, Libpng
+  libsrtp                                                                                                                                         3-clause BSD
+  libsrtp                                                                                                                                         3-clause BSD
+  libvpx                                                                                                                                          BSD-3-Clause, WebM-Project-Patent
+  libvpx                                                                                                                                          BSD-3-Clause, WebM-Project-Patent
+  libxml                                                                                                                                          MIT
+  libxslt                                                                                                                                         X11
+  libyuv                                                                                                                                          BSD-3-Clause
+  libyuv                                                                                                                                          BSD-3-Clause
+  minigbm                                                                                                                                         BSD-3-Clause
+  mitt                                                                                                                                            MIT
+  modp base64 decoder                                                                                                                             BSD-3-Clause
+  modp base64 decoder                                                                                                                             BSD-3-Clause
+  opus                                                                                                                                            Opus-Patent-BSD-3-Clause
+  opus                                                                                                                                            Opus-Patent-BSD-3-Clause
+  rapidhash                                                                                                                                       BSD-2-Clause
+  re2 - an efficient, principled regular expression library                                                                                       BSD-3-Clause
+  re2 - an efficient, principled regular expression library                                                                                       BSD-3-Clause
+  simdutf unicode transcoder                                                                                                                      MIT
+  simdutf unicode transcoder                                                                                                                      MIT
+  source-map-scopes-codec                                                                                                                         BSD-3-Clause
+  spl sqrt floor                                                                                                                                  SPL-SQRT-FLOOR
+  spl sqrt floor                                                                                                                                  SPL-SQRT-FLOOR
+  sqlite                                                                                                                                          blessing
+  sqlite                                                                                                                                          blessing
+  third-party-web                                                                                                                                 MIT
+  woff2                                                                                                                                           MIT
+  xdg-user-dirs                                                                                                                                   MIT
+  xdg-user-dirs                                                                                                                                   MIT
+  zlib                                                                                                                                            Zlib
+  zlib                                                                                                                                            Zlib
+  zod                                                                                                                                             MIT

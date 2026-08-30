@@ -64,39 +64,35 @@ FFmpeg 7.1, liba52, libdca, libdvdread, libdvdnav and the permissively licensed
 ones - are fetched from their own upstream projects by those same recipes,
 which name the exact version and checksum of each.
 
-IF THOSE LINKS EVER STOP WORKING
---------------------------------
-Section 6(d) leaves the distributor responsible for the source staying
-available, even when a third party hosts it. KVRouite therefore keeps its own
-offline copy of the tarballs above. If you cannot reach the GStreamer servers,
-or if a future release removes version 1.28.6, request the sources from:
+WHY POINTING IS ENOUGH HERE
+---------------------------
+Everything shipped here is licensed "or later" - LGPL-2.1-or-later for
+GStreamer itself, GPL-2.0-or-later for the x264, x265, a52dec, dtsdec and
+dvdread plugins. KVRouite conveys them under version 3, and GNU GPL version 3
+section 6(d) expressly allows the Corresponding Source to sit on a different
+server, operated by a third party, as long as clear directions next to the
+object code say where to find it. Those directions are this file.
+
+KVRouite compiles none of this. The binaries are the GStreamer Project's own
+official wheels, redistributed byte for byte, so the Corresponding Source is
+that project's own published release - the same source anyone can fetch from
+the addresses above.
+
+What section 6(d) does ask of us is that the directions keep leading somewhere.
+If a link above no longer works, or if a future release should withdraw version
+1.28.6, write to:
 
   bernd@kvrouite.com
 
-You will receive them at no more than the cost of the transfer. This applies for
-at least three (3) years from the date you received this software and to anyone
-who receives the software.
+and you will be pointed at a working source for the version you received.
 
 FOR MAINTAINERS
 ---------------
-The offline copy is made with:
-
-    python tools/fetch_gstreamer_sources.py --out third-party-src/gstreamer-1.28.6
-
-For version 1.28.6 it has been made and verified (10 tarballs, ~22 MB, each
-checked against its published SHA256). It lives in third-party-src/ and is
-excluded from git - it is a local archive, not something to publish.
-
-Run it once per pinned version. When the version in requirements.txt changes,
-run it again for the new version and update the version numbers in this file,
-in NOTICE.txt and in COMPONENTS.txt. The copy does not have to be published
-anywhere - it only has to exist, so that a request can be answered.
-
 Before publishing a Windows release that contains GStreamer:
 
   [ ] requirements.txt, NOTICE.txt, COMPONENTS.txt and this file all name
       the same version.
-  [ ] An offline copy of that version's tarballs exists.
+  [ ] The download links above still resolve, and they point at that version.
   [ ] build_with_pyinstaller.py printed "GStreamer WIRD mit ausgeliefert" and
       "Rechtstexte liegen in _internal/gstreamer - OK."
   [ ] The build is not a single-file executable (LGPL section 6: the DLLs must

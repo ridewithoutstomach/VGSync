@@ -25,9 +25,11 @@ PySide6-Essentials 6.11.2
 PySide6-Addons 6.11.2
   The Qt add-on modules, among them Qt WebEngine (Qt6WebEngineCore.dll).
   --> REQUIRED by KVRouite: the map is displayed in a Qt WebEngine view.
-  Qt WebEngine embeds a Chromium-derived engine, which carries further
-  upstream licenses (BSD-3-Clause, MIT and others) documented in the Qt
-  source release; see CORRESPONDING-SOURCE.txt.
+  Qt WebEngine embeds a Chromium-derived engine (Chromium 140.0.7339.225).
+  Chromium's own code is 3-clause BSD; that text is in LICENSE.chromium.
+  The 187 further projects contained in it, each with its license, are
+  listed in CHROMIUM-THIRD-PARTY.txt. Their full license texts are part of
+  the Qt source release; see CORRESPONDING-SOURCE.txt.
   License: LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 shiboken6 6.11.2

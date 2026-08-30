@@ -37,10 +37,21 @@ KVRouite relies on the LGPL-3.0-only option. KVRouite as a whole is licensed
 GNU GPL version 3 or later, which is compatible with it: the GNU LGPL version 3
 permits conveying the covered work under the GNU GPL version 3.
 
-Qt WebEngine additionally contains third-party code under BSD, MIT and other
-permissive licenses, and the Qt modules bundle further upstream libraries.
-The complete, per-file attribution for those is part of the Qt source release
-named in CORRESPONDING-SOURCE.txt; Qt publishes an overview at
+Qt WebEngine additionally contains a Chromium-derived engine
+(Chromium 140.0.7339.225). Chromium's own code is under the 3-clause BSD
+license, whose text is reproduced unchanged in
+
+    LICENSE.chromium
+
+next to this file, as that license asks of anyone passing the binaries on.
+Chromium contains code from 187 further projects, each under its own license.
+The Qt Company's list for exactly this version is reproduced in
+
+    CHROMIUM-THIRD-PARTY.txt
+
+The full text of each of those licenses is part of the Qt source release named
+in CORRESPONDING-SOURCE.txt, under "src/3rdparty/chromium". The other Qt
+modules bundle further upstream libraries; Qt publishes an overview at
 https://doc.qt.io/qt-6/licenses-used-in-qt.html .
 
 --------------------------------------------------------------------------------
@@ -63,9 +74,8 @@ the binaries are the Qt Project's own, so their corresponding source is that
 project's own release, and GNU GPL version 3 section 6(d) - which the LGPL
 version 3 incorporates - allows us to direct you there rather than to rehost it.
 
-You may also request the sources from bernd@kvrouite.com. This offer is valid
-for at least three (3) years from the date you received this software and is
-extended to anyone who receives this software.
+If a link there ever stops working, write to bernd@kvrouite.com and you will be
+pointed at a working source for the version you received.
 
 --------------------------------------------------------------------------------
  No warranty

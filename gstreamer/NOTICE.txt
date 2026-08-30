@@ -68,14 +68,14 @@ together with the cerbero build recipes at
 https://gitlab.freedesktop.org/gstreamer/ , which produce these exact binaries
 from those sources. CORRESPONDING-SOURCE.txt lists the individual tarball URLs.
 
-Should those servers ever become unreachable, or should version 1.28.6 be
-withdrawn, we hold our own copy and will supply it on request:
+These binaries are the GStreamer Project's own official wheels, redistributed
+unchanged; KVRouite compiles none of them. GNU GPL version 3 section 6(d)
+therefore allows us to direct you to that project's own source release instead
+of rehosting it. Should a link there ever stop working, write to
 
   bernd@kvrouite.com
 
-at no more than the cost of the transfer. This applies for at least three (3)
-years from the date you received this software and to anyone who receives the
-software.
+and you will be pointed at a working source for the version you received.
 
 ----------------------------------------
  Modifications

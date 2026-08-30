@@ -3890,7 +3890,7 @@ class MainWindow(QMainWindow):
             <h3>KVRouite - Video and GPX Sync Tool</h3>
             Version: {APP_VERSION}<br><br>
             
-            Copyright (C) 2025 Bernd Eller<br>
+            Copyright (C) 2025-2026 Bernd Eller<br>
             This program is free software: you can redistribute it and/or modify 
             it under the terms of the GNU General Public License as published by 
             the Free Software Foundation, either version 3 of the License, or 

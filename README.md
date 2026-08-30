@@ -279,7 +279,8 @@ Qt 6 / PySide6 / shiboken6
   "_internal/PySide6" of the Windows build - 122 Qt6 modules, the largest
   third-party part of the application. On Linux nothing of this is
   distributed with KVRouite. Qt WebEngine, used for the map, embeds a
-  Chromium-derived engine with further upstream licenses.
+  Chromium-derived engine (Chromium 140.0.7339.225) that carries 187 further
+  projects of its own.
 - Relinking: the Qt libraries are ordinary DLL files, not linked into the
   executable, so they can be replaced with a compatible build - which is what
   the LGPL requires.
@@ -287,7 +288,10 @@ Qt 6 / PySide6 / shiboken6
   the Corresponding Source is that project's own release - see
   "qt/CORRESPONDING-SOURCE.txt" for the exact locations.
 - Notice and license texts: "qt/NOTICE.txt", "qt/COMPONENTS.txt",
-  "qt/COPYING.LGPL-3", "qt/COPYING.GPL-3" (in the Windows build: "_internal/qt/")
+  "qt/COPYING.LGPL-3", "qt/COPYING.GPL-3", and for the browser engine
+  "qt/LICENSE.chromium" (3-clause BSD, reproduced unchanged) together with
+  "qt/CHROMIUM-THIRD-PARTY.txt", The Qt Company's list of the projects inside
+  it (in the Windows build: "_internal/qt/")
 
 OpenLayers, CPython, OpenSSL, Pillow, fitparse
 - OpenLayers 7.3.0 (BSD-2-Clause) - the map library, shipped as "ol.js" and
@@ -320,9 +324,11 @@ GStreamer Project's own, redistributed unchanged, and their Corresponding Source
 is published by that project in the same version - see
 "gstreamer/CORRESPONDING-SOURCE.txt" for the exact URLs and the reasoning.
 
-Either way, sources will be made available for at least three (3) years in
-accordance with GPL and LGPL requirements. Requests can be sent to
-bernd@kvrouite.com.
+The same holds for Qt: the PySide6 wheels are the Qt Project's own binaries,
+redistributed unchanged, so GPL-3 section 6(d) - which the LGPL-3 incorporates -
+lets us point at that project's source release. Nothing here is compiled by
+KVRouite, and no source archive is rehosted. If a link stops working, write to
+bernd@kvrouite.com and you will be pointed at a working one.
 
 None of these components are modified by KVRouite. All libraries are loaded
 dynamically from separate files and can be replaced by your own builds

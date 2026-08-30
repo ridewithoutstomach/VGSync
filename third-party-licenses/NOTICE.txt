@@ -45,7 +45,9 @@ projects:
   fitparse        https://github.com/dtcooper/python-fitparse
   OpenSSL         https://www.openssl.org/source/
 
-You may also request them from bernd@kvrouite.com.
+These are the upstream projects' own releases; KVRouite compiles none of them.
+If a link stops working, write to bernd@kvrouite.com and you will be pointed at
+a working one.
 
 --------------------------------------------------------------------------------
  No warranty
