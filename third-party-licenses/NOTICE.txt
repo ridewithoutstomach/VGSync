@@ -1,0 +1,55 @@
+KVRouite - Notice for the remaining bundled components
+================================================================================
+
+Two other folders carry legal texts of their own and are not repeated here:
+
+  _internal/gstreamer   GStreamer, GES, PyGObject and the plugin libraries
+  _internal/qt          Qt 6, PySide6 and shiboken6
+
+This folder covers what is left: the Python runtime and the smaller libraries
+that the Windows build contains. All of them are under permissive licenses.
+
+Files here:
+  NOTICE.txt              this notice
+  COMPONENTS.txt          the components, their versions and licenses
+  LICENSE.Python          Python Software Foundation License, version 2
+  LICENSE.Pillow          the MIT-CMU license of Pillow
+  LICENSE.Apache-2.0      Apache License, version 2.0 (for OpenSSL 3)
+  LICENSE.OpenLayers      the BSD 2-Clause license of OpenLayers
+
+On LINUX none of this is distributed with KVRouite; Python and the packages are
+installed by the user.
+
+--------------------------------------------------------------------------------
+ Licenses
+--------------------------------------------------------------------------------
+None of the components in this folder is copyleft. They are distributed under
+the Python Software Foundation License, the MIT-CMU license, the MIT license,
+the BSD 2-Clause license and the Apache License 2.0. All of them permit redistribution in binary form
+as long as the copyright notice and license text travel with the software -
+which is what this folder is for.
+
+KVRouite as a whole is licensed GNU GPL version 3 or later. All of the above
+are compatible with that.
+
+--------------------------------------------------------------------------------
+ Source code
+--------------------------------------------------------------------------------
+None of these licenses obliges us to supply source code. The components are
+unmodified upstream releases and their sources are published by their own
+projects:
+
+  OpenLayers      https://github.com/openlayers/openlayers
+  Python          https://www.python.org/downloads/source/
+  Pillow          https://pypi.org/project/pillow/#files
+  fitparse        https://github.com/dtcooper/python-fitparse
+  OpenSSL         https://www.openssl.org/source/
+
+You may also request them from bernd@kvrouite.com.
+
+--------------------------------------------------------------------------------
+ No warranty
+--------------------------------------------------------------------------------
+These components are provided "AS IS", WITHOUT ANY WARRANTY; without even the
+implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See
+the license texts in this folder for the full disclaimers.

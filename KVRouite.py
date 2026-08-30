@@ -33,6 +33,28 @@ import sys, platform, builtins
 REAL_STDOUT = sys.__stdout__
 REAL_STDERR = sys.__stderr__
 
+
+def _konsole_vertraegt_sonderzeichen():
+    """Pfeile, Haken und Warnzeichen in print() nicht zum Absturz werden lassen.
+
+    Die Windows-Konsole laeuft je nach Codepage auf cp1252. Ein "->" als
+    Unicode-Pfeil, ein Haken oder ein Warndreieck in einer Debug-Ausgabe wirft
+    dort UnicodeEncodeError - mitten im Programm, an einer voellig
+    harmlosen Stelle. Gemessen beim Start des gepackten Programms:
+    map_widget.py brach an einem "=>"-Pfeil ab.
+
+    errors="replace" ersetzt solche Zeichen durch "?" statt zu werfen. Betrifft
+    nur die Anzeige; kein Text der Anwendung haengt daran.
+    """
+    for strom in (sys.stdout, sys.stderr, REAL_STDOUT, REAL_STDERR):
+        try:
+            strom.reconfigure(errors="replace")
+        except Exception:
+            pass
+
+
+_konsole_vertraegt_sonderzeichen()
+
 def force_print(*args, sep=" ", end="\n"):
     REAL_STDOUT.write(sep.join(map(str, args)) + end)
     REAL_STDOUT.flush()
@@ -63,11 +85,41 @@ if not DEBUG:
     class _NullWriter:
         def write(self, *_args, **_kw): return 0
         def flush(self): pass
-    # Nur Python-Ausgaben stumm – ffmpeg/QProcess unaffected
     sys.stdout = _NullWriter()
     sys.stderr = _NullWriter()
 
-if platform.system() == "Windows":
+    # Auch die Ausgaben, die NICHT aus Python kommen - aber nur in der
+    # ausgelieferten EXE.
+    #
+    # sys.stdout/sys.stderr zu ersetzen wirkt nur auf Python. Bibliotheken, die
+    # als DLL geladen werden, schreiben an Python vorbei direkt auf die
+    # Dateideskriptoren 1 und 2. GLib tut das beim Start und meldet dort, dass
+    # es sein Proxy-Modul nicht laden kann (giolibproxy.dll - eine kaputte
+    # Abhaengigkeit in den GStreamer-Wheels, folgenlos: GIO nimmt dann seinen
+    # Platzhalter, und KVRouite macht seine Netzzugriffe ohnehin ueber Python).
+    #
+    # Nur gepackt umleiten: wer "python KVRouite.py" aufruft, entwickelt und
+    # will die Ausgaben der Bibliotheken sehen. Ihm hier die Deskriptoren
+    # wegzunehmen macht die Konsole still, obwohl er das Gegenteil braucht.
+    if getattr(sys, "frozen", False):
+        try:
+            _leer = os.open(os.devnull, os.O_RDWR)
+            os.dup2(_leer, 1)
+            os.dup2(_leer, 2)
+            if _leer > 2:
+                os.close(_leer)
+        except Exception:
+            # Gepackt ohne Fenster gibt es die Deskriptoren teils gar nicht.
+            # Dann ist ohnehin nichts zu sehen.
+            pass
+
+# Konsolenfenster herrichten - Titel, Puffer leeren, Hinweis, verstecken.
+#
+# Ausdruecklich NUR in der ausgelieferten EXE. Beim Aufruf ueber
+# "python KVRouite.py" gehoert die Konsole dem Entwickler: dort darf die App
+# weder den Titel umbiegen noch den Puffer leeren - das loescht alles, was
+# vorher in dem Fenster stand.
+if platform.system() == "Windows" and getattr(sys, "frozen", False):
     try:
         import ctypes, ctypes.wintypes as wt
         k32 = ctypes.windll.kernel32
@@ -89,7 +141,27 @@ if platform.system() == "Windows":
                         ("srWindow", wt.SMALL_RECT),
                         ("dwMaximumWindowSize", wt._COORD),
                     ]
-                hStdOut = k32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE
+                # Das Konsolenfenster DIREKT oeffnen, nicht ueber
+                # GetStdHandle(STD_OUTPUT_HANDLE).
+                #
+                # Gemessen: die Umleitung von Deskriptor 1 auf NUL weiter oben
+                # (die den GLib-Muell unterdrueckt) aendert ueber die
+                # C-Laufzeit auch das Std-Handle des Prozesses - vorher 184,
+                # danach 172. Ein WriteConsoleW auf dieses Handle schlaegt
+                # dann fehl (Rueckgabe 0, 0 Zeichen), und zwar lautlos.
+                # Deshalb blieb das Fenster schwarz.
+                #
+                # "CONOUT$" liefert immer das Handle des Konsolenfensters
+                # selbst, unabhaengig davon, wohin stdout gerade zeigt.
+                k32.CreateFileW.restype = ctypes.c_void_p
+                hStdOut = k32.CreateFileW(
+                    "CONOUT$",
+                    0xC0000000,   # GENERIC_READ | GENERIC_WRITE
+                    3,            # FILE_SHARE_READ | FILE_SHARE_WRITE
+                    None,
+                    3,            # OPEN_EXISTING
+                    0, None)
+                hStdOut = ctypes.c_void_p(hStdOut)
                 csbi = CONSOLE_SCREEN_BUFFER_INFO()
                 if k32.GetConsoleScreenBufferInfo(hStdOut, ctypes.byref(csbi)):
                     buf_cells = csbi.dwSize.X * csbi.dwSize.Y
@@ -99,10 +171,27 @@ if platform.system() == "Windows":
                     k32.FillConsoleOutputAttribute(hStdOut, csbi.wAttributes, buf_cells, wt._COORD(0, 0), ctypes.byref(chars_written))
                     # 3) Cursor auf 0,0
                     k32.SetConsoleCursorPosition(hStdOut, wt._COORD(0, 0))
-                    force_print("====   KVRouite DEBUG Konsole    ====")
-                    force_print("====         Don´t Close!        ====")
-                    force_print("==== closing will close the APP! ====")
-                    
+
+                # Den Hinweis DIREKT ueber die Konsolen-API schreiben, nicht
+                # ueber print oder einen Dateideskriptor.
+                #
+                # Warum: ein paar Zeilen weiter oben werden fuer den
+                # Normalbetrieb die Deskriptoren 1 und 2 auf NUL umgeleitet,
+                # damit Bibliotheken wie GLib ihre Meldungen nicht in die
+                # Konsole schreiben. Alles, was ueber einen Deskriptor geht,
+                # ist danach unsichtbar - auch dieser Hinweis. Genau das ist
+                # am 30.08.2026 passiert: das Fenster blieb schwarz und leer.
+                #
+                # WriteConsoleW schreibt an den Deskriptoren vorbei an das
+                # Konsolenfenster selbst. Damit ist der Hinweis unabhaengig
+                # davon, wohin stdout gerade zeigt.
+                hinweis = ("====   KVRouite Konsole          ====\r\n"
+                           "====         Don´t Close!        ====\r\n"
+                           "==== closing will close the APP! ====\r\n")
+                geschrieben = wt.DWORD(0)
+                k32.WriteConsoleW(hStdOut, ctypes.c_wchar_p(hinweis),
+                                  len(hinweis), ctypes.byref(geschrieben), None)
+
                 # 4) Fenster unsichtbar (Konsole bleibt vorhanden → Performance ok)
                 
                 SW_HIDE = 0
@@ -140,6 +229,31 @@ def resource_path(rel_path: str) -> str:
     if hasattr(sys, '_MEIPASS'):
         return os.path.join(sys._MEIPASS, rel_path)
     return os.path.join(base_dir, rel_path)
+
+# ---------------------------------------------------------
+# GStreamer-Umgebung im fertigen Programm selbst aufbauen.
+#
+# Die GStreamer-Wheels richten sich ueber site-packages/gstreamer_bundle.pth
+# ein: eine Zeile, die Python beim Start des Interpreters ausfuehrt und die
+# gstreamer_libs.setup_python_environment() aufruft. Die setzt PATH,
+# GST_PLUGIN_PATH_1_0, GI_TYPELIB_PATH und vor allem PYGI_DLL_DIRS.
+#
+# PyInstaller fuehrt .pth-Dateien NICHT aus. Im gepackten Programm fehlt
+# deshalb die ganze Einrichtung, und "import gi" bricht ab mit
+# "Could not deduce DLL directories, please set PYGI_DLL_DIRS". Hier wird
+# nachgeholt, was die .pth sonst erledigt.
+#
+# Nur im gepackten Zustand: im venv hat die .pth ihre Arbeit schon getan, ein
+# zweiter Aufruf wuerde die Pfade doppelt in die Umgebung schreiben.
+if getattr(sys, "frozen", False):
+    try:
+        import gstreamer_libs
+        gstreamer_libs.setup_python_environment()
+    except Exception as _exc:
+        # Kein Abbruch: die Meldung dazu kommt weiter unten aus main(), samt
+        # Hinweis, was zu tun ist. Hier waere noch kein Fenster da, um sie zu
+        # zeigen.
+        print("[WARN] GStreamer-Umgebung nicht aufgebaut:", _exc)
 
 # ---------------------------------------------------------
 import path_manager

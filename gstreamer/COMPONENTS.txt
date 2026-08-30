@@ -67,6 +67,15 @@ gstreamer-python 1.28.6
   License: MIT AND LGPL-2.0-or-later AND MPL-1.1 AND LGPL-2.1-or-later AND
            BSD-3-Clause
 
+gstreamer-cli 1.28.6
+  Despite its name this package holds ges-1.0-0.dll, the GStreamer Editing
+  Services library itself.
+  --> REQUIRED by KVRouite: without it the application cannot start.
+  The package also contains twelve command-line tools (gst-launch,
+  gst-inspect, ges-launch and relatives). KVRouite does not use them and the
+  build removes them again, so they are not distributed.
+  License: LGPL-2.1-or-later
+
 gstreamer-gtk 1.28.6
   gtk4paintablesink plugin and dependencies, including GTK4 itself
   License: Apache-2.0 AND MIT AND LGPL-2.1-or-later AND BSD-3-Clause

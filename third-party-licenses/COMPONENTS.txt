@@ -1,0 +1,65 @@
+KVRouite - remaining components shipped with the Windows build
+================================================================================
+
+GStreamer is documented in _internal/gstreamer, Qt in _internal/qt. What
+follows is everything else the Windows build contains. The license given for
+each package is the one it declares in its own metadata, quoted unchanged.
+
+--------------------------------------------------------------------------------
+
+CPython 3.12
+  The Python runtime: python312.dll and the standard library modules in
+  "_internal". PyInstaller embeds them so the application runs without a
+  separate Python installation.
+  --> REQUIRED: KVRouite is a Python application.
+  https://www.python.org
+  License: Python Software Foundation License Version 2
+  Text: LICENSE.Python in this folder
+
+OpenSSL 3
+  libcrypto-3.dll and libssl-3.dll. Comes with the Python runtime and is used
+  for the HTTPS requests KVRouite makes (update check, counters).
+  https://www.openssl.org
+  License: Apache-2.0
+  Text: LICENSE.Apache-2.0 in this folder
+
+pillow 12.3.0
+  The imaging library, in "_internal/PIL". KVRouite uses it to load and scale
+  the overlay images. The package bundles further upstream libraries of its
+  own (among them libjpeg-turbo, zlib, libtiff, libwebp, libpng, freetype);
+  their individual notices are part of LICENSE.Pillow.
+  --> REQUIRED by KVRouite: overlays.
+  https://python-pillow.github.io
+  License: MIT-CMU
+  Text: LICENSE.Pillow in this folder
+
+OpenLayers 7.3.0
+  The map library. Shipped as "ol.js" and "ol.css" next to the executable,
+  not inside "_internal".
+  --> REQUIRED by KVRouite: the map view is built with it.
+  https://openlayers.org
+  License: BSD-2-Clause
+  Text: LICENSE.OpenLayers in this folder
+
+fitparse 1.2.0
+  Reader for Garmin FIT files. Pure Python, no binaries of its own.
+  --> REQUIRED by KVRouite: importing FIT recordings.
+  https://github.com/dtcooper/python-fitparse
+  License: MIT
+
+--------------------------------------------------------------------------------
+ Not shipped, although KVRouite can use them
+--------------------------------------------------------------------------------
+ffmpeg and ffprobe are NOT part of this distribution. Copy mode calls whatever
+is installed on the user's own system, and stays disabled when they are absent.
+Nothing of ffmpeg is installed by KVRouite.
+
+Mapillary-JS 4.1.2 (MIT) is not distributed either. The map page loads it from
+the unpkg CDN at run time, so it never becomes part of this download.
+
+The map tiles themselves come from online services (MapTiler, Mapbox) and from
+OpenStreetMap data. They are not part of this distribution; their own terms of
+use and attribution requirements apply to the data shown on the map.
+
+(The FFmpeg shared libraries that ARE distributed come inside the GStreamer
+wheels and are documented in _internal/gstreamer/COMPONENTS.txt.)

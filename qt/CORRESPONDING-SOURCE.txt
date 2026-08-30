@@ -1,0 +1,69 @@
+KVRouite - Corresponding Source for the Qt components
+================================================================================
+
+WHAT KVRouite SHIPS HERE
+------------------------
+The Qt libraries in "_internal/PySide6" are prebuilt binaries published by the
+Qt Project as the PySide6 wheels on PyPI. They are the same binaries anyone
+gets with "pip install PySide6".
+
+KVRouite does not compile, patch, rebuild or otherwise modify any of them. They
+are passed on byte for byte, exactly as pip installs them.
+
+WHY THERE IS NO SOURCE ARCHIVE ON kvrouite.com
+----------------------------------------------
+The packages are licensed LGPL-3.0-only (see COMPONENTS.txt). The GNU LGPL
+version 3 is a set of additional permissions on top of the GNU GPL version 3
+and incorporates its terms, including section 6(d): the Corresponding Source
+may be kept on a third-party server as long as clear directions to it
+accompany the binaries. This file is those directions.
+
+Since these are the Qt Project's own binaries, unmodified, the Corresponding
+Source is that project's own release of the same version. Rehosting it here
+would add nothing.
+
+WHERE THE SOURCE IS
+-------------------
+Version shipped: Qt 6.11.2, PySide6 / PySide6-Essentials / PySide6-Addons /
+shiboken6 6.11.2.
+
+  Qt 6 sources, release archive
+    https://download.qt.io/archive/qt/6.11/
+    (the single-archive "qt-everywhere-src" tarball of 6.11.2 contains all
+    modules, Qt WebEngine included)
+
+  Qt git repositories, if you prefer the revision history
+    https://code.qt.io/cgit/
+
+  PySide6 and shiboken6 sources
+    https://pypi.org/project/PySide6/6.11.2/#files
+    https://pypi.org/project/shiboken6/6.11.2/#files
+    (the .tar.gz "source distribution" next to the wheels)
+
+  Qt's own overview of the licenses used inside Qt, including the third-party
+  code in Qt WebEngine
+    https://doc.qt.io/qt-6/licenses-used-in-qt.html
+
+All URLs were checked and reachable when this file was written.
+
+WHAT WE STAY RESPONSIBLE FOR
+----------------------------
+Directions are only worth something while they lead somewhere. If the Qt
+Project ever takes those files down, we have to supply the source ourselves.
+Keeping an offline copy is therefore not optional bookkeeping but the fallback.
+
+Note that the Qt sources are large - the single archive of one Qt 6 release is
+several gigabytes, mostly Qt WebEngine. Plan for that before fetching it. The
+copy does not have to be published anywhere; it only has to exist, so that a
+request can be answered.
+
+You may also request the sources from bernd@kvrouite.com. This offer is valid
+for at least three (3) years from the date you received this software and is
+extended to anyone who receives this software.
+
+CHECKLIST WHEN THE VERSION CHANGES
+----------------------------------
+  [ ] requirements.txt, NOTICE.txt, COMPONENTS.txt and this file all name the
+      same version.
+  [ ] The download links above point at that version.
+  [ ] An offline copy of that version's sources exists.

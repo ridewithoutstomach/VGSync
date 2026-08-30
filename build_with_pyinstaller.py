@@ -32,6 +32,15 @@ import shutil
 import importlib.util
 import hashlib, zipfile
 
+# Die Ausgabe dieses Skripts enthaelt Pfeile. Laeuft die Konsole auf cp1252,
+# wirft print() darauf UnicodeEncodeError und der Build bricht mitten im Lauf
+# ab. errors="replace" macht daraus ein "?" und laesst ihn weiterlaufen.
+for _strom in (sys.stdout, sys.stderr):
+    try:
+        _strom.reconfigure(errors="replace")
+    except Exception:
+        pass
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Seit 6.0 werden WEDER ffmpeg NOCH mpv mitgeliefert. Beide Ordner liegen
@@ -44,11 +53,51 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # Start.
 
 # gstreamer/ enthaelt KEINE Binaries, nur die Rechtstexte (NOTICE, COMPONENTS,
-# COPYING.*). Die GStreamer-DLLs selbst kommen ueber die pip-Wheels
-# (gstreamer-bundle) und werden von PyInstaller aus dem venv eingesammelt.
-# Der Ordner muss trotzdem mit, sonst liefern wir GPL/LGPL-Binaries ohne die
+# COPYING.*). Der Ordner muss mit, sonst liefern wir GPL/LGPL-Binaries ohne die
 # zugehoerigen Lizenztexte aus - siehe check_gstreamer_payload().
 LOCAL_GSTREAMER = os.path.join(BASE_DIR, "gstreamer")
+
+# Dieselbe Rolle fuer die uebrigen Fremdbestandteile: qt/ deckt Qt 6, PySide6
+# und shiboken6 ab (LGPL-3 - die verlangt ausdruecklich einen Hinweis UND eine
+# beiliegende Kopie von LGPL und GPL), third-party-licenses/ den Rest
+# (CPython, OpenSSL, Pillow, fitparse). Auch diese Ordner enthalten keine
+# Binaries, nur Text.
+LOCAL_QT = os.path.join(BASE_DIR, "qt")
+LOCAL_THIRDPARTY = os.path.join(BASE_DIR, "third-party-licenses")
+
+# Die GStreamer-Wheels, die in den Build gehoeren.
+#
+# PyInstaller findet sie NICHT von selbst. Die Wheels richten sich ueber
+# site-packages/gstreamer_bundle.pth ein - eine Zeile, die Python beim Start
+# des Interpreters ausfuehrt und die gstreamer_libs.setup_python_environment()
+# aufruft. PyInstaller fuehrt .pth-Dateien nicht aus, also importiert nichts
+# diese Pakete statisch, also sammelt PyInstaller sie nicht ein. Ohne
+# --collect-all landeten zuletzt nur gi und gstreamer_libs im Build, und die
+# fertige Anwendung brach beim Start mit "Could not deduce DLL directories,
+# please set PYGI_DLL_DIRS" ab.
+#
+# Die Liste ist genau die aus gstreamer/COMPONENTS.txt - wir liefern aus, was
+# dort dokumentiert ist, und nichts sonst.
+#
+# gstreamer_cli ist trotz seines Namens PFLICHT: darin liegt ges-1.0-0.dll,
+# die GES-Bibliothek selbst. Ohne sie meldet die Anwendung beim Start
+# "Failed to load shared library 'ges-1.0-0.dll' referenced by the typelib".
+# Die zwoelf Kommandozeilenwerkzeuge im selben Paket (gst-launch, gst-inspect
+# und Verwandte, zusammen 17 MB) braucht die Anwendung nicht - die entfernt
+# cli_werkzeuge_entfernen() nach dem Bau wieder.
+GSTREAMER_PAKETE = (
+    "gstreamer_bundle",
+    "gstreamer_cli",
+    "gstreamer_libs",
+    "gstreamer_plugins",
+    "gstreamer_plugins_libs",
+    "gstreamer_plugins_restricted",
+    "gstreamer_plugins_gpl",
+    "gstreamer_plugins_gpl_restricted",
+    "gstreamer_python",
+    "gstreamer_gtk",
+    "gstreamer_ext_runtime",
+)
 
 def write_sha256(path: str) -> str:
     """
@@ -67,44 +116,47 @@ def write_sha256(path: str) -> str:
 
     print("[INFO] SHA256 geschrieben:", out_path)
     return out_path
-def ensure_license_txt():
+# ensure_license_txt() ist am 30.08.2026 entfernt worden.
+#
+# Sie suchte disclaimer_dialog.py im Wurzelverzeichnis - die Datei liegt aber
+# in views/ - und meldete deshalb bei jedem Build "nicht gefunden". Ihr
+# Rueckgabewert wurde ohnehin nirgends benutzt: die GPL kommt aus der Datei
+# LICENSE im Projektwurzelverzeichnis und wird weiter unten gesondert kopiert
+# ("[COPY GPL]").
+#
+# Sie war ausserdem eine Falle: haette sie funktioniert, laege eine aus dem
+# Disclaimer erzeugte LICENSE.txt im Wurzelverzeichnis - und die Suche weiter
+# unten nimmt ("LICENSE", "LICENSE.txt"). Faellt LICENSE einmal weg, waere ein
+# Disclaimer-Text als GPL ausgeliefert worden.
+
+def cli_werkzeuge_entfernen(internal_dir):
+    """Die Kommandozeilenwerkzeuge aus gstreamer_cli wieder herausnehmen.
+
+    Das Paket muss mit, weil ges-1.0-0.dll darin liegt - siehe
+    GSTREAMER_PAKETE. Die zwoelf .exe daneben (gst-launch, gst-inspect,
+    ges-launch und Verwandte) benutzt die Anwendung nicht; sie waeren 17 MB,
+    die niemand aufruft. Die DLLs bleiben unangetastet.
     """
-    Erzeugt LICENSE.txt aus deinem Disclaimer-Text,
-    falls noch keine existiert.
-    """
-    license_path = os.path.join(BASE_DIR, "LICENSE.txt")
-    if os.path.isfile(license_path):
-        print("[INFO] LICENSE.txt existiert bereits.")
-        return license_path
+    binordner = os.path.join(internal_dir, "gstreamer_cli", "bin")
+    if not os.path.isdir(binordner):
+        return 0
+    entfernt = befreit = 0
+    for name in os.listdir(binordner):
+        if not name.lower().endswith(".exe"):
+            continue
+        pfad = os.path.join(binordner, name)
+        try:
+            befreit += os.path.getsize(pfad)
+            os.remove(pfad)
+            entfernt += 1
+        except OSError as exc:
+            print(f"[WARN] {name} nicht entfernbar: {exc}")
+    if entfernt:
+        print(f"[INFO] {entfernt} Kommandozeilenwerkzeug(e) aus gstreamer_cli "
+              f"entfernt ({befreit / (1024*1024):.1f} MB), "
+              f"ges-1.0-0.dll bleibt.")
+    return entfernt
 
-    disclaimer_file = os.path.join(BASE_DIR, "disclaimer_dialog.py")
-    if not os.path.isfile(disclaimer_file):
-        print("[WARN] disclaimer_dialog.py nicht gefunden – kann LICENSE.txt nicht erzeugen.")
-        return None
-
-    # Disclaimer-Inhalt extrahieren
-    try:
-        text = open(disclaimer_file, "r", encoding="utf-8").read()
-        # optional: nur zwischen """ ... """ falls du docstrings nutzt
-        import re
-        match = re.search(r'("""|\'\'\')(.*?)(\1)', text, re.S)
-        license_text = match.group(2).strip() if match else text
-    except Exception as e:
-        print("[ERROR] Konnte disclaimer_dialog.py nicht lesen:", e)
-        return None
-
-    header = (
-        "KVRouite – License & Disclaimer\n"
-        "---------------------------------\n"
-        "This software is distributed under the terms of the GNU GPL v3 (or later).\n"
-        "By continuing, you agree to the license conditions below.\n\n"
-    )
-
-    with open(license_path, "w", encoding="utf-8") as f:
-        f.write(header + license_text)
-
-    print("[INFO] LICENSE.txt wurde neu erstellt.")
-    return license_path
 
 def check_ffmpeg_frei(target_dir):
     """
@@ -214,7 +266,14 @@ def check_gstreamer_payload(internal_dir):
                            zweiten Wiedergabeweg mehr; KVRouite bricht dann
                            beim Start mit einer Meldung ab.
 
-    Die Funktion bricht nicht ab, sie sagt nur klar, welcher Fall vorliegt.
+    Geprueft wird ausserdem, ob ALLE Pakete aus GSTREAMER_PAKETE da sind. Ein
+    Build mit nur einem Teil davon startet nicht - genau das ist am 30.08.2026
+    passiert: es kamen nur gi und gstreamer_libs mit, und die Anwendung brach
+    mit "Could not deduce DLL directories" ab. Die alte Fassung dieser
+    Pruefung hat das durchgewunken, weil sie nur zaehlte, ob irgendwelche
+    gst-DLLs herumliegen.
+
+    Rueckgabe: Liste der fehlenden Pakete, leer heisst vollstaendig.
     """
     marker_dirs = [
         d for d in os.listdir(internal_dir)
@@ -229,26 +288,43 @@ def check_gstreamer_payload(internal_dir):
             continue
         gst_dlls += sum(1 for f in files if f.lower().startswith("gst") and f.lower().endswith(".dll"))
 
+    fehlende = [p for p in GSTREAMER_PAKETE
+                if not os.path.isdir(os.path.join(internal_dir, p))]
+
     print("-" * 70)
-    if marker_dirs or gi_dir or gst_dlls:
-        print("[LIZENZ] GStreamer WIRD mit ausgeliefert:")
-        print(f"         {gst_dlls} gst*.dll, Pakete: {', '.join(sorted(marker_dirs)) or '-'}"
-              f"{', gi' if gi_dir else ''}")
-        notice = os.path.join(internal_dir, "gstreamer", "NOTICE.txt")
-        if os.path.isfile(notice):
-            print("         Rechtstexte liegen in _internal/gstreamer - OK.")
-        else:
-            print("[FEHLER] _internal/gstreamer/NOTICE.txt FEHLT. So darf der Build "
-                  "nicht ausgeliefert werden (GPL/LGPL-Verstoss).")
-        x264 = os.path.isdir(os.path.join(internal_dir, "gstreamer_plugins_gpl_restricted"))
-        print(f"         x264/x265-Plugins (GPL-2.0-or-later): {'ja' if x264 else 'nein'}"
-              f"{'' if x264 else '  -> GES-Encoder kann nicht rendern!'}")
-    else:
+    if not (marker_dirs or gi_dir or gst_dlls):
         print("[FEHLER] GStreamer ist NICHT im Build enthalten.")
         print("         Seit 6.0 laeuft Wiedergabe, Schnitt und Export allein")
         print("         darueber - dieses Bundle startet nicht. Bitte aus einem")
         print("         venv bauen, in dem requirements.txt installiert ist.")
+        print("-" * 70)
+        return list(GSTREAMER_PAKETE)
+
+    print("[LIZENZ] GStreamer WIRD mit ausgeliefert:")
+    print(f"         {gst_dlls} gst*.dll, {len(GSTREAMER_PAKETE) - len(fehlende)}"
+          f" von {len(GSTREAMER_PAKETE)} Paketen{', gi' if gi_dir else ''}")
+    notice = os.path.join(internal_dir, "gstreamer", "NOTICE.txt")
+    if os.path.isfile(notice):
+        print("         Rechtstexte liegen in _internal/gstreamer - OK.")
+    else:
+        print("[FEHLER] _internal/gstreamer/NOTICE.txt FEHLT. So darf der Build "
+              "nicht ausgeliefert werden (GPL/LGPL-Verstoss).")
+
+    if fehlende:
+        print("[FEHLER] Der Build ist UNVOLLSTAENDIG. Es fehlen:")
+        for p in fehlende:
+            print("            ", p)
+        print("         So startet die Anwendung nicht. PyInstaller sammelt")
+        print("         diese Pakete nur mit --collect-all ein - siehe")
+        print("         GSTREAMER_PAKETE am Dateikopf.")
+    else:
+        x264 = os.path.isdir(os.path.join(internal_dir,
+                                          "gstreamer_plugins_gpl_restricted"))
+        print("         x264/x265-Plugins (GPL-2.0-or-later): "
+              + ("ja" if x264 else "nein  -> GES-Encoder kann nicht rendern!"))
+        print("[OK]     GStreamer vollstaendig.")
     print("-" * 70)
+    return fehlende
 
 
 def load_app_version():
@@ -309,7 +385,6 @@ def copy_only_pdfs(src_dir, dst_dir):
                 shutil.copy2(sfile, dfile)            
 
 def build_windows(build_setup: bool = False):
-    license_path = ensure_license_txt()
     app_version = load_app_version()
     print(f"[INFO] APP_VERSION: {app_version}")
 
@@ -336,8 +411,10 @@ def build_windows(build_setup: bool = False):
         f"--name={exe_name_tmp}",
         f"--distpath={artifacts_root}",
         f"--icon={icon_file}" if os.path.isfile(icon_file) else "",
-        main_script
     ]
+    # GStreamer muss ausdruecklich mit, siehe GSTREAMER_PAKETE oben.
+    cmd += [f"--collect-all={paket}" for paket in GSTREAMER_PAKETE]
+    cmd += [main_script]
     # leere Strings aus cmd entfernen
     cmd = [c for c in cmd if c]
     run_cmd(cmd)
@@ -372,14 +449,24 @@ def build_windows(build_setup: bool = False):
     # _internal vorbereiten
     internal_dir = os.path.join(target_dir, "_internal")
     os.makedirs(internal_dir, exist_ok=True)
-    print("[INFO] Kopiere gstreamer (Lizenztexte) →", os.path.join(internal_dir, "gstreamer"))
-    if os.path.isdir(LOCAL_GSTREAMER):
-        copy_tree_all(LOCAL_GSTREAMER, os.path.join(internal_dir, "gstreamer"))
-    else:
-        print("[WARN] gstreamer/ fehlt – die GPL/LGPL-Lizenztexte fuer GStreamer "
-              "wuerden NICHT mit ausgeliefert.")
+    fehlende_rechtstexte = []
+    # Rechtstexte. Ohne sie duerfte der Build nicht ausgeliefert werden, also
+    # ist ein fehlender Ordner ein Fehler und keine Randnotiz.
+    for quelle, ziel, was in ((LOCAL_GSTREAMER, "gstreamer", "GStreamer"),
+                              (LOCAL_QT, "qt", "Qt/PySide6"),
+                              (LOCAL_THIRDPARTY, "third-party-licenses",
+                               "CPython, OpenSSL, Pillow, fitparse")):
+        pfad = os.path.join(internal_dir, ziel)
+        print(f"[INFO] Kopiere Lizenztexte {was} → {pfad}")
+        if os.path.isdir(quelle):
+            copy_tree_all(quelle, pfad)
+        else:
+            print(f"[FEHLER] {ziel}/ fehlt - die Lizenztexte fuer {was} wuerden "
+                  f"NICHT mit ausgeliefert werden.")
+            fehlende_rechtstexte.append(ziel)
 
-    check_gstreamer_payload(internal_dir)
+    cli_werkzeuge_entfernen(internal_dir)
+    fehlende_gstreamer_pakete = check_gstreamer_payload(internal_dir)
 
     # Taskbar-Icon zusätzlich in _internal/icon
     if os.path.isfile(icon_file):
@@ -462,6 +549,13 @@ def build_windows(build_setup: bool = False):
         raise SystemExit("[ABBRUCH] Build enthaelt mpv - nicht ausliefern.")
     if check_ffmpeg_frei(target_dir):
         raise SystemExit("[ABBRUCH] Build enthaelt ffmpeg - nicht ausliefern.")
+    if fehlende_gstreamer_pakete:
+        raise SystemExit("[ABBRUCH] GStreamer ist unvollstaendig - der Build "
+                         "wuerde nicht starten.")
+    if fehlende_rechtstexte:
+        raise SystemExit("[ABBRUCH] Rechtstexte fehlen (%s) - so darf der Build "
+                         "nicht ausgeliefert werden."
+                         % ", ".join(fehlende_rechtstexte))
 
     # ---------------- portable ZIP + SHA ----------------
     ARCH_SUFFIX = "Win_x64"

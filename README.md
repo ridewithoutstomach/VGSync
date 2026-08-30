@@ -267,6 +267,38 @@ GStreamer / GStreamer Editing Services (GES)
 - Note: the GStreamer wheels contain an LGPL build of the FFmpeg libraries,
   used by the gst-libav plugin. That is the only FFmpeg KVRouite distributes.
 
+Qt 6 / PySide6 / shiboken6
+- Version: Qt 6.11.2, PySide6 / PySide6-Essentials / PySide6-Addons /
+  shiboken6 6.11.2
+- License: the packages declare "LGPL-3.0-only OR GPL-2.0-only OR
+  GPL-3.0-only"; KVRouite relies on LGPL-3.0-only. That is compatible with
+  KVRouite being GPL-3.0-or-later, because the LGPL version 3 permits
+  conveying the covered work under the GPL version 3.
+- Website: https://pyside.org
+- Binaries: **Windows only.** Installed by pip and placed into
+  "_internal/PySide6" of the Windows build - 122 Qt6 modules, the largest
+  third-party part of the application. On Linux nothing of this is
+  distributed with KVRouite. Qt WebEngine, used for the map, embeds a
+  Chromium-derived engine with further upstream licenses.
+- Relinking: the Qt libraries are ordinary DLL files, not linked into the
+  executable, so they can be replaced with a compatible build - which is what
+  the LGPL requires.
+- Source code: the binaries are the Qt Project's own, passed on unchanged, so
+  the Corresponding Source is that project's own release - see
+  "qt/CORRESPONDING-SOURCE.txt" for the exact locations.
+- Notice and license texts: "qt/NOTICE.txt", "qt/COMPONENTS.txt",
+  "qt/COPYING.LGPL-3", "qt/COPYING.GPL-3" (in the Windows build: "_internal/qt/")
+
+OpenLayers, CPython, OpenSSL, Pillow, fitparse
+- OpenLayers 7.3.0 (BSD-2-Clause) - the map library, shipped as "ol.js" and
+  "ol.css" next to the executable
+- CPython 3.12 (Python Software Foundation License), OpenSSL 3 (Apache-2.0),
+  Pillow 12.3.0 (MIT-CMU), fitparse 1.2.0 (MIT)
+- All permissive; none requires us to supply source code, but each requires
+  its notice to travel with the binaries.
+- Notice and license texts: "third-party-licenses/" (in the Windows build:
+  "_internal/third-party-licenses/")
+
 GoPro GPS Extraction
 - Based on: gopro2gpx by Juan M. Casillas (https://github.com/juanmcasillas/gopro2gpx)
 - Modifications by: Bernd Eller

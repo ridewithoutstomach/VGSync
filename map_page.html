@@ -23,9 +23,11 @@
   <meta charset="UTF-8" />
   <title>OpenLayers – Directions + Speed Input + Keep old logic</title>
 
-  <!-- OpenLayers (CDN) -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@7.3.0/ol.css" />
-  <script src="https://cdn.jsdelivr.net/npm/ol@7.3.0/dist/ol.js"></script>
+  <!-- OpenLayers 7.3.0 aus dem Programmordner, nicht vom CDN: die Karte soll
+       ohne Internet funktionieren, und ausgeliefert wird genau diese Fassung
+       (siehe third-party-licenses/). Aufgeloest wird relativ zu dieser Datei. -->
+  <link rel="stylesheet" href="ol.css" />
+  <script src="ol.js"></script>
 
   <!-- QWebChannel (für QtWebEngine) -->
   <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
@@ -860,6 +862,8 @@
         }
         return new ol.source.XYZ({
           url: "https://api.maptiler.com/tiles/satellite/{z}/{x}/{y}.jpg?key="+mapTilerKey,
+          attributions: '&copy; <a href="https://www.maptiler.com/copyright/" target="_blank">MapTiler</a> '
+                      + '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap contributors</a>',
           tileSize: 512,
           maxZoom: 21
         });
@@ -872,6 +876,8 @@
         }
         return new ol.source.XYZ({
           url: "https://api.mapbox.com/styles/v1/mapbox/satellite-v9/tiles/{z}/{x}/{y}?access_token="+mapboxKey,
+          attributions: '&copy; <a href="https://www.mapbox.com/about/maps/" target="_blank">Mapbox</a> '
+                      + '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap contributors</a>',
           tileSize: 512,
           maxZoom: 22
         });

@@ -36,6 +36,20 @@ Third-Party Libraries
 ---------------------
 This application includes and distributes open-source libraries:
 
+- Qt 6.11.2 with PySide6 and shiboken6
+  License: LGPL-3.0-only (the packages offer a choice of LGPL-3.0-only,
+  GPL-2.0-only or GPL-3.0-only; KVRouite relies on the LGPL). The Qt libraries
+  are ordinary DLL files in `_internal/PySide6` - you may replace them with a
+  compatible build of your own, as the LGPL provides for. Qt WebEngine, used
+  for the map, embeds a Chromium-derived engine with further upstream licenses.
+  https://pyside.org
+
+- OpenLayers 7.3.0, the map library (ol.js / ol.css next to the executable)
+  License: BSD-2-Clause - https://openlayers.org
+
+- CPython 3.12 (Python Software Foundation License), OpenSSL 3 (Apache-2.0),
+  Pillow 12.3.0 (MIT-CMU) and fitparse 1.2.0 (MIT)
+
 - GStreamer 1.28.6, including GStreamer Editing Services (GES) and PyGObject
   License: LGPL-2.1-or-later. The bundled x264 and x265 encoder plugins, and the
   a52dec/dtsdec/dvdread plugins, are GPL-2.0-or-later. Individual components are
@@ -55,16 +69,28 @@ This application includes and distributes open-source libraries:
   those are NOT part of this distribution - KVRouite uses whatever is
   installed on your own system, and copy mode stays disabled without them.)
 
-Full license texts for these libraries are located in the
-`_internal/gstreamer` folder. `_internal/gstreamer/COMPONENTS.txt` lists
-every GStreamer package shipped and its exact license.
+Full license texts are located in three folders next to the application:
 
-The GStreamer binaries are the GStreamer Project's own prebuilt binaries, passed on
-unchanged. Their corresponding source is published by that project, in the same
-version, at https://gstreamer.freedesktop.org/src/ - the exact tarball URLs are listed
-in `_internal/gstreamer/CORRESPONDING-SOURCE.txt`, as permitted by GNU GPL version 3,
-section 6(d).
+  `_internal/gstreamer`             GStreamer, GES, PyGObject
+  `_internal/qt`                    Qt 6, PySide6, shiboken6
+  `_internal/third-party-licenses`  CPython, OpenSSL, Pillow, fitparse,
+                                    OpenLayers
 
-In either case you may request the sources from bernd@kvrouite.com. This offer is
-valid for at least three (3) years from the date you received this software and is
-extended to anyone who receives this software.
+Each folder holds a NOTICE.txt, a COMPONENTS.txt listing every package shipped
+with its exact license, and the license texts themselves.
+
+The GStreamer and Qt binaries are the respective projects' own prebuilt binaries,
+passed on unchanged. Their corresponding source is published by those projects in
+the same versions:
+
+  GStreamer   https://gstreamer.freedesktop.org/src/
+  Qt          https://download.qt.io/archive/qt/6.11/
+  PySide6     https://pypi.org/project/PySide6/6.11.2/#files
+
+The exact locations are listed in `_internal/gstreamer/CORRESPONDING-SOURCE.txt`
+and `_internal/qt/CORRESPONDING-SOURCE.txt`, as permitted by GNU GPL version 3,
+section 6(d), which the GNU LGPL version 3 incorporates.
+
+You may also request the sources from bernd@kvrouite.com. This offer is valid for
+at least three (3) years from the date you received this software and is extended
+to anyone who receives this software.

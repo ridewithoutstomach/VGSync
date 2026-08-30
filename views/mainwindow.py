@@ -3907,7 +3907,17 @@ class MainWindow(QMainWindow):
             
             <h3>Third-Party Libraries &amp; Patent Notice</h3>
             This application includes and distributes open-source libraries:<br>
-            <b>GStreamer 1.28.6</b>, incl. GStreamer Editing Services (GES) and
+            <b>1. Qt 6.11.2</b> with PySide6 and shiboken6 -
+            <a href='https://pyside.org'>pyside.org</a> (LGPL-3.0-only). The Qt
+            libraries are ordinary DLL files in <code>_internal/PySide6</code> -
+            you may replace them with a compatible build of your own, as the
+            LGPL provides for.<br>
+            <b>2. OpenLayers 7.3.0</b> -
+            <a href='https://openlayers.org'>openlayers.org</a> (BSD-2-Clause),
+            the map library<br>
+            <b>3. CPython 3.12</b> (PSF), <b>OpenSSL 3</b> (Apache-2.0),
+            <b>Pillow</b> (MIT-CMU), <b>fitparse</b> (MIT)<br>
+            <b>4. GStreamer 1.28.6</b>, incl. GStreamer Editing Services (GES) and
             PyGObject -
             <a href='https://gstreamer.freedesktop.org'>gstreamer.freedesktop.org</a>
             (LGPL-2.1-or-later; the bundled x264 and x265 encoder plugins are
@@ -3925,7 +3935,8 @@ class MainWindow(QMainWindow):
             disabled without them.<br><br>
 
             Full license texts are located in the
-            <code>_internal/gstreamer</code> folder.<br>
+            <code>_internal/gstreamer</code>, <code>_internal/qt</code> and
+            <code>_internal/third-party-licenses</code> folders.<br>
             The GStreamer binaries are the GStreamer Project's own, passed on unchanged;
             their source is published by that project at
             <a href='https://gstreamer.freedesktop.org/src/'>gstreamer.freedesktop.org/src</a>
