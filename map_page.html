@@ -43,7 +43,7 @@
       background-color: #f0f0f0;
     }
 
-    /* Button unten links => 4 Modi (OSM, MapTiler, Mapbox, Bing) */
+    /* Button unten links => 3 Modi (OSM, MapTiler, Mapbox) */
     #mapViewBtn {
       position: absolute;
       bottom: 10px;
@@ -314,10 +314,9 @@
     function dbg(msg){ if(debugMode) console.log("[DEBUG] " + msg); }
 
     let mapTilerKey = "";
-    let bingKey     = "";
     let mapboxKey   = "";
 
-    // 0=OSM, 1=MapTiler, 2=Mapbox, 3=Bing
+    // 0=OSM, 1=MapTiler, 2=Mapbox
     let currentMapMode = 0;
 
     let map;
@@ -642,10 +641,9 @@
     }
 
     /***********************************************************
-     * 4) setMapTilerKey, setBingKey, setMapboxKey
+     * 4) setMapTilerKey, setMapboxKey
      ***********************************************************/
     function setMapTilerKey(newKey){ mapTilerKey=newKey; }
-    function setBingKey(newKey){ bingKey=newKey; }
     function setMapboxKey(newKey){ mapboxKey=newKey; }
 
     /***********************************************************

@@ -500,7 +500,6 @@ class MainWindow(QMainWindow):
         self._undo_stack = []
         
         self._maptiler_key = ""
-        self._bing_key     = ""
         self._mapbox_key   = ""
         
         self._load_map_keys_from_settings()
@@ -1537,7 +1536,6 @@ class MainWindow(QMainWindow):
         """
         Liest aus QSettings:
          - mapTiler/key
-         - bing/key
          - mapbox/key
         (jeweils Base64-kodiert) und schreibt sie in self._maptiler_key etc.
         """
@@ -1552,16 +1550,14 @@ class MainWindow(QMainWindow):
                 return ""
 
         enc_mt = s.value("mapTiler/key", "", str)
-        enc_bi = s.value("bing/key", "", str)
         enc_mb = s.value("mapbox/key", "", str)
 
         self._maptiler_key = decode(enc_mt)
-        self._bing_key     = decode(enc_bi)
         self._mapbox_key   = decode(enc_mb)
     
     def _save_map_key_to_settings(self, provider: str, plain_key: str):
         """
-        Speichert den Key in Base64, z. B. provider='mapTiler'|'bing'|'mapbox'.
+        Speichert den Key in Base64, z. B. provider='mapTiler'|'mapbox'.
         """
         s = QSettings("KVRouite", "KVRouite")
         enc = base64.b64encode(plain_key.encode("utf-8")).decode("utf-8")
@@ -1569,9 +1565,6 @@ class MainWindow(QMainWindow):
         if provider == "mapTiler":
             s.setValue("mapTiler/key", enc)
             self._maptiler_key = plain_key
-        elif provider == "bing":
-            s.setValue("bing/key", enc)
-            self._bing_key = plain_key
         elif provider == "mapbox":
             s.setValue("mapbox/key", enc)
             self._mapbox_key = plain_key
@@ -1582,7 +1575,7 @@ class MainWindow(QMainWindow):
     def _update_map_page_keys(self):
         """
         Sendet die aktuellen Keys an map_page.html.
-        Dort definieren wir setMapTilerKey(...), setBingKey(...), setMapboxKey(...).
+        Dort definieren wir setMapTilerKey(...) und setMapboxKey(...).
         """
         if not self.map_widget or not self.map_widget.view:
             return
@@ -1591,9 +1584,6 @@ class MainWindow(QMainWindow):
         # JS-Aufrufe
         js_mt = f"setMapTilerKey('{self._maptiler_key}')"
         page.runJavaScript(js_mt)
-
-        js_bi = f"setBingKey('{self._bing_key}')"
-        page.runJavaScript(js_bi)
 
         js_mb = f"setMapboxKey('{self._mapbox_key}')"
         page.runJavaScript(js_mb)
