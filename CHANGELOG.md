@@ -1,7 +1,8 @@
 # Changelog
 
 All notable changes to KVRouite are listed here, newest version first.
-The section of a version is also the text that goes into the GitHub release notes.
+The GitHub release page is shorter and written for users; this file is the
+detailed record.
 
 Versions up to and including 5.0 are documented in the GitHub releases only.
 
@@ -9,79 +10,76 @@ Versions up to and including 5.0 are documented in the GitHub releases only.
 
 ## 6.0 – unreleased
 
-### Removed
+### Changed
 
-**ffmpeg is no longer shipped — copy mode uses yours**
+**The video engine was rebuilt on GStreamer Editing Services**
 
-Rendering moved to GES, so the FFmpeg full build in `ffmpeg/` (435 MB) was
-only still needed by copy mode, which cuts on keyframes with `-c copy`. It is
-no longer distributed:
+Up to 5.01 there were two playback paths and a separate render engine. Preview
+and export now build the same GES timeline, so the preview shows what the
+render will produce - cut ranges are gone from the picture and the crossfades
+sit at the cuts.
 
-- `build_with_pyinstaller.py` does not copy `ffmpeg/` into the build any more.
-  A new `check_ffmpeg_frei()` runs before packing and aborts if an `ffmpeg`
-  folder or an ffmpeg/ffprobe/ffplay executable turns up in it. It deliberately
-  ignores `av*.dll` — the GStreamer wheels bring their own **LGPL** FFmpeg
-  libraries for gst-libav, and those stay.
-- Copy mode is greyed out unless **both** `ffmpeg` and `ffprobe` are in your
-  PATH. It used to check only `ffmpeg`, so having just one of them led into a
-  mode that failed at export. KVRouite now also says once at startup what is
-  missing and what it costs, instead of leaving you with a greyed-out menu
-  entry and no explanation.
-- `path_manager` no longer prefers a bundled `ffmpeg/bin`; it looks at your
-  stored path, the usual Windows install locations and your PATH.
-- `check_ges.py` treats a missing ffmpeg as a hint, not as a failure.
-- The ffmpeg render engine — `xfade_main()` with its pre-cutting, keyframe
-  search, `copy_cut`, `crossfade_2`, concat, overlay encode and the
-  VAAPI/NVENC parameters — was dead since the encode mode moved to GES. It is
-  deleted, about 1200 lines. What remains of `managers/encoder_manager.py` is
-  the export dialog and the segment length check that copy mode needs.
-
-**What this means for licensing:** 6.0 no longer distributes an FFmpeg
-program, so no GPL source obligation arises from it. It does still distribute
-the FFmpeg **libraries** inside the GStreamer wheels — an LGPL build, covered
-by `gstreamer/COMPONENTS.txt` and the GStreamer source directions. The source
-offer for the GPL build shipped with 5.01 and earlier stays up: that
-obligation belongs to the builds already handed out.
-
-**mpv / libmpv is gone — GStreamer is now the only engine**
-
-Up to 5.01 there were two playback paths and mpv was the default. It could
-not show the crossfades at your cuts, had no real 360° mode, and was never
-involved in the export anyway. Keeping it meant shipping a second video
-runtime and maintaining two code paths for every feature. It is now removed:
-
-- `core/player_backend.py` (the backend interface, the mpv implementation and
-  the factory) is deleted. `VideoEditorWidget` builds `GesPlayerBackend`
+- Crossfades are pre-rendered in the background while you keep working
+  (`core/fade_cache.py`). Finished ones are reused; a cut without a rendered
+  fade shows as a hard cut until it arrives.
+- `core/player_backend.py` - the backend interface, the second implementation
+  and the factory - is deleted. `VideoEditorWidget` builds `GesPlayerBackend`
   directly.
-- Gone from the menus: *Config → Video Backend* and *Config → libmpv*. The
-  QSettings keys `player/backend`, `paths/mpv` and `paths/mpv_mac` are no
-  longer read.
-- `path_manager.py` keeps only the ffmpeg helpers; the libmpv search, the
-  validity checks and the macOS `find_library` patch are gone.
-- `python-mpv` is out of `requirements.txt`.
-- `build_with_pyinstaller.py` no longer copies `mpv/` into the build, so
-  neither the portable ZIP nor the Inno Setup installer contains libmpv
-  any more (110 MB less). A new `check_mpv_frei()` runs right before
-  packing and aborts the build if any `mpv` folder, `libmpv*`/`mpv-*`
-  library or the `mpv.py` binding turns up in it - shipping libmpv again
-  by accident would silently re-create a GPL source obligation whose
-  license texts are no longer in the bundle. The `mpv/` folder itself
-  stays in the working tree; the 5.x branches still build from it.
+- Gone from the menus: *Config -> Video Backend* and *Config -> libmpv*.
+- `path_manager.py` keeps only the ffmpeg helpers.
+- The old render engine - `xfade_main()` with its pre-cutting, keyframe search,
+  `copy_cut`, `crossfade_2`, concat, overlay encode and the VAAPI/NVENC
+  parameters - is deleted, about 1200 lines. What remains of
+  `managers/encoder_manager.py` is the export dialog and the segment length
+  check that copy mode needs.
+- **GStreamer is a startup requirement.** If it cannot be loaded, KVRouite says
+  so with the exact reason and the install command for the platform, and points
+  at `check_ges.py`, instead of failing later somewhere in the user interface.
 
-**GStreamer is therefore a startup requirement now.** If it cannot be loaded,
-KVRouite says so with the exact reason and the install command for the
-platform, and points at `check_ges.py` — instead of failing later somewhere
-in the user interface. ffmpeg stays optional (Copy-Mode only).
+**Rendering is much faster**
+
+The old export ran in several passes over the material: pre-cutting the
+segments, searching keyframes, rendering each crossfade on its own, joining
+everything back together and, if overlays were used, encoding the result a
+further time - with intermediate files at every step. GES builds one timeline
+and renders it in a single pass.
+
+Measured on the reference project - two GoPro files, 3840x2160 H.265 at
+29.97 fps, 11.9 GB each, 70 minutes of raw material cut down to 4.4 minutes
+with five cuts, three of them with a crossfade, and two overlays. Both renders
+used NVENC hardware encoding on the same machine: about 15 minutes before,
+about two minutes now.
+
+That is a rough indication of the new engine, not a benchmark - the time
+depends on the machine, the material and the encoder settings. The gain grows
+with the number of cuts, because every cut used to add work of its own.
+
+The Windows build is also about 100 MB smaller, since it no longer carries a
+second video runtime or the render engine it used to ship.
+
+**Copy mode uses the ffmpeg on your system**
+
+Rendering runs through GES, so ffmpeg is only still used by copy mode, which
+cuts on keyframes with `-c copy`.
+
+- Copy mode is enabled only when **both** `ffmpeg` and `ffprobe` are in your
+  PATH. It used to check only `ffmpeg`, so having just one of them led into a
+  mode that failed at export.
+- KVRouite says once at startup what is missing and what it costs, instead of
+  leaving a greyed-out menu entry with no explanation.
+- `path_manager` looks at your stored path, the usual Windows install locations
+  and your PATH.
+- `check_ges.py` treats a missing ffmpeg as a hint, not as a failure.
 
 ### Added
 
 **True 360° video**
 
-360° footage is stored equirectangular — the whole sphere squeezed into a 2:1
+360° footage is stored equirectangular - the whole sphere squeezed into a 2:1
 rectangle. Up to 5.01 KVRouite only cropped that distorted picture and moved
-the crop around (mpv `panscan` + `video-zoom`/`video-pan`): no projection, no
-wrap-around across the 360° seam, no real zoom — and the view never reached
-the export, which always rendered the full distorted 2:1 image.
+the crop around: no projection, no wrap-around across the 360° seam, no real
+zoom - and the view never reached the export, which always rendered the full
+distorted 2:1 image.
 
 KVRouite now does the real thing with an OpenGL fragment shader
 (`core/view360.py`), attached to each clip as a `GESEffect`:
@@ -91,80 +89,50 @@ KVRouite now does the real thing with an OpenGL fragment shader
   scaled by the current field of view, so it feels the same at any zoom.
 - Straight lines stay straight, and panning across the seam is seamless.
 - One viewing direction per video, stored in the project file (`view360`).
-  *View → Apply 360° view to all videos* copies it to every clip, which is
+  *View -> Apply 360° view to all videos* copies it to every clip, which is
   what you want for material from one camera.
-- **The view is rendered.** Preview and export build the same timeline, so
-  the export produces a normal 16:9 video showing exactly what the preview
-  showed. Crossfades work: both halves are projected and then mixed.
+- **The view is rendered.** Preview and export build the same timeline, so the
+  export produces a normal 16:9 video showing exactly what the preview showed.
+  Crossfades work: both halves are projected and then mixed.
 - Measured: the shader costs nothing noticeable in the preview (30.0 fps with
-  and without it on 1920x960 material), and it changes no timing — the same
+  and without it on 1920x960 material), and it changes no timing - the same
   project rendered with and without 360° gives the identical frame count and
   duration.
 - If the GL elements are missing (`gstreamer1.0-gl` on Linux, or no GL context
   over remote desktop), 360° simply stays off and says why; `check_ges.py`
   reports it.
 
-**GStreamer / GES licensing and credits**
+**Overlays**
 
-The GES backend brings a third-party runtime with it, and on Windows KVRouite
-distributes that runtime. It is therefore documented like ffmpeg:
+Images can be placed on the timeline, positioned in the picture and are
+rendered into the export.
 
-- New folder `gstreamer/` with `NOTICE.txt` (notice, patent notice, LGPL
-  section 6 relinking note), `CORRESPONDING-SOURCE.txt`, `COMPONENTS.txt`
-  (every shipped package with the license expression the package itself
-  declares) and the full texts `COPYING.LGPL-2.1`, `COPYING.GPL-2`,
-  `COPYING.GPL-3`. The wheels ship no license text of their own, so these had
-  to be supplied.
-- Unlike ffmpeg, no GStreamer sources are copied to kvrouite.com. These
-  binaries are the GStreamer Project's own wheels, passed on unchanged, so the
-  Corresponding Source is that project's 1.28.6 release tarballs - which GPLv3
-  section 6(d) allows us to point at instead of rehosting, as long as clear
-  directions travel with the binaries. `CORRESPONDING-SOURCE.txt` is those
-  directions and explains the difference.
-- `build_with_pyinstaller.py` copies `gstreamer/` to `_internal/gstreamer` and
-  now reports whether the GStreamer runtime actually ended up in the build -
-  if it did, the license texts are mandatory; if it did not, the build will not
-  even start and is unusable.
-- GStreamer, GES and PyGObject are named in the startup disclaimer, in
-  `installer/AGREEMENT.txt`, in the README and on the website, with the split
-  between the LGPL-2.1+ core and the GPL-2.0+ x264/x265 encoder plugins, and
-  with the note that Linux redistributes nothing. Since mpv is no longer part
-  of the distribution, it was taken out of all of those lists again, and out of
-  the `_internal/...` folder lists they point at. The source offer for the
-  libmpv shipped with 5.01 and earlier stays up at kvrouite.com - that
-  obligation does not end when the next version drops the library.
-- The patent notice now also names x264, AAC, MP3, AC-3 and DTS, not only x265.
+### Removed
+
+**Street view and the create mode**
+
+The street view pane was only ever visible inside the create mode, and the
+create mode existed to place GPX points next to it. Both are gone, together
+with the Mapillary key entry. Building GPX points still works: *new points at
+video time* and *directions* remain as their own menu entries.
 
 ### Fixed
 
-**mpv was documented under the wrong license**
+**Loading a second project could stall the preview**
 
-The README listed mpv as LGPLv2.1+. mpv is LGPL only when built without any
-GPL-only files; the `libmpv-2.dll` that used to be shipped links libx264 and
-libx265 and is a GPL build. It was corrected to GPL-2.0-or-later - which is
-what the NOTICE always said - before mpv was dropped from the distribution
-altogether. `mpv/NOTICE.txt` still carries the correct statement, for the
-5.x branches that keep building from that folder.
+Loading a project while another one was open started the crossfade
+pre-rendering in the middle of the load - still in the mode of the previous
+project - and could leave the progress window waiting forever. Two causes, both
+fixed: the preview is no longer rebuilt while a project is loading, and the
+render loop can no longer stop without reporting a result.
 
-**FFmpeg was listed under two different licenses**
+**The keyframe index travelled between projects**
 
-The About dialog said GPL-2.0-or-later while `ffmpeg/NOTICE.txt`, the README,
-`installer/AGREEMENT.txt` and the startup disclaimer all said
-GPL-3.0-or-later. The About dialog now agrees with the other four.
-
-**Notice files were copies of each other**
-
-`ffmpeg/NOTICE.txt.txt` and `mpv/NOTICE.txt.txt` were byte-identical and each
-described both libraries. They are now one file per component, named
-`NOTICE.txt`, each describing only what is in its folder.
-
-**License texts were missing from the repository**
-
-`.gitignore` still had exceptions for `ffmpeg/VGSync_ffmpeg.txt` and
-`mpv/VGSync_mpv.txt` - names from before the rename. The guidance files the
-README points to, and the notice and license texts, were therefore not in the
-repository at all. The exceptions now match the actual file names and also
-cover `NOTICE.txt`, `LICENSE`, `LICENSE.GPL` and `Copyright`.
+The index was written into the project file and only ever cleared by *New
+Project*, so a project could carry the keyframes of videos that were no longer
+loaded. It is no longer stored: when a project is loaded the index is read
+directly from the video files, which takes milliseconds, and it is dropped when
+the playlist changes. Project files are much smaller as a result.
 
 ---
 
