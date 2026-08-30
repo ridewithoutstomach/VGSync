@@ -47,7 +47,7 @@ Was die Modi damit tun:
 
   f      genau ein Bild weiter, im fertigen Video. Steht man auf dem letzten
          Bild vor einem Schnitt, fuehrt EIN Druck auf das erste Bild dahinter.
-         Solange kein Schnitt im Weg ist, macht das mpv selbst ("frame-step"),
+         Solange kein Schnitt im Weg ist, macht das der Player selbst,
          das ist bildgenau. Der Multiplier bleibt hier ohne Wirkung, wie bisher.
 
   k      zum naechsten Keyframe, DER IM FERTIGEN VIDEO NOCH EXISTIERT.
@@ -58,8 +58,8 @@ Was die Modi damit tun:
          Encode-Mode, siehe _require_encode_mode(). Der Multiplier bleibt ohne
          Wirkung, es geht immer eine Kante weiter.
 
-ZUM SPRINGEN: mpv zeigt bei "seek ... absolute exact" das ERSTE Bild AB der
-Zielzeit (nachgemessen an libmpv). Wer das letzte Bild VOR einem Zeitpunkt
+ZUM SPRINGEN: ein bildgenauer Sprung zeigt das ERSTE Bild AB der Zielzeit
+(so nachgemessen). Wer das letzte Bild VOR einem Zeitpunkt
 sehen will, muss deshalb eine ganze Bilddauer abziehen - eine Millisekunde
 reicht nicht, die liegt noch im selben Bild. Siehe _edge_seek_target().
 """
@@ -78,7 +78,7 @@ where the cut will really land."""
 
     def __init__(self, video_editor):
         """
-        :param video_editor: das VideoEditorWidget (mpv-Player, multi_durations)
+        :param video_editor: das VideoEditorWidget (Player, multi_durations)
         """
         self.video_editor = video_editor
         self.mainwindow = None
@@ -108,8 +108,7 @@ where the cut will really land."""
     # ------------------------------------------------------------------------
     def step_forward(self):
         if self.video_editor.is_playing:
-            self.video_editor._player.pause = True
-            self.video_editor.is_playing = False
+            self.video_editor.set_paused(True)
 
         if self.step_mode in ('s', 'm'):
             self._step_time(+1)
@@ -124,8 +123,7 @@ where the cut will really land."""
 
     def step_backward(self):
         if self.video_editor.is_playing:
-            self.video_editor._player.pause = True
-            self.video_editor.is_playing = False
+            self.video_editor.set_paused(True)
 
         if self.step_mode in ('s', 'm'):
             self._step_time(-1)
@@ -148,7 +146,7 @@ where the cut will really land."""
         if not keeps:
             target = max(cur_s + delta, 0.0)
             print(f"[DEBUG] (time): keine Schnitte => {cur_s:.3f} => {target:.3f}")
-            self.video_editor._jump_to_global_time(target)
+            self.video_editor.seek_global(target)
             return
 
         cur_final = self._final_from_source(cur_s)
@@ -157,7 +155,7 @@ where the cut will really land."""
         arrow = "+" if direction > 0 else "-"
         print(f"[DEBUG] (time {arrow}): roh {cur_s:.3f} => {target:.3f} | "
               f"fertig {cur_final:.3f} => {new_final:.3f} (dt={delta:+.3f})")
-        self.video_editor._jump_to_global_time(target)
+        self.video_editor.seek_global(target)
 
     def _compute_time_step_s(self):
         if self.step_mode == 'm':
@@ -175,14 +173,14 @@ where the cut will really land."""
 
         if idx is None:
             print(f"[DEBUG] (frame-forward): {cur_s:.3f} liegt in keinem "
-                  f"Keep-Bereich => normaler mpv-Schritt")
+                  f"Keep-Bereich => normaler Bildschritt")
             self.video_editor.frame_step_forward()
             return
 
         ke = keeps[idx][1]
         if cur_s + d < ke - 0.25 * d:
-            # Das naechste Bild bleibt erhalten: mpv macht das bildgenau.
-            print(f"[DEBUG] (frame-forward): {cur_s:.3f} + 1 Bild (mpv)")
+            # Das naechste Bild bleibt erhalten: der Player macht das bildgenau.
+            print(f"[DEBUG] (frame-forward): {cur_s:.3f} + 1 Bild")
             self.video_editor.frame_step_forward()
             return
 
@@ -193,7 +191,7 @@ where the cut will really land."""
         target = self._edge_seek_target("in", keeps[idx + 1][0])
         print(f"[DEBUG] (frame-forward): {cur_s:.3f} => {target:.3f} "
               f"(ueber den Schnitt {ke:.3f}..{keeps[idx + 1][0]:.3f})")
-        self.video_editor._jump_to_global_time(target)
+        self.video_editor.seek_global(target)
 
     def _step_frame_backward(self):
         cur_s = self._get_current_global_time()
@@ -203,13 +201,13 @@ where the cut will really land."""
 
         if idx is None:
             print(f"[DEBUG] (frame-backward): {cur_s:.3f} liegt in keinem "
-                  f"Keep-Bereich => normaler mpv-Schritt")
+                  f"Keep-Bereich => normaler Bildschritt")
             self.video_editor.frame_step_backward()
             return
 
         ks = keeps[idx][0]
         if cur_s - d > ks - 0.25 * d:
-            print(f"[DEBUG] (frame-backward): {cur_s:.3f} - 1 Bild (mpv)")
+            print(f"[DEBUG] (frame-backward): {cur_s:.3f} - 1 Bild")
             self.video_editor.frame_step_backward()
             return
 
@@ -220,7 +218,7 @@ where the cut will really land."""
         target = self._edge_seek_target("out", keeps[idx - 1][1])
         print(f"[DEBUG] (frame-backward): {cur_s:.3f} => {target:.3f} "
               f"(ueber den Schnitt {keeps[idx - 1][1]:.3f}..{ks:.3f})")
-        self.video_editor._jump_to_global_time(target)
+        self.video_editor.seek_global(target)
 
     # ------------------------------------------------------------------------
     # k => Keyframes, die im fertigen Video noch vorkommen
@@ -230,8 +228,17 @@ where the cut will really land."""
         if not raw:
             print("[DEBUG] (k): Keine Keyframes vorhanden.")
             from PySide6.QtWidgets import QMessageBox
-            QMessageBox.warning(None, "No Keyframes Loaded",
-                "No keyframes loaded! Please index your videos or switch off 'k' mode.")
+            # Indiziert wird nur noch im Copy-Mode: der Keyframe-Index hat
+            # keinen anderen Abnehmer als diesen Schrittmodus, und der zeigt,
+            # wo Copy-Mode schneiden wuerde. Im Encode-Mode liegt jeder Schnitt
+            # ohnehin genau auf dem Bild, das man gewaehlt hat.
+            QMessageBox.warning(
+                None, "No Keyframes Loaded",
+                "No keyframes are indexed.\n\n"
+                "Keyframe stepping shows where Copy mode would cut, so the "
+                "index is only built in Copy mode.\n\n"
+                "In Encode mode every cut lands exactly on the frame you "
+                "picked - use step mode '1' or 'c' there.")
             return
 
         kfs = self._surviving_keyframes(raw)
@@ -261,7 +268,7 @@ where the cut will really land."""
         arrow = "+" if direction > 0 else "-"
         print(f"[DEBUG] (k {arrow}): {cur_s:.3f} => {target:.3f} "
               f"(idx={idx} von {len(kfs)})")
-        self.video_editor._jump_to_global_time(target)
+        self.video_editor.seek_global(target)
 
     def _surviving_keyframes(self, raw):
         """
@@ -307,7 +314,7 @@ where the cut will really land."""
                 target = self._edge_seek_target(kind, t)
                 print(f"[DEBUG] (c {arrow}): {cur_s:.3f} => {target:.3f} "
                       f"({kind} @ {t:.3f})")
-                self.video_editor._jump_to_global_time(target)
+                self.video_editor.seek_global(target)
                 return
 
         print("[DEBUG] (c): letzte Schnittkante in dieser Richtung erreicht.")
@@ -424,7 +431,7 @@ where the cut will really land."""
         """
         Rechnet eine Kante in die Zeit um, auf die wir springen.
 
-        Nachgemessen an libmpv (hr_seek + "exact"): mpv zeigt das ERSTE Bild AB
+        Nachgemessen an einem bildgenauen Sprung: gezeigt wird das ERSTE Bild AB
         der Zielzeit, nicht das davor. Also:
 
           "in"  (erstes Bild ab der Kante)   -> die Kante selbst, minus 0,1 ms,
@@ -446,26 +453,12 @@ where the cut will really land."""
     # ------------------------------------------------------------------------
     def _get_current_fps(self) -> float:
         """
-        Bildrate aus mpv. Fallback 25.0.
-
-        video_params kennt KEIN "fps" - nachgemessen an libmpv enthaelt es
-        w/h/aspect/par usw., aber keine Bildrate. Der frueher benutzte Zugriff
-        lief deshalb immer in den Fallback. Richtig sind "container-fps" und
-        ersatzweise "estimated-vf-fps".
+        Bildrate des aktuellen Videos. Fallback 25.0, wenn der Player keine
+        liefert - siehe GesPlayerBackend.fps() in core/ges_backend.py.
         """
-        for name in ("container_fps", "estimated_vf_fps"):
-            try:
-                val = getattr(self.video_editor._player, name)
-                if val and float(val) > 0:
-                    return float(val)
-            except Exception:
-                pass
-        try:
-            val = self.video_editor._player.video_params["fps"]
-            if val and float(val) > 0:
-                return float(val)
-        except Exception:
-            pass
+        fps = self.video_editor.get_fps()
+        if fps and float(fps) > 0:
+            return float(fps)
         return 25.0
 
     def _get_current_global_time(self) -> float:

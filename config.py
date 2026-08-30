@@ -31,7 +31,7 @@ from PySide6.QtCore import QSettings
 # 1) Versions-Konfiguration & Modus
 ##############################################################################
 
-APP_VERSION = "5.01"
+APP_VERSION = "6.0"
 # use 4.30_pre for a pre Version
 
 
@@ -120,6 +120,9 @@ _instance_lock_file = None   # bleibt offen, solange die App laeuft
 
 MY_GLOBAL_TMP_DIR = os.path.join(_INSTANCE_DIR, "segments")
 TMP_KEYFRAME_DIR = os.path.join(_INSTANCE_DIR, "keyframes")
+# Vorgerenderte Blenden fuer die GES-Vorschau. Kleine Dateien: rund 4 MB je
+# Blende (2 s, 1280 breit), unabhaengig von der Groesse der Quelldateien.
+TMP_FADE_DIR = os.path.join(_INSTANCE_DIR, "fades")
 
 
 def _lock_exclusive(fh) -> bool:
@@ -179,6 +182,7 @@ def prepare_instance_temp_dir():
     """
     global _instance_lock_file
     os.makedirs(MY_GLOBAL_TMP_DIR, exist_ok=True)
+    os.makedirs(TMP_FADE_DIR, exist_ok=True)
     os.makedirs(TMP_KEYFRAME_DIR, exist_ok=True)
     if _instance_lock_file is not None:
         return

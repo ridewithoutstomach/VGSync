@@ -7,7 +7,7 @@ KVRouite
 
 ![Kinomap Logo](./doc/Kinomap_Logo.png)
 
-KVRouite is a Python-based desktop application designed to synchronize GPX data with video footage. Its a Video and GPX synchronising tool. It uses "mpv" for high-precision video playback and "ffmpeg" for media processing.
+KVRouite is a Python-based desktop application designed to synchronize GPX data with video footage. Its a Video and GPX synchronising tool. It plays, cuts and renders video through "GStreamer Editing Services (GES)". Copy mode additionally needs "ffmpeg", which you install yourself - KVRouite does not ship it. Because preview and export build the same GES timeline, the preview shows what the export will produce - including the crossfades at your cuts and true 360°: equirectangular footage is reprojected to a normal picture, you pick the viewing direction and zoom in the preview by dragging and scrolling, and that view is what gets rendered.
 
 ![KVRouite Main Window](./screenshots/mainwindow.png)
 
@@ -21,21 +21,20 @@ Requirements
 ------------
 
 - Python 3.10.9 (64-bit) or Python 3.12.0 (64-bit)
-- mpv binary (must be placed in "mpv/" folder)
-- ffmpeg binary (must be placed in "ffmpeg/" folder)
+- ffmpeg and ffprobe in your PATH - **only** for the Copy-Mode. They are not
+  shipped with KVRouite; without them Copy-Mode stays disabled and everything
+  else works.
 
-Python packages are split into two files:
+There are two requirements files:
 
-- "requirements.txt" - everything the application needs to run.
-  The same list on Linux and Windows.
+- "requirements.txt" - everything the application needs to run, GStreamer
+  included. On Windows and macOS one command installs all of it. On Linux the
+  GStreamer line is skipped automatically, because there are no Linux wheels -
+  there it comes from the distribution, see below.
 - "requirements-build.txt" - additional packages needed only to build the
   Windows executable (PyInstaller and its dependencies).
 
 If you just want to run KVRouite, "requirements.txt" is all you need.
-
-Note:
-Binaries are NOT included in the Git repository due to size limitations.
-You must manually download and extract them from the GitHub Releases page.
 
 -------------------------------------------------------------------------------
 ## 🔧 Installation & Usage (Linux & Windows)
@@ -50,8 +49,47 @@ Install the required system packages (one-time setup):
 
 ```bash
 sudo apt update
-sudo apt install ffmpeg libmpv-dev python3-venv
+sudo apt install ffmpeg python3-venv
 ```
+
+#### Required: GStreamer / GES
+
+KVRouite plays, cuts and renders the timeline through GStreamer Editing
+Services. This is not optional -- without it the application will not start.
+
+On Linux there are no GStreamer Python wheels, so this comes from the
+distribution:
+
+```bash
+sudo apt install python3-gi python3-gi-cairo \
+    gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 gir1.2-ges-1.0 \
+    gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+    gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly \
+    gstreamer1.0-libav gstreamer1.0-gl gstreamer1.0-x
+```
+
+`gir1.2-ges-1.0` is in the *universe* component; if apt cannot find it,
+enable it once with `sudo add-apt-repository universe`. Ubuntu 24.04 LTS
+ships GStreamer 1.24.2, Ubuntu 26.04 LTS ships 1.28.2; the Windows build
+uses the 1.28.6 wheels (see `requirements.txt`).
+
+These are **system** packages. A plain venv hides them and `import gi`
+fails although everything is installed -- create the venv with
+`--system-site-packages` as shown below.
+
+Then verify the environment before starting the app:
+
+```bash
+python3 check_ges.py
+```
+
+It checks typelibs, the GES engine, a usable video sink, an H.264 decoder and
+the GL elements the 360 view needs, and it names the missing package instead
+of failing later inside the player. A missing ffmpeg is reported as a hint,
+not an error - it only costs you the Copy-Mode.
+
+A step-by-step guide with a troubleshooting table is in
+[`GES_Installation_Kubuntu.md`](GES_Installation_Kubuntu.md) (German).
 
 #### Download the Project
 
@@ -69,7 +107,8 @@ git clone https://github.com/ridewithoutstomach/KVRouite.git
 
 ```bash
 cd KVRouite
-python3 -m venv venv
+python3 -m venv venv                            # with the GES backend:
+# python3 -m venv --system-site-packages venv
 source venv/bin/activate
 pip install -r requirements.txt
 python KVRouite.py
@@ -94,25 +133,50 @@ python KVRouite.py
 
 ---
 
+#### GStreamer / GES
+
+On Windows the whole GStreamer runtime comes as pip wheels - no MSYS2, no
+system installation. It is part of `requirements.txt`, so the install above
+already covers it: `gstreamer-bundle` 1.28.6, ~80 MB in site-packages,
+uninstalling removes every file. Check the result with `python check_ges.py`.
+
+Licensing note: these wheels contain GPL- and LGPL-licensed binaries, among
+them the x264/x265 encoder plugins that the GES encoder renders with. **If you
+build and redistribute a Windows executable yourself, you are redistributing
+those binaries** and the obligations in `gstreamer/NOTICE.txt` apply to you.
+In practice that means shipping the license texts and keeping the directions to
+the sources next to them - not hosting sources yourself, since the binaries are
+the GStreamer Project's own and their sources are published by that project
+(see `gstreamer/CORRESPONDING-SOURCE.txt`). `build_with_pyinstaller.py` copies
+`gstreamer/` into the build for you and prints whether the GStreamer runtime
+actually ended up in it.
+
+---
+
 ### ❗ Important Notes
 
 - Always create and activate the virtual environment **inside** the `KVRouite` folder.
 - Do **not** run `python KVRouite.py` outside the project folder.
-- On **Linux**, make sure required packages like `ffmpeg` and `libmpv-dev` are installed.
+- On **Linux**, make sure the GStreamer packages listed above are installed. `ffmpeg` is optional and only needed for the Copy-Mode.
 
 
 
 -------------------------------------------------------------------------------
 
-Install External Binaries (Windows)
+External Binaries (Windows)
 --------------------------
 
-Download the following ZIP files from the latest KVRouite Release:
+There is nothing to download and unpack.
 
-- ffmpeg.zip → extract into "ffmpeg/" folder
-- mpv.zip → extract into "mpv/" folder
+GStreamer comes from `requirements.txt` (see above). The "gstreamer/" folder
+in this repository contains no binaries - only the license texts, the component
+list and the source code directions, which the build process copies next to the
+runtime.
 
-The "ffmpeg/" and "mpv/" folders include guidance files ("KVRouite_ffmpeg.txt" and "KVRouite_mpv.txt") describing the expected contents.
+ffmpeg is optional and only needed for the Copy-Mode. Install it yourself and
+make sure `ffmpeg` and `ffprobe` are in your PATH, or point KVRouite at them
+under Config > FFmpeg > Set ffmpeg Path. Without them the Copy-Mode is greyed
+out and KVRouite says so once at startup.
 
 -------------------------------------------------------------------------------
 
@@ -163,30 +227,114 @@ Third-Party Components
 This project includes and relies on the following third-party components:
 
 FFmpeg
-- Version: 7.1-full_build
-- License: GPLv3
+- Version: 7.1, as **shared libraries only** (libavcodec, libavformat,
+  libavutil, libswresample, libswscale), inside the GStreamer wheels and used
+  by the gst-libav plugin.
+- License: LGPL-2.1-or-later. Covered by the GStreamer entry below - the
+  Corresponding Source is the GStreamer Project's own, see
+  "gstreamer/CORRESPONDING-SOURCE.txt".
+- The ffmpeg and ffprobe **programs** are not distributed with KVRouite. Copy
+  mode calls whatever is installed on the user's system.
 - Website: https://ffmpeg.org
-- Binaries provided in: "ffmpeg/"
-- Original source code included in: "third-party-src/FFmpeg-7.1-source.zip"
-- Release notes included in the source archive
 
-mpv
-- Version: 0.40.0
-- License: LGPLv2.1+
-- Website: https://mpv.io
-- Binaries provided in: "mpv/"
-- Original source code included in: "third-party-src/mpv-0.40.0-source.zip"
-- Release notes included in the source archive
+GStreamer / GStreamer Editing Services (GES)
+- Version: 1.28.6 on Windows (pip package "gstreamer-bundle", see
+  requirements.txt); on Linux whatever the distribution ships
+- License: LGPL-2.1-or-later for GStreamer core, gst-plugins-base/good/bad,
+  GES and PyGObject. The bundled x264 and x265 encoder plugins - which the GES
+  encoder uses for rendering - and the a52dec/dtsdec/dvdread plugins are
+  GPL-2.0-or-later. Further components are under MIT, BSD, Apache-2.0, MPL and
+  other permissive licenses. The Microsoft Visual C++ runtime redistributables
+  contained in the wheels are proprietary Microsoft components and are System
+  Libraries in the sense of the GNU GPL.
+- Website: https://gstreamer.freedesktop.org
+- Binaries: **Windows only.** They are installed by pip and are placed into the
+  "_internal" folder of the Windows build. This is the engine KVRouite plays,
+  cuts and renders with, so it is always present in a Windows build - the build
+  script refuses to package a build without it. **On Linux nothing of this is
+  distributed with KVRouite** - GStreamer is installed from the distribution's
+  own packages, so KVRouite redistributes no GStreamer binary there.
+- Source code: the binaries are the GStreamer Project's own prebuilt wheels,
+  passed on unchanged. KVRouite compiles nothing here, so there is no KVRouite
+  build to publish - the Corresponding Source is the 1.28.6 release tarballs at
+  https://gstreamer.freedesktop.org/src/ plus the project's cerbero build
+  recipes. GPLv3 section 6(d) permits exactly this: source on a third-party
+  server, with clear directions next to the binaries. Those directions, the
+  individual tarball URLs and a fallback contact are in
+  "gstreamer/CORRESPONDING-SOURCE.txt".
+- Notice and per-package license list: "gstreamer/NOTICE.txt" and
+  "gstreamer/COMPONENTS.txt" (in the Windows build: "_internal/gstreamer/")
+- Note: the GStreamer wheels contain an LGPL build of the FFmpeg libraries,
+  used by the gst-libav plugin. That is the only FFmpeg KVRouite distributes.
+
+Qt 6 / PySide6 / shiboken6
+- Version: Qt 6.11.2, PySide6 / PySide6-Essentials / PySide6-Addons /
+  shiboken6 6.11.2
+- License: the packages declare "LGPL-3.0-only OR GPL-2.0-only OR
+  GPL-3.0-only"; KVRouite relies on LGPL-3.0-only. That is compatible with
+  KVRouite being GPL-3.0-or-later, because the LGPL version 3 permits
+  conveying the covered work under the GPL version 3.
+- Website: https://pyside.org
+- Binaries: **Windows only.** Installed by pip and placed into
+  "_internal/PySide6" of the Windows build - 122 Qt6 modules, the largest
+  third-party part of the application. On Linux nothing of this is
+  distributed with KVRouite. Qt WebEngine, used for the map, embeds a
+  Chromium-derived engine (Chromium 140.0.7339.225) that carries 187 further
+  projects of its own.
+- Relinking: the Qt libraries are ordinary DLL files, not linked into the
+  executable, so they can be replaced with a compatible build - which is what
+  the LGPL requires.
+- Source code: the binaries are the Qt Project's own, passed on unchanged, so
+  the Corresponding Source is that project's own release - see
+  "qt/CORRESPONDING-SOURCE.txt" for the exact locations.
+- Notice and license texts: "qt/NOTICE.txt", "qt/COMPONENTS.txt",
+  "qt/COPYING.LGPL-3", "qt/COPYING.GPL-3", and for the browser engine
+  "qt/LICENSE.chromium" (3-clause BSD, reproduced unchanged) together with
+  "qt/CHROMIUM-THIRD-PARTY.txt", The Qt Company's list of the projects inside
+  it (in the Windows build: "_internal/qt/")
+
+OpenLayers, CPython, OpenSSL, Pillow, fitparse
+- OpenLayers 7.3.0 (BSD-2-Clause) - the map library, shipped as "ol.js" and
+  "ol.css" next to the executable
+- CPython 3.12 (Python Software Foundation License), OpenSSL 3 (Apache-2.0),
+  Pillow 12.3.0 (MIT-CMU), fitparse 1.2.0 (MIT)
+- All permissive; none requires us to supply source code, but each requires
+  its notice to travel with the binaries.
+- Notice and license texts: "third-party-licenses/" (in the Windows build:
+  "_internal/third-party-licenses/")
 
 GoPro GPS Extraction
 - Based on: gopro2gpx by Juan M. Casillas (https://github.com/juanmcasillas/gopro2gpx)
 - Modifications by: Bernd Eller
 - License: GNU GPL v3
 
-All third-party components are redistributed in accordance with their respective licenses.
-The complete and unmodified source code is included in the "third-party-src/" directory 
-and will be retained and made available for at least three (3) years in accordance with GPL and LGPL requirements.
+KVRouite as a whole is distributed under GPL-3.0-or-later. All of the above are
+compatible with that: GPL-2.0-or-later and LGPL-2.1-or-later both allow use
+under any later version of the respective license.
 
+All third-party components are redistributed in accordance with their respective
+licenses.
+
+KVRouite distributes no FFmpeg program and no libmpv - the only third-party
+binaries it ships are the GStreamer ones.
+
+For GStreamer no source archive is hosted here, and none needs to be: those
+binaries are the
+GStreamer Project's own, redistributed unchanged, and their Corresponding Source
+is published by that project in the same version - see
+"gstreamer/CORRESPONDING-SOURCE.txt" for the exact URLs and the reasoning.
+
+The same holds for Qt: the PySide6 wheels are the Qt Project's own binaries,
+redistributed unchanged, so GPL-3 section 6(d) - which the LGPL-3 incorporates -
+lets us point at that project's source release. Nothing here is compiled by
+KVRouite, and no source archive is rehosted. If a link stops working, write to
+bernd@kvrouite.com and you will be pointed at a working one.
+
+None of these components are modified by KVRouite. All libraries are loaded
+dynamically from separate files and can be replaced by your own builds
+(LGPL section 6): overwrite the corresponding DLL in the "_internal" folder and
+restart the application. The Windows build is deliberately not packed into a
+single-file executable, so that this stays possible.
 
 
 -------------------------------------------------------------------------------

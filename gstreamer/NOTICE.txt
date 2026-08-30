@@ -1,0 +1,125 @@
+========================================
+ NOTICE & SOURCE CODE OFFER
+ GStreamer / GStreamer Editing Services
+========================================
+
+This folder documents the GStreamer components that KVRouite distributes as
+part of the Windows build.
+
+The binaries themselves are NOT in this folder. On Windows they are installed
+by pip (package "gstreamer-bundle", version 1.28.6) and are placed by the
+build process into the "_internal" folder next to KVRouite.exe, in the
+sub-folders "gstreamer_libs", "gstreamer_plugins", "gstreamer_plugins_libs",
+"gstreamer_plugins_restricted", "gstreamer_plugins_gpl",
+"gstreamer_plugins_gpl_restricted", "gstreamer_python",
+"gstreamer_ext_runtime" and "gi".
+
+On LINUX nothing of this is distributed with KVRouite. GStreamer comes from
+the distribution's own packages (python3-gi, gir1.2-ges-1.0,
+gstreamer1.0-plugins-*), installed by the user. This notice then only serves
+as attribution.
+
+----------------------------------------
+ Licenses
+----------------------------------------
+GStreamer core, gst-plugins-base/good/bad, GStreamer Editing Services (GES)
+and PyGObject are licensed under the GNU Lesser General Public License,
+version 2.1 or later (LGPL-2.1-or-later).
+
+Some of the distributed plugins and the libraries they wrap are licensed
+under the GNU General Public License, version 2 or later (GPL-2.0-or-later).
+This includes in particular the x264 and x265 encoder plugins, which KVRouite
+uses for rendering when the GES encoder is selected.
+
+Further components are under permissive licenses (MIT, BSD, Apache-2.0, MPL,
+ISC, Zlib and others). The exact, per-package license expressions as declared
+by the upstream packages are listed in COMPONENTS.txt in this folder.
+
+KVRouite as a whole is distributed under the GNU General Public License
+version 3 or later. GPL-2.0-or-later and LGPL-2.1-or-later components are
+compatible with that, because both permit use under any later version of the
+respective license.
+
+The full license texts are provided in this folder:
+  COPYING.LGPL-2.1   GNU Lesser General Public License, version 2.1
+  COPYING.GPL-2      GNU General Public License, version 2
+  COPYING.GPL-3      GNU General Public License, version 3
+
+----------------------------------------
+ Source Code Availability
+----------------------------------------
+The binaries distributed here are the prebuilt GStreamer binaries published by
+the GStreamer Project itself, in the "gstreamer-bundle" 1.28.6 wheels on PyPI.
+KVRouite passes them on unchanged and compiles nothing.
+
+Every GPL component here is GPL-2.0-or-later and every LGPL component
+LGPL-2.1-or-later, so KVRouite conveys them under version 3 of the respective
+license, as it does for itself. Under GNU GPL version 3, section 6(d), the
+Corresponding Source may be kept on a third-party server as long as clear
+directions accompany the object code. Those directions are here and in
+CORRESPONDING-SOURCE.txt in this folder.
+
+The Corresponding Source is the 1.28.6 release tarballs published by the
+GStreamer Project at:
+
+  https://gstreamer.freedesktop.org/src/
+
+together with the cerbero build recipes at
+https://gitlab.freedesktop.org/gstreamer/ , which produce these exact binaries
+from those sources. CORRESPONDING-SOURCE.txt lists the individual tarball URLs.
+
+These binaries are the GStreamer Project's own official wheels, redistributed
+unchanged; KVRouite compiles none of them. GNU GPL version 3 section 6(d)
+therefore allows us to direct you to that project's own source release instead
+of rehosting it. Should a link there ever stop working, write to
+
+  bernd@kvrouite.com
+
+and you will be pointed at a working source for the version you received.
+
+----------------------------------------
+ Modifications
+----------------------------------------
+KVRouite does not modify GStreamer. The binaries are redistributed unchanged
+as they are published in the "gstreamer-bundle" wheels for version 1.28.6.
+KVRouite uses GStreamer through its public API (GES, GstPbutils, GstVideo)
+via the PyGObject bindings.
+
+----------------------------------------
+ Replacing the libraries (LGPL section 6)
+----------------------------------------
+All GStreamer libraries are shipped as separate, dynamically loaded DLLs in
+the "_internal" folder. They are not linked statically into KVRouite.exe and
+are not compressed into a single-file executable. You may replace them with
+your own build of the same libraries: overwrite the DLLs in the corresponding
+"_internal/gstreamer_*" sub-folder and restart the application.
+
+----------------------------------------
+ No Warranty & Liability
+----------------------------------------
+These libraries are provided under the GPL/LGPL "AS IS," WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+A PARTICULAR PURPOSE. Please refer to the license texts for the full
+disclaimer.
+
+----------------------------------------
+ Patent Encumbrance Notice
+----------------------------------------
+Some of the distributed plugins are known to be patent-encumbered in certain
+jurisdictions. This applies in particular to the H.264 (x264, openh264), H.265
+(x265), AAC, MP3, AC-3 (a52dec), DTS (dtsdec) and VVC decoders/encoders.
+It is the user's responsibility to ensure compliance with all applicable laws
+and regulations and to obtain any necessary patent licenses.
+
+----------------------------------------
+ Official Websites
+----------------------------------------
+- GStreamer:                  https://gstreamer.freedesktop.org
+- GStreamer Editing Services: https://gstreamer.freedesktop.org/documentation/gst-editing-services/
+- PyGObject:                  https://pygobject.gnome.org
+- x264:                       https://www.videolan.org/developers/x264.html
+- x265:                       https://www.videolan.org/developers/x265.html
+
+========================================
+ End of NOTICE
+========================================

@@ -33,6 +33,28 @@ import sys, platform, builtins
 REAL_STDOUT = sys.__stdout__
 REAL_STDERR = sys.__stderr__
 
+
+def _konsole_vertraegt_sonderzeichen():
+    """Pfeile, Haken und Warnzeichen in print() nicht zum Absturz werden lassen.
+
+    Die Windows-Konsole laeuft je nach Codepage auf cp1252. Ein "->" als
+    Unicode-Pfeil, ein Haken oder ein Warndreieck in einer Debug-Ausgabe wirft
+    dort UnicodeEncodeError - mitten im Programm, an einer voellig
+    harmlosen Stelle. Gemessen beim Start des gepackten Programms:
+    map_widget.py brach an einem "=>"-Pfeil ab.
+
+    errors="replace" ersetzt solche Zeichen durch "?" statt zu werfen. Betrifft
+    nur die Anzeige; kein Text der Anwendung haengt daran.
+    """
+    for strom in (sys.stdout, sys.stderr, REAL_STDOUT, REAL_STDERR):
+        try:
+            strom.reconfigure(errors="replace")
+        except Exception:
+            pass
+
+
+_konsole_vertraegt_sonderzeichen()
+
 def force_print(*args, sep=" ", end="\n"):
     REAL_STDOUT.write(sep.join(map(str, args)) + end)
     REAL_STDOUT.flush()
@@ -63,11 +85,41 @@ if not DEBUG:
     class _NullWriter:
         def write(self, *_args, **_kw): return 0
         def flush(self): pass
-    # Nur Python-Ausgaben stumm – ffmpeg/QProcess unaffected
     sys.stdout = _NullWriter()
     sys.stderr = _NullWriter()
 
-if platform.system() == "Windows":
+    # Auch die Ausgaben, die NICHT aus Python kommen - aber nur in der
+    # ausgelieferten EXE.
+    #
+    # sys.stdout/sys.stderr zu ersetzen wirkt nur auf Python. Bibliotheken, die
+    # als DLL geladen werden, schreiben an Python vorbei direkt auf die
+    # Dateideskriptoren 1 und 2. GLib tut das beim Start und meldet dort, dass
+    # es sein Proxy-Modul nicht laden kann (giolibproxy.dll - eine kaputte
+    # Abhaengigkeit in den GStreamer-Wheels, folgenlos: GIO nimmt dann seinen
+    # Platzhalter, und KVRouite macht seine Netzzugriffe ohnehin ueber Python).
+    #
+    # Nur gepackt umleiten: wer "python KVRouite.py" aufruft, entwickelt und
+    # will die Ausgaben der Bibliotheken sehen. Ihm hier die Deskriptoren
+    # wegzunehmen macht die Konsole still, obwohl er das Gegenteil braucht.
+    if getattr(sys, "frozen", False):
+        try:
+            _leer = os.open(os.devnull, os.O_RDWR)
+            os.dup2(_leer, 1)
+            os.dup2(_leer, 2)
+            if _leer > 2:
+                os.close(_leer)
+        except Exception:
+            # Gepackt ohne Fenster gibt es die Deskriptoren teils gar nicht.
+            # Dann ist ohnehin nichts zu sehen.
+            pass
+
+# Konsolenfenster herrichten - Titel, Puffer leeren, Hinweis, verstecken.
+#
+# Ausdruecklich NUR in der ausgelieferten EXE. Beim Aufruf ueber
+# "python KVRouite.py" gehoert die Konsole dem Entwickler: dort darf die App
+# weder den Titel umbiegen noch den Puffer leeren - das loescht alles, was
+# vorher in dem Fenster stand.
+if platform.system() == "Windows" and getattr(sys, "frozen", False):
     try:
         import ctypes, ctypes.wintypes as wt
         k32 = ctypes.windll.kernel32
@@ -89,7 +141,27 @@ if platform.system() == "Windows":
                         ("srWindow", wt.SMALL_RECT),
                         ("dwMaximumWindowSize", wt._COORD),
                     ]
-                hStdOut = k32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE
+                # Das Konsolenfenster DIREKT oeffnen, nicht ueber
+                # GetStdHandle(STD_OUTPUT_HANDLE).
+                #
+                # Gemessen: die Umleitung von Deskriptor 1 auf NUL weiter oben
+                # (die den GLib-Muell unterdrueckt) aendert ueber die
+                # C-Laufzeit auch das Std-Handle des Prozesses - vorher 184,
+                # danach 172. Ein WriteConsoleW auf dieses Handle schlaegt
+                # dann fehl (Rueckgabe 0, 0 Zeichen), und zwar lautlos.
+                # Deshalb blieb das Fenster schwarz.
+                #
+                # "CONOUT$" liefert immer das Handle des Konsolenfensters
+                # selbst, unabhaengig davon, wohin stdout gerade zeigt.
+                k32.CreateFileW.restype = ctypes.c_void_p
+                hStdOut = k32.CreateFileW(
+                    "CONOUT$",
+                    0xC0000000,   # GENERIC_READ | GENERIC_WRITE
+                    3,            # FILE_SHARE_READ | FILE_SHARE_WRITE
+                    None,
+                    3,            # OPEN_EXISTING
+                    0, None)
+                hStdOut = ctypes.c_void_p(hStdOut)
                 csbi = CONSOLE_SCREEN_BUFFER_INFO()
                 if k32.GetConsoleScreenBufferInfo(hStdOut, ctypes.byref(csbi)):
                     buf_cells = csbi.dwSize.X * csbi.dwSize.Y
@@ -99,10 +171,27 @@ if platform.system() == "Windows":
                     k32.FillConsoleOutputAttribute(hStdOut, csbi.wAttributes, buf_cells, wt._COORD(0, 0), ctypes.byref(chars_written))
                     # 3) Cursor auf 0,0
                     k32.SetConsoleCursorPosition(hStdOut, wt._COORD(0, 0))
-                    force_print("====   KVRouite DEBUG Konsole    ====")
-                    force_print("====         Don´t Close!        ====")
-                    force_print("==== closing will close the APP! ====")
-                    
+
+                # Den Hinweis DIREKT ueber die Konsolen-API schreiben, nicht
+                # ueber print oder einen Dateideskriptor.
+                #
+                # Warum: ein paar Zeilen weiter oben werden fuer den
+                # Normalbetrieb die Deskriptoren 1 und 2 auf NUL umgeleitet,
+                # damit Bibliotheken wie GLib ihre Meldungen nicht in die
+                # Konsole schreiben. Alles, was ueber einen Deskriptor geht,
+                # ist danach unsichtbar - auch dieser Hinweis. Genau das ist
+                # am 30.08.2026 passiert: das Fenster blieb schwarz und leer.
+                #
+                # WriteConsoleW schreibt an den Deskriptoren vorbei an das
+                # Konsolenfenster selbst. Damit ist der Hinweis unabhaengig
+                # davon, wohin stdout gerade zeigt.
+                hinweis = ("====   KVRouite Konsole          ====\r\n"
+                           "====         Don´t Close!        ====\r\n"
+                           "==== closing will close the APP! ====\r\n")
+                geschrieben = wt.DWORD(0)
+                k32.WriteConsoleW(hStdOut, ctypes.c_wchar_p(hinweis),
+                                  len(hinweis), ctypes.byref(geschrieben), None)
+
                 # 4) Fenster unsichtbar (Konsole bleibt vorhanden → Performance ok)
                 
                 SW_HIDE = 0
@@ -119,23 +208,13 @@ if platform.system() == "Windows":
 
 
 
-# ++ADD++  (Mac-spezifischer Monkeypatch + locale Setting)
+# Unter macOS muss LC_NUMERIC auf "C" stehen: sonst schreiben Bibliotheken,
+# die Zahlen als Text weiterreichen, ein Komma als Dezimaltrennzeichen, und
+# GStreamer nimmt das nicht an.
 current_os = platform.system()
 if current_os == "Darwin":
-    import ctypes.util
     import locale
-
-    old_find_library = ctypes.util.find_library
-
-    def custom_find_library(name: str) -> str:
-        if name == "mpv":
-            # Beispiel: Pfad zur Homebrew-liegenden libmpv.2.dylib
-            return "/opt/homebrew/lib/libmpv.2.dylib"
-        return old_find_library(name)
-
-    ctypes.util.find_library = custom_find_library
     locale.setlocale(locale.LC_NUMERIC, "C")
-# ++ADD++ Ende Mac-Patch
 
 base_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -152,11 +231,32 @@ def resource_path(rel_path: str) -> str:
     return os.path.join(base_dir, rel_path)
 
 # ---------------------------------------------------------
-# Zuerst mpv-Pfad einstellen, bevor wir "import mpv" machen
-import path_manager
+# GStreamer-Umgebung im fertigen Programm selbst aufbauen.
+#
+# Die GStreamer-Wheels richten sich ueber site-packages/gstreamer_bundle.pth
+# ein: eine Zeile, die Python beim Start des Interpreters ausfuehrt und die
+# gstreamer_libs.setup_python_environment() aufruft. Die setzt PATH,
+# GST_PLUGIN_PATH_1_0, GI_TYPELIB_PATH und vor allem PYGI_DLL_DIRS.
+#
+# PyInstaller fuehrt .pth-Dateien NICHT aus. Im gepackten Programm fehlt
+# deshalb die ganze Einrichtung, und "import gi" bricht ab mit
+# "Could not deduce DLL directories, please set PYGI_DLL_DIRS". Hier wird
+# nachgeholt, was die .pth sonst erledigt.
+#
+# Nur im gepackten Zustand: im venv hat die .pth ihre Arbeit schon getan, ein
+# zweiter Aufruf wuerde die Pfade doppelt in die Umgebung schreiben.
+if getattr(sys, "frozen", False):
+    try:
+        import gstreamer_libs
+        gstreamer_libs.setup_python_environment()
+    except Exception as _exc:
+        # Kein Abbruch: die Meldung dazu kommt weiter unten aus main(), samt
+        # Hinweis, was zu tun ist. Hier waere noch kein Fenster da, um sie zu
+        # zeigen.
+        print("[WARN] GStreamer-Umgebung nicht aufgebaut:", _exc)
 
-# wurde nach untern verschoben, damit wir den Pfad or dem laden angeben können ( mac)
-#path_manager.ensure_mpv_library(parent_widget=None, base_dir=base_dir)
+# ---------------------------------------------------------
+import path_manager
 
 # ---------------------------------------------------------
 # Jetzt erst den Rest importieren
@@ -237,22 +337,6 @@ def center_mainwindow(window):
     window.move(frame_geo.topLeft())
 
 
-def check_ffmpeg_and_vlc_or_exit():
-    """
-    Ein simpler Check, ob ffmpeg und vlc in PATH vorhanden sind.
-    """
-    ffmpeg_path = shutil.which("ffmpeg")
-    vlc_path    = shutil.which("vlc")
-
-    if not ffmpeg_path or not os.path.exists(ffmpeg_path):
-        return False, "ffmpeg"
-    # Falls du VLC zwingend brauchst, kannst du hier checken.
-    # if not vlc_path or not os.path.exists(vlc_path):
-    #     return False, "vlc"
-
-    return True, ""
-
-
 def _file_arg_from_cli(argv):
     """Erste uebergebene existierende Datei aus der Kommandozeile.
 
@@ -275,7 +359,7 @@ def main():
     if config.is_soft_opengl_enabled():
         QGuiApplication.setAttribute(Qt.AA_UseSoftwareOpenGL)
 
-    # QtWebEngine (Karte) und mpv (Video) leben im selben Prozess und nutzen
+    # QtWebEngine (Karte) und die Videoausgabe leben im selben Prozess und nutzen
     # beide OpenGL. Ohne geteilten Kontext verliert die Karte ab Qt 6.11 ihren
     # Inhalt, sobald sie ueber "Map (detach)" in ein eigenes Fenster wandert -
     # das Fenster bleibt dann schwarz. Muss VOR QApplication(...) gesetzt
@@ -288,38 +372,97 @@ def main():
     
     current_os = platform.system()
     
-    # Zuerst mpv-Pfad einstellen, bevor wir "import mpv" machen
-    #path_manager.ensure_mpv_library(parent_widget=None, base_dir=base_dir)
-    # dann erst mainwindow starten:
-    
-    # ++ADD++: Windows/macOS Pfad-Check:
-    if current_os == "Windows":
-        if not path_manager.ensure_mpv(None):
-            QMessageBox.critical(None, "Missing MPV (Windows)", "MPV (libmpv-2.dll) wurde nicht gefunden.")
-            sys.exit(1)
-        if not path_manager.ensure_ffmpeg(None):
-            QMessageBox.critical(None, "Missing FFmpeg (Windows)", "FFmpeg wurde nicht gefunden.")
-            sys.exit(1)
-
-    elif current_os == "Darwin":
-        if not path_manager.ensure_mpv_mac(None):
-            QMessageBox.critical(None, "Missing MPV (macOS)", "libmpv.dylib wurde nicht gefunden.")
-            sys.exit(1)
-        if not path_manager.ensure_ffmpeg_mac(None):
-            QMessageBox.critical(None, "Missing FFmpeg (macOS)", "FFmpeg wurde nicht gefunden.")
-    elif current_os == "Linux":
-        if not path_manager.ensure_mpv_linux("/usr/lib/x86_64-linux-gnu/libmpv.so.2"):
-            QMessageBox.critical(None, "Missing MPV (Linux)", "libmpv.so.2 wurde nicht gefunden.\nInstalliere mit:\nsudo apt install libmpv-dev")
-            sys.exit(1)
-        # ffmpeg prüfen – z. B. nur ob im PATH
-        if not shutil.which("ffmpeg"):
-            QMessageBox.critical(None, "Missing FFmpeg", "FFmpeg ist nicht im PATH.")
-            sys.exit(1)  
-    else:
-        QMessageBox.critical(None, "Unsupported OS", f"Dein Betriebssystem ({current_os}) wird derzeit nicht unterstützt.")
+    # GStreamer/GES IST seit 6.0 eine Startbedingung.
+    #
+    # Bis 5.01 gab es zwei Wiedergabewege, und wenn GES fehlte, lief die App
+    # auf libmpv weiter. Der zweite Weg ist entfallen: ohne GStreamer kann
+    # KVRouite kein Video anzeigen, schneiden oder exportieren. Es hier
+    # abzufangen ist freundlicher, als spaeter mit einem ImportError aus dem
+    # Aufbau der Oberflaeche zu fallen.
+    if current_os not in ("Windows", "Darwin", "Linux"):
+        QMessageBox.critical(
+            None, "Unsupported OS",
+            f"Dein Betriebssystem ({current_os}) wird derzeit nicht unterstützt.")
         sys.exit(1)
-        ##
-    # ++ADD++ Ende
+
+    from core.ges_backend import is_available as ges_verfuegbar
+    from core.ges_backend import unavailable_reason as ges_grund
+    if not ges_verfuegbar():
+        if current_os == "Linux":
+            hilfe = ("sudo apt install python3-gi python3-gi-cairo "
+                     "gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 "
+                     "gir1.2-ges-1.0 gstreamer1.0-plugins-base "
+                     "gstreamer1.0-plugins-good gstreamer1.0-plugins-bad "
+                     "gstreamer1.0-plugins-ugly gstreamer1.0-libav "
+                     "gstreamer1.0-gl gstreamer1.0-x\n\n"
+                     "Das venv muss mit --system-site-packages angelegt sein.")
+        else:
+            hilfe = "pip install -r requirements.txt"
+        QMessageBox.critical(
+            None, "GStreamer is missing",
+            "KVRouite plays, cuts and renders video through GStreamer "
+            "Editing Services (GES). It could not be loaded, so the "
+            "application cannot start.\n\n"
+            f"Reason:\n{ges_grund()}\n\n"
+            f"To install it:\n{hilfe}\n\n"
+            "Run check_ges.py to see what exactly is missing.")
+        sys.exit(1)
+
+    # ffmpeg ist KEINE Startbedingung und wird seit 6.0 auch nicht mehr
+    # mitgeliefert. Gebraucht wird es allein vom Copy-Mode; Wiedergabe,
+    # Vorschau samt Blenden, Bildraten, Laengen, Drehung, Hardware-Erkennung
+    # und der Export laufen ueber GStreamer. Gesucht wird deshalb nur, was auf
+    # dem Rechner schon da ist, und es wird in den PATH gelegt, damit die
+    # spaeteren Pruefungen mit shutil.which() es auch finden.
+    #
+    # Bewusst NICHT ueber path_manager.ensure_ffmpeg(): das oeffnet bei
+    # Misserfolg einen Ordner-Dialog, und genau das soll beim Start nicht
+    # passieren.
+    ffmpeg_ordner = (path_manager.find_ffmpeg_folder_mac()
+                     if current_os == "Darwin"
+                     else path_manager.find_ffmpeg_folder())
+    if ffmpeg_ordner and path_manager.is_ffmpeg_in_folder(ffmpeg_ordner):
+        path_manager.add_to_process_path(ffmpeg_ordner)
+        print("[DEBUG] ffmpeg gefunden in", ffmpeg_ordner)
+
+    # Einmal deutlich sagen, was ohne ffmpeg fehlt. Nur der Copy-Mode haengt
+    # daran, deshalb ein Hinweis und kein Abbruch - und nur beim ersten Mal.
+    # Ohne das faende der Anwender bloss einen ausgegrauten Menueeintrag vor
+    # und wuesste nicht, warum.
+    #
+    # Der Merker wird zurueckgenommen, sobald ffmpeg wieder da ist. Sonst
+    # hiesse "einmal" ein einziges Mal ueberhaupt: wer ffmpeg spaeter
+    # deinstalliert oder den PATH aendert, saesse wieder vor einem
+    # ausgegrauten Menueeintrag ohne Erklaerung. So kommt der Hinweis bei
+    # jedem NEUEN Fehlen genau einmal.
+    from PySide6.QtCore import QSettings as _QS
+    einstellungen = _QS("KVRouite", "KVRouite")
+    MERKER = "hints/ffmpeg_missing_shown"
+
+    fehlende_werkzeuge = path_manager.fehlende_ffmpeg_werkzeuge()
+    if not fehlende_werkzeuge:
+        if einstellungen.contains(MERKER):
+            einstellungen.remove(MERKER)
+    else:
+        print("[WARN] " + path_manager.copy_mode_fehlgrund()
+              + " - der Copy-Mode steht nicht zur Verfuegung.")
+        if not einstellungen.value(MERKER, False, type=bool):
+            kasten = QMessageBox(None)
+            kasten.setIcon(QMessageBox.Information)
+            kasten.setWindowTitle("ffmpeg not found")
+            kasten.setText(
+                "KVRouite did not find " + " and ".join(fehlende_werkzeuge)
+                + " in your PATH.\n\n"
+                "This affects one thing: COPY MODE stays greyed out. It cuts "
+                "on keyframes with ffmpeg and uses ffprobe to index them, so "
+                "it cannot run without them.\n\n"
+                "Nothing else is affected - KVRouite works as usual.\n\n"
+                "If you want copy mode: install ffmpeg - it includes ffprobe - "
+                "and make sure it is in your PATH. You can also point KVRouite "
+                "at it under Config > FFmpeg > Set ffmpeg Path.")
+            kasten.setStandardButtons(QMessageBox.Ok)
+            kasten.exec()
+            einstellungen.setValue(MERKER, True)
     
     
     from views.mainwindow import MainWindow
@@ -344,22 +487,11 @@ def main():
     config.clear_temp_directories()
 
 
-    # Zusätzlicher Check
+    # Frueher stand hier eine zweite Pruefung, die ohne ffmpeg im PATH
+    # das Programm beendet hat. Sie ist weggefallen: ffmpeg ist keine
+    # Startbedingung mehr (siehe oben).
     parent_widget = QWidget()
     parent_widget.hide()
-    ok2, missing = check_ffmpeg_and_vlc_or_exit()
-    if not ok2:
-        msg_box = QMessageBox(parent_widget)
-        msg_box.setIcon(QMessageBox.Warning)
-        msg_box.setWindowTitle("Missing Dependency")
-        msg_box.setText(
-            f"Could not find '{missing}'!\n"
-            "Please install it (or provide it) and restart the program.\n\n"
-            "Be sure it's in your PATH-Variable."
-        )
-        msg_box.setStandardButtons(QMessageBox.Ok)
-        msg_box.exec()
-        sys.exit(0)
 
     # Disclaimer-Dialog (nur wenn nicht akzeptiert)
     

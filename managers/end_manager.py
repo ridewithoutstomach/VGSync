@@ -146,50 +146,17 @@ class EndManager(QObject):
             
     def _set_global_time_s(self, new_global_s: float):
         """
-        Versetzt den Player (media_list_player) an die globale Zeit new_global_s,
-        pausiert dann sofort. So bleiben wir garantiert am letzten Frame stehen.
+        Versetzt den Player an die globale Zeit new_global_s und pausiert
+        sofort. So bleiben wir garantiert am letzten Frame stehen.
+
+        Stand bis 5.01 hier eine eigene Kopie der Clip-Rechnung, die noch die
+        laengst abgeloeste Player-API ansprach (media_list_player/media_player).
+        Diese Attribute gibt es im Widget nicht mehr - der Zweig waere mit
+        AttributeError gestorben. Aufgerufen wurde er nie. Jetzt geht es ueber
+        dieselbe Sprungfunktion wie ueberall sonst.
         """
-        durations = self.video_editor.multi_durations
-        if not durations:
+        if not self.video_editor.multi_durations:
             return
 
-        boundaries = []
-        offset = 0.0
-        for dur in durations:
-            offset += dur
-            boundaries.append(offset)
-
-        total_all = boundaries[-1]
-        if new_global_s < 0:
-            new_global_s = 0
-        if new_global_s > total_all:
-            new_global_s = total_all
-
-        new_idx = 0
-        offset_prev = 0.0
-        if abs(new_global_s - total_all) < 0.0001:
-            new_idx = len(boundaries) - 1
-            if new_idx > 0:
-                offset_prev = boundaries[new_idx - 1]
-        else:
-            for i, bnd in enumerate(boundaries):
-                if new_global_s <= bnd:
-                    new_idx = i
-                    break
-                offset_prev = bnd
-
-        local_s = new_global_s - offset_prev
-        if local_s < 0:
-            local_s = 0
-
-        self.video_editor.media_list_player.stop()
-        self.video_editor.is_playing = False
-        self.video_editor._current_index = new_idx
-        self.video_editor.media_list_player.play_item_at_index(new_idx)
-
-        def after_switch():
-            self.video_editor.media_player.set_time(int(local_s * 1000))
-            self.video_editor.media_player.set_pause(True)
-            self.video_editor.is_playing = False
-
-        QTimer.singleShot(50, after_switch)
+        self.video_editor.seek_global(new_global_s)
+        self.video_editor.set_paused(True)

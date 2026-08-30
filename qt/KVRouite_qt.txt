@@ -1,0 +1,18 @@
+This folder holds the legal texts for the Qt components that KVRouite ships.
+
+It contains NO binaries. The Qt libraries themselves come from the PySide6
+wheels on PyPI (see requirements.txt) and are placed into "_internal/PySide6"
+of the Windows build by build_with_pyinstaller.py. That same script copies this
+folder to "_internal/qt", so the texts travel with the binaries.
+
+Files here:
+  NOTICE.txt                notice, licensing, and your rights under the LGPL
+  COMPONENTS.txt            the exact packages shipped and their licenses
+  CORRESPONDING-SOURCE.txt  where the source code is, and why none of it is
+                            hosted on kvrouite.com
+  COPYING.LGPL-3            GNU Lesser General Public License, version 3
+  COPYING.GPL-3             GNU General Public License, version 3
+                            (the LGPL version 3 builds on it)
+
+On Linux nothing of this is distributed with KVRouite; PySide6 is installed by
+the user from PyPI or from the distribution's packages.

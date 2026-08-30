@@ -20,64 +20,132 @@
 
 
 # core/hardware_detect.py
-import subprocess
-import platform
-import glob
+import time
 
-_cached_encoders = None  # Global Cache
-_cached_already_printed_debug = False
 
-def detect_available_hw_encoders(ffmpeg_path="ffmpeg"):
-    """
-    Ruft ffmpeg -encoders auf, um GPU-Encoder herauszufinden.
-    Gibt ein set(...) zurück, z.B. {"CPU","nvidia_h264","nvidia_hevc","amd_h264","amd_hevc",...}
-    
-    "CPU" steht hier für den reinen Software-Encode (vormals "none").
-    """
-    import subprocess
-    global _cached_encoders
-    global _cached_already_printed_debug
+# ---------------------------------------------------------------------------
+# Encoder-Test ueber GStreamer
+# ---------------------------------------------------------------------------
+# Die Kennungen links sind die, die das ganze Programm benutzt ("nvidia_hevc"
+# und so weiter). Rechts steht das GStreamer-Element. Die Tabelle liegt hier,
+# damit es sie nur einmal gibt: managers/ges_encoder_manager.py holt sie sich
+# von hier, statt eine eigene Kopie zu fuehren.
 
-    if _cached_encoders is not None:
-        return _cached_encoders
+GST_HW_ENCODER = {
+    "nvidia_h264": ("nvh264enc", "video/x-h264"),
+    "nvidia_hevc": ("nvh265enc", "video/x-h265"),
+    "amd_h264":    ("amfh264enc", "video/x-h264"),
+    "amd_hevc":    ("amfh265enc", "video/x-h265"),
+    "intel_h264":  ("qsvh264enc", "video/x-h264"),
+    "intel_hevc":  ("qsvh265enc", "video/x-h265"),
+    "vaapi_h264":  ("vah264enc", "video/x-h264"),
+    "vaapi_hevc":  ("vah265enc", "video/x-h265"),
+}
 
-    encoders_found = set()
-    encoders_found.add("CPU")  # CPU = reine Software
 
+def gstreamer_verfuegbar():
+    """True, wenn GStreamer benutzbar ist."""
     try:
-        cmd = [ffmpeg_path, "-hide_banner", "-encoders"]
-        output = subprocess.check_output(cmd, stderr=subprocess.STDOUT, encoding="utf-8")
-    except Exception as e:
-        print("[WARN] detect_available_hw_encoders failed:", e)
-        print("[DEBUG] => No GPU encoders => returning {'CPU'}")
-        _cached_encoders = {"CPU"}
-        return _cached_encoders
+        import gi
+        gi.require_version("Gst", "1.0")
+        from gi.repository import Gst
+        if not Gst.is_initialized():
+            Gst.init(None)
+        return True
+    except Exception:
+        return False
 
-    if "h264_nvenc" in output:
-        encoders_found.add("nvidia_h264")
-    if "hevc_nvenc" in output:
-        encoders_found.add("nvidia_hevc")
 
-    if "h264_amf" in output:
-        encoders_found.add("amd_h264")
-    if "hevc_amf" in output:
-        encoders_found.add("amd_hevc")
+def can_encode_with_gst(element, bilder=12, zeitgrenze=8.0):
+    """Baut den Encoder wirklich auf und schickt Bilder hindurch.
 
-    if "h264_qsv" in output:
-        encoders_found.add("intel_h264")
-    if "hevc_qsv" in output:
-        encoders_found.add("intel_hevc")
+    Getestet wird wirklich, nicht nur geraten: es laeuft eine kleine
+    Pipeline
 
-    # VAAPI: unter Linux der uebliche Weg fuer Intel-iGPUs UND AMD-Karten.
-    # Jeder Linux-ffmpeg listet VAAPI, auch ohne passende Hardware. Deshalb
-    # zusaetzlich pruefen, ob ueberhaupt ein Render-Knoten existiert.
-    # (Der echte Beweis bleibt der "Detect HW"-Knopf, der real encodiert.)
-    if platform.system() == "Linux" and glob.glob("/dev/dri/renderD*"):
-        if "h264_vaapi" in output:
-            encoders_found.add("vaapi_h264")
-        if "hevc_vaapi" in output:
-            encoders_found.add("vaapi_hevc")
+        videotestsrc -> videoconvert -> <encoder> -> fakesink
 
-    print("[DEBUG] => GPU encoders found:", encoders_found)
-    _cached_encoders = encoders_found
-    return _cached_encoders
+    bis ans Ende durch. Ein Element laesst sich naemlich oft anlegen, ohne dass
+    die Hardware wirklich da ist - erst beim Starten faellt das auf. Deshalb
+    wird bis EOS gewartet und nicht nur gebaut.
+
+    Liefert (True, "") oder (False, grund). Der Grund landet im Log; wenn ein
+    Anwender meldet, seine Karte werde nicht erkannt, steht dort, woran es lag.
+    """
+    if not gstreamer_verfuegbar():
+        return False, "GStreamer nicht verfuegbar"
+    import gi
+    from gi.repository import Gst
+
+    beschreibung = (
+        f"videotestsrc num-buffers={int(bilder)} ! "
+        "video/x-raw,width=320,height=240,framerate=25/1 ! "
+        f"videoconvert ! {element} ! fakesink sync=false")
+    try:
+        pipeline = Gst.parse_launch(beschreibung)
+    except Exception as exc:
+        return False, f"Pipeline nicht baubar: {exc}"
+
+    ergebnis, grund = False, "keine Rueckmeldung"
+    try:
+        if pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
+            return False, "Pipeline startete nicht"
+        bus = pipeline.get_bus()
+        ende = time.time() + zeitgrenze
+        while time.time() < ende:
+            msg = bus.timed_pop_filtered(
+                200 * Gst.MSECOND,
+                Gst.MessageType.ERROR | Gst.MessageType.EOS)
+            if msg is None:
+                continue
+            if msg.type == Gst.MessageType.EOS:
+                ergebnis, grund = True, ""
+            else:
+                err, _dbg = msg.parse_error()
+                grund = err.message
+            break
+        else:
+            grund = "Zeitgrenze ueberschritten"
+    finally:
+        pipeline.set_state(Gst.State.NULL)
+        pipeline.get_state(2 * Gst.SECOND)
+    return ergebnis, grund
+
+
+def detect_hw_encoders_gst():
+    """Alle Kennungen, deren Encoder sich wirklich betreiben laesst.
+
+    "CPU" ist immer dabei. Zurueck kommt (menge, protokoll): das Protokoll
+    haelt zu jedem Kandidaten fest, ob er lief und warum nicht.
+    """
+    gefunden = {"CPU"}
+    protokoll = []
+    if not gstreamer_verfuegbar():
+        return gefunden, [("GStreamer", False, "nicht verfuegbar")]
+    for kennung, (element, _caps) in GST_HW_ENCODER.items():
+        ok, grund = can_encode_with_gst(element)
+        if ok:
+            gefunden.add(kennung)
+        protokoll.append((f"{kennung} ({element})", ok, grund))
+    return gefunden, protokoll
+
+
+def list_hw_encoders_gst():
+    """Die Kennungen, deren Encoder-Element vorhanden ist - ohne Testlauf.
+
+    Sagt nur, was theoretisch da ist; der Beweis bleibt der Knopf
+    "Detect HW", der wirklich kodiert. GStreamer legt die Hersteller-Elemente
+    erst an, wenn beim Start eine passende Karte gefunden wurde - auf einem
+    Rechner mit nur NVIDIA meldet es zwei Kennungen, waehrend die frueher
+    benutzte ffmpeg-Liste sechs auffuehrte, unabhaengig von der Hardware.
+    """
+    gefunden = {"CPU"}
+    if not gstreamer_verfuegbar():
+        return gefunden
+    from gi.repository import Gst
+    for kennung, (element, _caps) in GST_HW_ENCODER.items():
+        try:
+            if Gst.ElementFactory.make(element, None) is not None:
+                gefunden.add(kennung)
+        except Exception:
+            pass
+    return gefunden

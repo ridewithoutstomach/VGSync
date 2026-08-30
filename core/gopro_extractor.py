@@ -33,7 +33,6 @@ along with this program. If not, see <http://www.gnu.org/licenses/>.
 import os
 import sys
 import struct
-import subprocess
 import json
 import tempfile
 from datetime import datetime, timedelta
@@ -120,23 +119,19 @@ def get_video_start_time(video_path, metadata):
             return start_time
         else:
             #print(f"⚠️ GPSU time implausible ({start_time}), trying creation_time...")
-            print("[WARNING] GPSU time implausible ({start_time}), trying creation_time...")
+            print(f"[WARNING] GPSU time implausible ({start_time}), trying creation_time...")
 
-    # FFprobe creation_time
+    # Aufnahmezeit aus dem Container ("mvhd"). Das ist dieselbe Angabe,
+    # die ffprobe als creation_time gemeldet hat - an einer GoPro-Datei
+    # geprueft, beide sagen 2025-09-19T07:11:56Z.
     try:
-        cmd = ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_format', video_path]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        data = json.loads(result.stdout)
-        creation_time_str = data.get('format', {}).get('tags', {}).get('creation_time')
-        if creation_time_str:
-            try:
-                creation_time = datetime.fromisoformat(creation_time_str.replace('Z', '+00:00'))
-                print(f"Using creation_time from metadata: {creation_time}")
-                return creation_time
-            except Exception:
-                pass
-    except Exception as e:
-        print(f"Error reading creation_time: {e}")
+        from core.mp4_keyframes import creation_time_from_container
+        aus_container = creation_time_from_container(video_path)
+        if aus_container is not None:
+            print(f"Using creation_time from container: {aus_container}")
+            return aus_container
+    except Exception as exc:
+        print(f"[WARN] Aufnahmezeit nicht lesbar: {exc}")
 
     # fallback
     now = datetime.now()
@@ -149,42 +144,41 @@ def get_video_start_time(video_path, metadata):
 # Video duration & metadata
 # -----------------------------
 def get_video_duration(video_path):
+    """Laenge in Sekunden, ueber core.framerate (Container bzw. GStreamer)."""
     try:
-        cmd = ['ffprobe', '-v', 'quiet', '-show_entries', 'format=duration', '-of', 'json', video_path]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        data = json.loads(result.stdout)
-        duration = float(data['format']['duration'])
-        print(f"Video duration: {duration:.2f} seconds")
-        return duration
+        from core.framerate import dauer as _dauer
+        wert = _dauer(video_path)
+        if wert and wert > 0:
+            print(f"Video duration: {wert:.2f} seconds")
+            return float(wert)
+        print(f"Error getting video duration: keine Laenge lesbar ({video_path})")
+        return None
     except Exception as e:
         print(f"Error getting video duration: {e}")
         return None
 
 def extract_metadata(video_path):
+    """Rohdaten der GoPro-Telemetriespur ("gpmd"), direkt aus dem Container.
+
+    Die Spur wird nicht dekodiert, sondern nur herauskopiert - genau das,
+    was "ffmpeg -codec copy -map 0:N" getan hat. Das Ergebnis ist Byte fuer
+    Byte dasselbe (an zwei GoPro-Dateien mit gleicher SHA1 geprueft) und
+    braucht 0,02 s statt 13,9 s: kein Prozessstart, keine Zwischendatei, und
+    zusammenhaengende Samples werden am Stueck gelesen.
+
+    Voraussetzung ist ein MP4/MOV-Container - bei GoPro-Material immer
+    gegeben. Liefert None, wenn keine "gpmd"-Spur gefunden wird.
+    """
     try:
-        cmd = ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_streams', video_path]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        data = json.loads(result.stdout)
-        gpmd_stream = None
-        for stream in data.get('streams', []):
-            if stream.get('codec_tag_string') == 'gpmd':
-                gpmd_stream = stream
-                break
-        if not gpmd_stream:
-            print("No GPMD stream found")
-            return None
-        stream_index = gpmd_stream['index']
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.bin') as f:
-            temp_path = f.name
-        cmd = ['ffmpeg', '-y', '-i', video_path, '-codec', 'copy', '-map', f'0:{stream_index}', '-f', 'rawvideo', temp_path]
-        subprocess.run(cmd, capture_output=True)
-        with open(temp_path, 'rb') as f:
-            metadata = f.read()
-        os.unlink(temp_path)
-        return metadata
-    except Exception as e:
-        print(f"Error: {e}")
+        from core.mp4_keyframes import track_data_from_container
+        daten = track_data_from_container(video_path, b"gpmd")
+    except Exception as exc:
+        print(f"[ERROR] Telemetrie nicht lesbar: {exc}")
         return None
+    if not daten:
+        print("No GPMD stream found")
+        return None
+    return daten
 
 # -----------------------------
 # GPS parsing
@@ -444,7 +438,7 @@ def adjust_gpx_to_video_duration(points, video_duration):
         return points
 
     #print(f"⚡ DEBUG: Shifting GPX points by {diff:.3f} s to match video duration")
-    print("[DEBUG] Shifting GPX points by {diff:.3f} s to match video duration")
+    print(f"[DEBUG] Shifting GPX points by {diff:.3f} s to match video duration")
 
     # Alle Punkte ab dem zweiten Punkt verschieben
     for i in range(1, len(points)):

@@ -32,16 +32,31 @@ ffmpeg/bin/ffmpeg.exe
 ffmpeg/bin/ffprobe.exe
 mpv/lib/libmpv-2.dll
 
-# Nur README.txt behalten, sonst alles ignorieren
+# ffmpeg/ und mpv/ vollstaendig ignorieren, Rechtstexte eingeschlossen.
+#
+# KVRouite liefert beides nicht mehr aus: die Wiedergabe laeuft ueber
+# GStreamer, und der Copy-Mode ruft das ffmpeg des Anwenders auf. Was nicht
+# ausgeliefert wird, braucht hier auch keine Lizenzdokumentation - die
+# Rechtstexte fuer GStreamer stehen in gstreamer/ und gehen mit in den Build.
+#
+# Die beiden Ordner bleiben trotzdem im Arbeitsbaum: die 5.x-Zweige bauen
+# daraus und liefern beides aus. Dort haengen die Rechtstexte an den eigenen
+# Auslieferungen, nicht an diesem Zweig.
 ffmpeg/*
 ffmpeg/**/*
-ffmpeg/doc/
-ffmpeg/doc/**
-!ffmpeg/VGSync_ffmpeg.txt
-
 mpv/*
-!mpv/
-!mpv/VGSync_mpv.txt
+mpv/**/*
+
+# gstreamer/ enthaelt keine Binaries, nur Lizenztexte - komplett ins Repo.
+
+# Quell-Tarballs in third-party-src/ bleiben lokal (wie die .zip/.7z dort).
+# Sie sind die Offline-Kopie fuer den Fall, dass die Upstream-Links ausfallen -
+# siehe gstreamer/CORRESPONDING-SOURCE.txt. Nachladen mit
+# tools/fetch_gstreamer_sources.py.
+third-party-src/gstreamer-*/
+*.tar.xz
+*.tar.xz.asc
+*.tar.xz.sha256sum
 config.js
 
 # interne Notizen, nicht ausliefern

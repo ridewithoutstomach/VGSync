@@ -1,0 +1,58 @@
+KVRouite - Qt components shipped with the Windows build
+================================================================================
+
+Every package below is installed by pip from PyPI and ends up in
+"_internal/PySide6" of the Windows build. The license expression given for each
+is the one the package itself declares in its metadata, quoted unchanged.
+
+Measured against the 6.0GES build: 122 Qt6 module DLLs, 529.9 MB in total -
+the largest third-party part of the application.
+
+--------------------------------------------------------------------------------
+
+PySide6 6.11.2
+  The Qt for Python meta package. Pulls in PySide6-Essentials and
+  PySide6-Addons, which carry the actual Qt 6.11.2 runtime libraries.
+  https://pyside.org
+  License: LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+
+PySide6-Essentials 6.11.2
+  The Qt essential modules and their bindings: QtCore, QtGui, QtWidgets,
+  QtNetwork, QtQml, QtQuick and others.
+  --> REQUIRED by KVRouite: the whole user interface is built with them.
+  License: LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+
+PySide6-Addons 6.11.2
+  The Qt add-on modules, among them Qt WebEngine (Qt6WebEngineCore.dll).
+  --> REQUIRED by KVRouite: the map is displayed in a Qt WebEngine view.
+  Qt WebEngine embeds a Chromium-derived engine (Chromium 140.0.7339.225).
+  Chromium's own code is 3-clause BSD; that text is in LICENSE.chromium.
+  The 187 further projects contained in it, each with its license, are
+  listed in CHROMIUM-THIRD-PARTY.txt. Their full license texts are part of
+  the Qt source release; see CORRESPONDING-SOURCE.txt.
+  License: LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+
+shiboken6 6.11.2
+  The binding runtime that connects the Python code to the Qt libraries.
+  --> REQUIRED by KVRouite.
+  License: LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+
+--------------------------------------------------------------------------------
+ Which option applies
+--------------------------------------------------------------------------------
+The packages offer a choice of three licenses. KVRouite relies on
+LGPL-3.0-only. KVRouite as a whole is GPL-3.0-or-later, and the GNU LGPL
+version 3 permits conveying the covered work under the GNU GPL version 3, so
+the combination is consistent.
+
+The full texts are in this folder: COPYING.LGPL-3 and COPYING.GPL-3. The LGPL
+version 3 is written as a set of additional permissions on top of the GPL
+version 3, which is why both are needed to read it.
+
+--------------------------------------------------------------------------------
+ Note on Qt Commercial
+--------------------------------------------------------------------------------
+The PySide6 wheels also contain a file named LicenseRef-Qt-Commercial.txt.
+That is the text of Qt's commercial license, included by the Qt Project for
+customers who hold one. KVRouite does not hold a commercial Qt license and does
+not rely on it; the terms that apply here are the LGPL-3.0-only ones above.

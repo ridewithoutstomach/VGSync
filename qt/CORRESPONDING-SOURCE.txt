@@ -1,0 +1,71 @@
+KVRouite - Corresponding Source for the Qt components
+================================================================================
+
+WHAT KVRouite SHIPS HERE
+------------------------
+The Qt libraries in "_internal/PySide6" are prebuilt binaries published by the
+Qt Project as the PySide6 wheels on PyPI. They are the same binaries anyone
+gets with "pip install PySide6".
+
+KVRouite does not compile, patch, rebuild or otherwise modify any of them. They
+are passed on byte for byte, exactly as pip installs them.
+
+WHY THERE IS NO SOURCE ARCHIVE ON kvrouite.com
+----------------------------------------------
+The packages are licensed LGPL-3.0-only (see COMPONENTS.txt). The GNU LGPL
+version 3 is a set of additional permissions on top of the GNU GPL version 3
+and incorporates its terms, including section 6(d): the Corresponding Source
+may be kept on a third-party server as long as clear directions to it
+accompany the binaries. This file is those directions.
+
+Since these are the Qt Project's own binaries, unmodified, the Corresponding
+Source is that project's own release of the same version. Rehosting it here
+would add nothing.
+
+WHERE THE SOURCE IS
+-------------------
+Version shipped: Qt 6.11.2, PySide6 / PySide6-Essentials / PySide6-Addons /
+shiboken6 6.11.2.
+
+  Qt 6 sources, release archive
+    https://download.qt.io/archive/qt/6.11/
+    (the single-archive "qt-everywhere-src" tarball of 6.11.2 contains all
+    modules, Qt WebEngine included)
+
+  Qt git repositories, if you prefer the revision history
+    https://code.qt.io/cgit/
+
+  PySide6 and shiboken6 sources
+    https://pypi.org/project/PySide6/6.11.2/#files
+    https://pypi.org/project/shiboken6/6.11.2/#files
+    (the .tar.gz "source distribution" next to the wheels)
+
+  Qt's own overview of the licenses used inside Qt, including the third-party
+  code in Qt WebEngine - the licenses of that code are listed in
+    CHROMIUM-THIRD-PARTY.txt, their full texts live in
+    src/3rdparty/chromium of this source tree
+    https://doc.qt.io/qt-6/licenses-used-in-qt.html
+
+All URLs were checked and reachable when this file was written.
+
+WHY POINTING IS ENOUGH HERE
+---------------------------
+KVRouite uses Qt under LGPL-3.0-only, and the GNU LGPL version 3 incorporates
+GNU GPL version 3 section 6(d): the Corresponding Source may sit on a different
+server, operated by a third party, as long as clear directions next to the
+object code say where to find it. Those directions are this file.
+
+KVRouite compiles nothing of Qt. The libraries are the Qt Project's own PySide6
+wheels from PyPI, redistributed byte for byte, so the Corresponding Source is
+that project's own published release.
+
+What section 6(d) does ask of us is that the directions keep leading somewhere.
+If a link above no longer works, write to bernd@kvrouite.com and you will be
+pointed at a working source for the version you received.
+
+CHECKLIST WHEN THE VERSION CHANGES
+----------------------------------
+  [ ] requirements.txt, NOTICE.txt, COMPONENTS.txt and this file all name the
+      same version.
+  [ ] The download links above point at that version.
+  [ ] The download links above still resolve.

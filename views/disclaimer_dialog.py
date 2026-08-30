@@ -21,10 +21,46 @@
 # views/disclaimer_dialog.py
 
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QLabel, QCheckBox, QDialogButtonBox
+    QDialog, QVBoxLayout, QLabel, QCheckBox, QDialogButtonBox, QScrollArea
 )
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
+
+# Was die Anwendung an Verbindungen aufbaut - Wortlaut fuer den erzwungenen
+# Disclaimer und fuer "Help -> Privacy". Bewusst nur eine Stelle: sonst
+# beschreiben die beiden Texte irgendwann verschiedene Programme.
+#
+# Der Inhalt ist gemessen, nicht angenommen (30.08.2026): vollstaendige
+# Aufzaehlung aller ausgehenden Adressen in core/, managers/, views/, widgets/
+# und map_page.html. Wer ihn aendert, misst vorher nach.
+NETWORK_HTML = (
+    "<b>Network use and data</b><br><br>"
+    "KVRouite does not collect usage statistics. No information about you, "
+    "your videos<br>or your routes is sent to the author of this program."
+    "<br><br>"
+    "Connections to other services are made only in these situations:"
+    "<ul>"
+    "<li><b>Map display.</b> While the map is shown, map tiles are loaded "
+    "from OpenStreetMap (<code>tile.openstreetmap.org</code>). After you load "
+    "a GPX file the map centres on your track, so the tile server can infer "
+    "the area you are working in.</li>"
+    "<li><b>Update check.</b> A few seconds after start, KVRouite asks "
+    "<code>api.github.com</code> whether a newer release exists. Only the "
+    "program version is sent. You can switch this off under "
+    "<i>Help &rarr; Auto Check for Updates</i>.</li>"
+    "<li><b>Optional map services.</b> Satellite imagery (MapTiler, Mapbox) "
+    "and route calculation and elevation lookup (Mapbox) are contacted "
+    "<b>only when you use them</b>, and only after you have entered your own "
+    "API key. Route calculation and elevation lookup transmit the coordinates "
+    "of the section of your track concerned. Your keys are stored on your "
+    "computer and are sent only to the service they belong to.</li>"
+    "</ul>"
+    "Everything else - playing, cutting, rendering, and reading and writing "
+    "GPX files -<br>happens entirely on your computer. No other connections "
+    "are made.<br><br>"
+    "See <a href='https://kvrouite.com/privacy.html'>kvrouite.com/privacy.html</a>."
+)
+
 
 class DisclaimerDialog(QDialog):
     """
@@ -58,7 +94,8 @@ class DisclaimerDialog(QDialog):
             "SERVICING, REPAIR OR CORRECTION.<br><br>"
             
             "<b>Patent Encumbrance Notice:</b><br>"
-            "Some codecs (e.g., x265) may be patent-encumbered in certain jurisdictions.<br> "
+            "Some codecs (e.g., x264, x265, AAC, MP3, AC-3, DTS) may be patent-encumbered<br> "
+            "in certain jurisdictions.<br> "
             "It is the user's responsibility to ensure compliance with all applicable laws and regulations,<br> "
             "and to obtain any necessary patent licenses.<br><br>"
         
@@ -68,16 +105,47 @@ class DisclaimerDialog(QDialog):
             "<b>Third-Party Libraries:</b><br>"
             "This application includes and distributes open-source libraries:<br>"
             "<ul>"
-            "<li><b>FFmpeg (GPL build)</b> – <a href='https://ffmpeg.org'>ffmpeg.org</a></li>"
-            "<li><b>mpv (GPL build)</b> – <a href='https://mpv.io'>mpv.io</a></li>"
+            "<li><b>Qt 6.11.2 with PySide6 and shiboken6</b> – LGPL-3.0-only – "
+            "<a href='https://pyside.org'>pyside.org</a></li>"
+            "<li><b>OpenLayers 7.3.0</b> \u2013 BSD-2-Clause \u2013 "
+            "<a href='https://openlayers.org'>openlayers.org</a></li>"
+            "<li><b>CPython 3.12</b> (PSF), <b>OpenSSL 3</b> (Apache-2.0), "
+            "<b>Pillow</b> (MIT-CMU), <b>fitparse</b> (MIT)</li>"
+            "<li><b>GStreamer 1.28.6, incl. GStreamer Editing Services (GES) "
+            "and PyGObject</b> – LGPL-2.1-or-later; the bundled x264 and x265 "
+            "encoder plugins are GPL-2.0-or-later – "
+            "<a href='https://gstreamer.freedesktop.org'>gstreamer.freedesktop.org</a></li>"
             "</ul>"
-            "Full license texts for these libraries are located in the <br>"
-            "<code>_internal/ffmpeg</code> and <code>_internal/mpv</code> folders.<br>"
-            "Corresponding source code for FFmpeg and mpv, as used in this distribution, is available at<br> "
-            "<a href='http://www.KVRouite.com'>http://www.KVRouite.com</a>.<br><br>"
+            "The GStreamer bundle also contains the FFmpeg 7.1 shared libraries "
+            "(LGPL build)<br>used by its gst-libav plugin – see "
+            "<code>COMPONENTS.txt</code>.<br><br>"
+            "GStreamer is what plays, cuts and renders video in KVRouite, so it is "
+            "always loaded.<br>"
+            "On Linux, GStreamer is not distributed with KVRouite at all – it is "
+            "installed<br>from your distribution's own packages.<br><br>"
+            "Copy mode additionally calls the <b>ffmpeg</b> and <b>ffprobe</b> "
+            "programs. Those are <b>not</b><br>part of this distribution – "
+            "KVRouite uses whatever is installed on your system,<br>"
+            "and copy mode stays disabled without them.<br><br>"
+            "The Qt libraries are ordinary DLL files in "
+            "<code>_internal/PySide6</code> – you may<br>replace them with a "
+            "compatible build of your own, as the LGPL provides for.<br><br>"
+            "Full license texts are located in <code>_internal/gstreamer</code>, "
+            "<code>_internal/qt</code><br>and "
+            "<code>_internal/third-party-licenses</code>.<br>"
+            "The GStreamer binaries are the GStreamer Project's own, passed on<br>"
+            "unchanged; their source is published by that project at "
+            "<a href='https://gstreamer.freedesktop.org/src/'>gstreamer.freedesktop.org/src</a><br>"
+            "in the same version - see <code>_internal/gstreamer/CORRESPONDING-SOURCE.txt</code>.<br>"
+            "KVRouite compiles none of these binaries. If one of those links "
+            "ever stops<br>working, write to "
+            "<a href='mailto:bernd@kvrouite.com'>bernd@kvrouite.com</a> and you "
+            "will be pointed at a<br>working source for the version you "
+            "received.<br><br>"
             
             
             "</p>"
+            "<p>" + NETWORK_HTML + "</p>"
 )
 
 
@@ -86,7 +154,13 @@ class DisclaimerDialog(QDialog):
         self.label_info.setOpenExternalLinks(False)  # Wir handeln das selbst
         self.label_info.setTextInteractionFlags(Qt.TextBrowserInteraction | Qt.LinksAccessibleByMouse)
         self.label_info.setText(disclaimer_html)
-        layout.addWidget(self.label_info)
+        self.label_info.setWordWrap(True)
+
+        bereich = QScrollArea(self)
+        bereich.setWidget(self.label_info)
+        bereich.setWidgetResizable(True)
+        bereich.setMinimumSize(700, 520)
+        layout.addWidget(bereich)
 
         # (2) Signal abfangen ⇒ Linkklick
         self.label_info.linkActivated.connect(self._on_link_clicked)

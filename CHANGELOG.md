@@ -1,9 +1,138 @@
 # Changelog
 
 All notable changes to KVRouite are listed here, newest version first.
-The section of a version is also the text that goes into the GitHub release notes.
+The GitHub release page is shorter and written for users; this file is the
+detailed record.
 
 Versions up to and including 5.0 are documented in the GitHub releases only.
+
+---
+
+## 6.0 – unreleased
+
+### Changed
+
+**The video engine was rebuilt on GStreamer Editing Services**
+
+Up to 5.01 there were two playback paths and a separate render engine. Preview
+and export now build the same GES timeline, so the preview shows what the
+render will produce - cut ranges are gone from the picture and the crossfades
+sit at the cuts.
+
+- Crossfades are pre-rendered in the background while you keep working
+  (`core/fade_cache.py`). Finished ones are reused; a cut without a rendered
+  fade shows as a hard cut until it arrives.
+- `core/player_backend.py` - the backend interface, the second implementation
+  and the factory - is deleted. `VideoEditorWidget` builds `GesPlayerBackend`
+  directly.
+- Gone from the menus: *Config -> Video Backend* and *Config -> libmpv*.
+- `path_manager.py` keeps only the ffmpeg helpers.
+- The old render engine - `xfade_main()` with its pre-cutting, keyframe search,
+  `copy_cut`, `crossfade_2`, concat, overlay encode and the VAAPI/NVENC
+  parameters - is deleted, about 1200 lines. What remains of
+  `managers/encoder_manager.py` is the export dialog and the segment length
+  check that copy mode needs.
+- **GStreamer is a startup requirement.** If it cannot be loaded, KVRouite says
+  so with the exact reason and the install command for the platform, and points
+  at `check_ges.py`, instead of failing later somewhere in the user interface.
+
+**Rendering is much faster**
+
+The old export ran in several passes over the material: pre-cutting the
+segments, searching keyframes, rendering each crossfade on its own, joining
+everything back together and, if overlays were used, encoding the result a
+further time - with intermediate files at every step. GES builds one timeline
+and renders it in a single pass.
+
+Measured on the reference project - two GoPro files, 3840x2160 H.265 at
+29.97 fps, 11.9 GB each, 70 minutes of raw material cut down to 4.4 minutes
+with five cuts, three of them with a crossfade, and two overlays. Both renders
+used NVENC hardware encoding on the same machine: about 15 minutes before,
+about two minutes now.
+
+That is a rough indication of the new engine, not a benchmark - the time
+depends on the machine, the material and the encoder settings. The gain grows
+with the number of cuts, because every cut used to add work of its own.
+
+The Windows build is also about 100 MB smaller, since it no longer carries a
+second video runtime or the render engine it used to ship.
+
+**Copy mode uses the ffmpeg on your system**
+
+Rendering runs through GES, so ffmpeg is only still used by copy mode, which
+cuts on keyframes with `-c copy`.
+
+- Copy mode is enabled only when **both** `ffmpeg` and `ffprobe` are in your
+  PATH. It used to check only `ffmpeg`, so having just one of them led into a
+  mode that failed at export.
+- KVRouite says once at startup what is missing and what it costs, instead of
+  leaving a greyed-out menu entry with no explanation.
+- `path_manager` looks at your stored path, the usual Windows install locations
+  and your PATH.
+- `check_ges.py` treats a missing ffmpeg as a hint, not as a failure.
+
+### Added
+
+**True 360° video**
+
+360° footage is stored equirectangular - the whole sphere squeezed into a 2:1
+rectangle. Up to 5.01 KVRouite only cropped that distorted picture and moved
+the crop around: no projection, no wrap-around across the 360° seam, no real
+zoom - and the view never reached the export, which always rendered the full
+distorted 2:1 image.
+
+KVRouite now does the real thing with an OpenGL fragment shader
+(`core/view360.py`), attached to each clip as a `GESEffect`:
+
+- Look around by dragging in the picture, zoom with the mouse wheel, or use
+  `Ctrl` + arrow keys / `Ctrl +` / `Ctrl -`, `Ctrl 0` to reset. Dragging is
+  scaled by the current field of view, so it feels the same at any zoom.
+- Straight lines stay straight, and panning across the seam is seamless.
+- One viewing direction per video, stored in the project file (`view360`).
+  *View -> Apply 360° view to all videos* copies it to every clip, which is
+  what you want for material from one camera.
+- **The view is rendered.** Preview and export build the same timeline, so the
+  export produces a normal 16:9 video showing exactly what the preview showed.
+  Crossfades work: both halves are projected and then mixed.
+- Measured: the shader costs nothing noticeable in the preview (30.0 fps with
+  and without it on 1920x960 material), and it changes no timing - the same
+  project rendered with and without 360° gives the identical frame count and
+  duration.
+- If the GL elements are missing (`gstreamer1.0-gl` on Linux, or no GL context
+  over remote desktop), 360° simply stays off and says why; `check_ges.py`
+  reports it.
+
+**Overlays**
+
+Images can be placed on the timeline, positioned in the picture and are
+rendered into the export.
+
+### Removed
+
+**Street view and the create mode**
+
+The street view pane was only ever visible inside the create mode, and the
+create mode existed to place GPX points next to it. Both are gone, together
+with the Mapillary key entry. Building GPX points still works: *new points at
+video time* and *directions* remain as their own menu entries.
+
+### Fixed
+
+**Loading a second project could stall the preview**
+
+Loading a project while another one was open started the crossfade
+pre-rendering in the middle of the load - still in the mode of the previous
+project - and could leave the progress window waiting forever. Two causes, both
+fixed: the preview is no longer rebuilt while a project is loading, and the
+render loop can no longer stop without reporting a result.
+
+**The keyframe index travelled between projects**
+
+The index was written into the project file and only ever cleared by *New
+Project*, so a project could carry the keyframes of videos that were no longer
+loaded. It is no longer stored: when a project is loaded the index is read
+directly from the video files, which takes milliseconds, and it is dropped when
+the playlist changes. Project files are much smaller as a result.
 
 ---
 

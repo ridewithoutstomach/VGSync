@@ -1,7 +1,7 @@
 KVRouite – End-User Agreement & Disclaimer
 ==========================================
 
-Copyright (C) 2025  Bernd Eller
+Copyright (C) 2025-2026  Bernd Eller
 
 This program is free software: you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -28,16 +28,73 @@ IS WITH YOU. SHOULD THE PROGRAM PROVE DEFECTIVE, YOU ASSUME THE COST OF ALL NECE
 SERVICING, REPAIR OR CORRECTION.
 
 Patent Encumbrance Notice:
-Some codecs (e.g., x265) may be patent-encumbered in certain jurisdictions.
-It is the user's responsibility to ensure compliance with all applicable laws and
-regulations and to obtain any necessary patent licenses.
+Some codecs (e.g., x264, x265, AAC, MP3, AC-3, DTS) may be patent-encumbered in certain
+jurisdictions. It is the user's responsibility to ensure compliance with all applicable
+laws and regulations and to obtain any necessary patent licenses.
 
 Third-Party Libraries
 ---------------------
 This application includes and distributes open-source libraries:
-- FFmpeg (GPL build) — https://ffmpeg.org
-- mpv (GPL build)    — https://mpv.io
 
-Full license texts for these libraries are located in the `_internal/ffmpeg`
-and `_internal/mpv` folders. Corresponding source code for FFmpeg and mpv, as
-used in this distribution, is available at: http://www.KVRouite.com
+- Qt 6.11.2 with PySide6 and shiboken6
+  License: LGPL-3.0-only (the packages offer a choice of LGPL-3.0-only,
+  GPL-2.0-only or GPL-3.0-only; KVRouite relies on the LGPL). The Qt libraries
+  are ordinary DLL files in `_internal/PySide6` - you may replace them with a
+  compatible build of your own, as the LGPL provides for. Qt WebEngine, used
+  for the map, embeds a Chromium-derived engine (Chromium 140.0.7339.225);
+  its 3-clause BSD license is reproduced in `_internal/qt/LICENSE.chromium`
+  and the 187 further projects contained in it are listed with their licenses
+  in `_internal/qt/CHROMIUM-THIRD-PARTY.txt`.
+  https://pyside.org
+
+- OpenLayers 7.3.0, the map library (ol.js / ol.css next to the executable)
+  License: BSD-2-Clause - https://openlayers.org
+
+- CPython 3.12 (Python Software Foundation License), OpenSSL 3 (Apache-2.0),
+  Pillow 12.3.0 (MIT-CMU) and fitparse 1.2.0 (MIT)
+
+- GStreamer 1.28.6, including GStreamer Editing Services (GES) and PyGObject
+  License: LGPL-2.1-or-later. The bundled x264 and x265 encoder plugins, and the
+  a52dec/dtsdec/dvdread plugins, are GPL-2.0-or-later. Individual components are
+  additionally under MIT, BSD, Apache-2.0, MPL and other permissive licenses; the
+  Microsoft Visual C++ runtime redistributables included with the GStreamer wheels
+  are proprietary Microsoft components and are System Libraries in the sense of the
+  GNU GPL. https://gstreamer.freedesktop.org
+
+  The bundle also contains the FFmpeg 7.1 shared libraries (libavcodec,
+  libavformat, libavutil, libswresample, libswscale) that the GStreamer
+  gst-libav plugin uses. Those are an LGPL-2.1-or-later build and are covered
+  by the same arrangement as the rest of GStreamer; see
+  `_internal/gstreamer/COMPONENTS.txt`.
+
+  GStreamer is what plays, cuts and renders video in KVRouite. It is always
+  loaded. (Copy mode additionally calls the ffmpeg and ffprobe programs, but
+  those are NOT part of this distribution - KVRouite uses whatever is
+  installed on your own system, and copy mode stays disabled without them.)
+
+Full license texts are located in three folders next to the application:
+
+  `_internal/gstreamer`             GStreamer, GES, PyGObject
+  `_internal/qt`                    Qt 6, PySide6, shiboken6
+  `_internal/third-party-licenses`  CPython, OpenSSL, Pillow, fitparse,
+                                    OpenLayers
+
+Each folder holds a NOTICE.txt, a COMPONENTS.txt listing every package shipped
+with its exact license, and the license texts themselves.
+
+The GStreamer and Qt binaries are the respective projects' own prebuilt binaries,
+passed on unchanged. Their corresponding source is published by those projects in
+the same versions:
+
+  GStreamer   https://gstreamer.freedesktop.org/src/
+  Qt          https://download.qt.io/archive/qt/6.11/
+  PySide6     https://pypi.org/project/PySide6/6.11.2/#files
+
+The exact locations are listed in `_internal/gstreamer/CORRESPONDING-SOURCE.txt`
+and `_internal/qt/CORRESPONDING-SOURCE.txt`, as permitted by GNU GPL version 3,
+section 6(d), which the GNU LGPL version 3 incorporates.
+
+KVRouite compiles none of these binaries - they are the upstream projects' own
+official releases, redistributed unchanged, which is why section 6(d) applies.
+If one of the links above ever stops working, write to bernd@kvrouite.com and you
+will be pointed at a working source for the version you received.

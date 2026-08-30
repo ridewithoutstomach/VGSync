@@ -42,11 +42,19 @@ class OverlayManager(QObject):
 
     overlaysChanged = Signal()
 
+    #: Wird VOR jeder vom Anwender ausgeloesten Aenderung gesendet und traegt
+    #: den Stand davor. Daran haengt das globale Strg+Z: das Hauptfenster legt
+    #: sich daraus eine Ruecknahmefunktion auf seinen Stapel.
+    #:
+    #: Absichtlich nur beim Anlegen und beim Aendern. Das Leeren beim Laden
+    #: eines Projekts oder bei "New Project" ist keine Bearbeitung - dafuer
+    #: einen Ruecknahmeschritt anzubieten, waere irrefuehrend.
+    vorAenderung = Signal(list)
+
     def __init__(self, timeline, parent=None):
         super().__init__(parent)
         self.timeline = timeline
         self._overlays = []
-        self._history_stack = []
 
     def add_overlay(self, ovl_dict):
         """
@@ -141,18 +149,12 @@ class OverlayManager(QObject):
 
         # --- Alles gut -> speichern + Timeline markieren ---
         import copy
-        self._history_stack.append(copy.deepcopy(self._overlays))
+        self.vorAenderung.emit(copy.deepcopy(self._overlays))
         self._overlays.append(ovl_dict)
         self.timeline.add_overlay_interval(start_s, end_s)
         self.overlaysChanged.emit()
         print("[OverlayManager] => Overlay ADDED:", ovl_dict)
 
-
-    def remove_last_overlay(self):
-        if self._overlays:
-            self._overlays.pop()
-            self.timeline.remove_last_overlay_interval()
-            self.overlaysChanged.emit()
 
     def clear_overlays(self):
         self._overlays.clear()
@@ -160,18 +162,51 @@ class OverlayManager(QObject):
         self.overlaysChanged.emit()
         
         
-    def undo_overlay(self):
-        if not self._history_stack:
-            return
-        old_state = self._history_stack.pop()
-        self._overlays = old_state
-        self.timeline.clear_overlay_intervals()
-        for ovl in self._overlays:
-            self.timeline.add_overlay_interval(ovl["start"], ovl["end"])
-        self.overlaysChanged.emit()   
-
     def get_all_overlays(self):
         return self._overlays
+
+    def update_overlay(self, index, **werte):
+        """Einzelne Felder eines vorhandenen Overlays aendern.
+
+        Gedacht fuer das Verschieben und Skalieren im Vorschaubild: dort
+        aendern sich nur Lage und Groesse, nie Anfang oder Ende. Deshalb
+        werden hier auch die Markierungen in der Timeline nicht angefasst -
+        die haengen an der Zeit.
+
+        Der vorherige Stand kommt wie bei add_overlay auf den Verlaufsstapel,
+        damit "Undo Overlay" auch ein Verschieben zuruecknimmt.
+        """
+        if not isinstance(index, int) or not (0 <= index < len(self._overlays)):
+            print(f"[WARN] update_overlay: Platz {index} gibt es nicht.")
+            return False
+        if not werte:
+            return False
+        if "start" in werte or "end" in werte:
+            # Zeiten muessen gegen Schnitte und Blendenraender geprueft
+            # werden; das kann diese Methode nicht leisten.
+            print("[WARN] update_overlay: Zeiten aendert diese Methode nicht.")
+            return False
+
+        self.vorAenderung.emit(copy.deepcopy(self._overlays))
+        self._overlays[index].update(werte)
+        self.overlaysChanged.emit()
+        return True
+
+    def set_all_overlays(self, liste):
+        """Den kompletten Stand ersetzen - fuer das Zuruecknehmen.
+
+        Die Markierungen in der Timeline werden mitgezogen, sonst blieben
+        blaue Balken stehen, zu denen es kein Overlay mehr gibt.
+        """
+        self._overlays = [dict(o) for o in (liste or [])]
+        self.timeline.clear_overlay_intervals()
+        for ovl in self._overlays:
+            try:
+                self.timeline.add_overlay_interval(ovl["start"], ovl["end"])
+            except (KeyError, TypeError):
+                continue
+        self.overlaysChanged.emit()
+        return True
 
     # -------------------------------------------------------------------------
     # Public-Methode: ask_user_for_overlay(marker_s, parent)
@@ -181,40 +216,30 @@ class OverlayManager(QObject):
     #      => wir rufen add_overlay(...) direkt => und schließen InsertOverlayDialog
     # -------------------------------------------------------------------------
     def ask_user_for_overlay(self, marker_s: float, parent=None):
-        dlg = self.InsertOverlayDialog(marker_s, self, parent)
-        if dlg.exec() == QDialog.Accepted:
-            # => falls user exist overlay 1..3 gewählt
-            chosen_id = dlg.chosen_overlay_id
-            duration_s= dlg.duration_s
-            fade_in_s = dlg.fade_in_s
-            fade_out_s= dlg.fade_out_s
-            if not chosen_id:
-                print("[OverlayManager] => user had no selection.")
-                return
-            # => start/end
-            start_s = marker_s
-            end_s   = marker_s + duration_s
+        """Overlay einfuegen: erst das Bild waehlen, dann die Zeitwerte.
 
-            # => QSettings auslesen
-            s = QSettings("KVRouite", "KVRouite")
-            image_val  = s.value(f"overlay/{chosen_id}/image", "", str)
-            scale_val  = s.value(f"overlay/{chosen_id}/scale", 1.0, float)
-            x_expr     = s.value(f"overlay/{chosen_id}/mapped_x", "0", str)
-            y_expr     = s.value(f"overlay/{chosen_id}/mapped_y", "0", str)
+        Frueher stand hier die Auswahl zwischen drei festen Plaetzen aus den
+        Einstellungen. Jetzt uebernimmt das der OverlayInsertDialog, der die
+        Bilder dieses Projekts, die Bibliothek und den Dateidialog in einer
+        Liste zusammenfasst.
 
-            ovl_dict = {
-                "start":    start_s,
-                "end":      end_s,
-                "fade_in":  fade_in_s,
-                "fade_out": fade_out_s,
-                "image":    image_val,
-                "scale":    scale_val,
-                "x":        x_expr,
-                "y":        y_expr
-            }
-            self.add_overlay(ovl_dict)
+        Die Pruefung gegen Schnitte und Blendenraender bleibt unveraendert in
+        add_overlay - sie ist der Grund, warum Vorschau und Export nicht
+        auseinanderlaufen koennen.
+
+        Der alte InsertOverlayDialog steht weiter unten unveraendert; wer
+        zurueck will, ersetzt hier nur die eine Zeile.
+        """
+        from views.overlay_insert_dialog import OverlayInsertDialog
+
+        dlg = OverlayInsertDialog(marker_s, self, parent)
+        if dlg.exec() == QDialog.Accepted and dlg.ergebnis:
+            self.add_overlay(dlg.ergebnis)
+        elif getattr(dlg, "bereits_hinzugefuegt", False):
+            # "Erweitert…" hat das Overlay selbst eingetragen.
+            pass
         else:
-            print("[OverlayManager] => user canceled InsertOverlayDialog")
+            print("[OverlayManager] => Einfuegen abgebrochen")
 
 
     # =========================================================================
@@ -505,8 +530,8 @@ class OverlayManager(QObject):
         if not self._overlays:
             return
         import copy
-        # Falls du Undo möchtest:
-        self._history_stack.append(copy.deepcopy(self._overlays))
+        # Damit Strg+Z auch das Loeschen zuruecknimmt.
+        self.vorAenderung.emit(copy.deepcopy(self._overlays))
 
         found_i = -1
         for i, ovl in enumerate(self._overlays):

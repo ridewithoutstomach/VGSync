@@ -1,0 +1,23 @@
+This folder contains the license texts and the source code offer for the
+GStreamer components - NOT the binaries.
+
+On WINDOWS the GStreamer binaries are installed with
+
+    pip install -r requirements.txt
+
+and the build process (build_with_pyinstaller.py) places them into the
+"_internal" folder of the finished application. This folder is copied to
+"_internal/gstreamer" alongside them, so the license texts always travel with
+the binaries.
+
+On LINUX no GStreamer binary is distributed with KVRouite at all; it is
+installed from the distribution's packages. See README.md.
+
+Files here:
+  NOTICE.txt                notice, licensing, patent notice
+  CORRESPONDING-SOURCE.txt  where the source code is, and why none of it is
+                            hosted on kvrouite.com
+  COMPONENTS.txt            the exact packages shipped and their licenses
+  COPYING.LGPL-2.1          GNU Lesser General Public License, version 2.1
+  COPYING.GPL-2             GNU General Public License, version 2
+  COPYING.GPL-3             GNU General Public License, version 3
