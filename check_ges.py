@@ -142,15 +142,18 @@ def main():
                 "intel-media-va-driver / mesa-va-drivers nachinstallieren")
 
     # --- ffmpeg -------------------------------------------------------------
-    # Die Blenden in der Vorschau werden mit ffmpeg vorgerendert, der Export
-    # ohnehin. Beides laeuft ueber den PATH.
-    for werkzeug in ("ffmpeg", "ffprobe"):
-        pfad = shutil.which(werkzeug)
-        if not pfad:
-            return fehler(werkzeug + " nicht im PATH",
-                          "sudo apt install ffmpeg" if LINUX else
-                          "ffmpeg/ neben KVRouite.py legen")
-        ok(f"{werkzeug}: {pfad}")
+    # Seit 6.0 KEIN Abbruchgrund mehr: Wiedergabe, Vorschau samt Blenden und
+    # der Export laufen ueber GStreamer. ffmpeg braucht allein der Copy-Mode -
+    # und zwar beide Werkzeuge, ffmpeg zum Schneiden mit "-c copy" und ffprobe
+    # zum Indizieren der Keyframes. Mitgeliefert wird es nicht mehr.
+    fehlende = [w for w in ("ffmpeg", "ffprobe") if not shutil.which(w)]
+    if fehlende:
+        warnung("Copy-Mode nicht verfuegbar, es fehlt: " + ", ".join(fehlende),
+                "sudo apt install ffmpeg" if LINUX else
+                "ffmpeg installieren und in den PATH legen")
+    else:
+        for werkzeug in ("ffmpeg", "ffprobe"):
+            ok(f"{werkzeug}: {shutil.which(werkzeug)}")
 
     # --- Fenstereinbettung --------------------------------------------------
     if LINUX:
@@ -167,7 +170,6 @@ def main():
         print(f"\nAlles Noetige vorhanden, {len(_warnungen)} Hinweis(e) oben beachten.")
     else:
         print("\nAlles vorhanden.")
-    print("In KVRouite unter Config -> Video Backend auf 'ges' stellen und neu starten.")
     return True
 
 

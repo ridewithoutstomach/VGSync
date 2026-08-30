@@ -1,4 +1,0 @@
-KVRouite Installation Note – ffmpeg
-
-→ Download `ffmpeg.zip` from the official KVRouite GitHub Releases page.
-→ Extract the contents of the ZIP archive into this folder: ffmpeg/

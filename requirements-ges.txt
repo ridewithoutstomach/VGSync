@@ -80,7 +80,7 @@ gstreamer-bundle==1.28.6
 # https://gstreamer.freedesktop.org/src/ . GPLv3 section 6(d) allows the source
 # to sit on a third-party server as long as clear directions accompany the
 # binaries; gstreamer/CORRESPONDING-SOURCE.txt is those directions. That is why
-# there is nothing to upload to kvrouite.com for GStreamer, unlike ffmpeg.
+# there is nothing to upload to kvrouite.com for GStreamer.
 #
 # What does remain: we stay responsible for the source being reachable. Run
 #   python tools/fetch_gstreamer_sources.py --out <folder>

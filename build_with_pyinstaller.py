@@ -34,13 +34,14 @@ import hashlib, zipfile
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Pfad zu ffmpeg (Original-Quellen), das mit ausgeliefert wird.
-LOCAL_FFMPEG = os.path.join(BASE_DIR, "ffmpeg")  # z.B. hier liegt dein ffmpeg/
-
-# mpv wird seit 6.0 NICHT mehr mitgeliefert. Der Ordner mpv/ liegt weiterhin
-# im Arbeitsverzeichnis, weil die 5.x-Zweige ihn brauchen - dieser Builder
-# fasst ihn aber nicht mehr an. Dass nichts davon in den Build rutscht, prueft
-# check_mpv_frei() am Ende.
+# Seit 6.0 werden WEDER ffmpeg NOCH mpv mitgeliefert. Beide Ordner liegen
+# weiterhin im Arbeitsverzeichnis, weil die 5.x-Zweige daraus bauen - dieser
+# Builder fasst sie nicht mehr an. Dass nichts davon in den Build rutscht,
+# pruefen check_mpv_frei() und check_ffmpeg_frei() am Ende.
+#
+# ffmpeg bleibt fuer den Copy-Mode noetig, kommt aber aus dem PATH des
+# Anwenders. Fehlt es dort, sperrt KVRouite den Copy-Mode und sagt es beim
+# Start.
 
 # gstreamer/ enthaelt KEINE Binaries, nur die Rechtstexte (NOTICE, COMPONENTS,
 # COPYING.*). Die GStreamer-DLLs selbst kommen ueber die pip-Wheels
@@ -104,6 +105,54 @@ def ensure_license_txt():
 
     print("[INFO] LICENSE.txt wurde neu erstellt.")
     return license_path
+
+def check_ffmpeg_frei(target_dir):
+    """
+    Gegenprobe: der GPL-Vollbuild von ffmpeg darf nicht im Build liegen.
+
+    Seit 6.0 wird ffmpeg nicht mehr mitgeliefert; der Copy-Mode holt es aus
+    dem PATH des Anwenders. Der Ordner ffmpeg/ (435 MB) liegt aber weiterhin
+    im Arbeitsverzeichnis, weil 5.34 daraus baut - er koennte also unbemerkt
+    wieder eingepackt werden, und dann gaelte die GPL-Quellcodepflicht wieder,
+    obwohl die Rechtstexte dafuer aus dem Build genommen wurden.
+
+    ACHTUNG, hier steckt eine Falle: die GStreamer-Wheels bringen ihre EIGENEN
+    FFmpeg-Bibliotheken mit (avcodec-61.dll, avformat-61.dll, avutil-59.dll,
+    swresample-5.dll fuer gstlibav.dll). Das ist ein LGPL-Build, er gehoert
+    dazu und ist in gstreamer/COMPONENTS.txt dokumentiert. Deshalb wird hier
+    NUR auf den Ordner _internal/ffmpeg und auf die ausfuehrbaren Programme
+    geprueft, niemals auf av*.dll.
+
+    Rueckgabe ist die Liste der Fundstellen, leer heisst sauber.
+    """
+    programme = ("ffmpeg.exe", "ffprobe.exe", "ffplay.exe",
+                 "ffmpeg", "ffprobe", "ffplay")
+    funde = []
+    for root, dirs, files in os.walk(target_dir):
+        rel = os.path.relpath(root, target_dir)
+        for d in dirs:
+            if d.lower() == "ffmpeg":
+                funde.append(os.path.join(rel, d))
+        for f in files:
+            if f.lower() in programme:
+                funde.append(os.path.join(rel, f))
+
+    print("-" * 70)
+    if funde:
+        print("[FEHLER] Im Build liegt noch ffmpeg:")
+        for p in sorted(set(funde))[:20]:
+            print("        ", p)
+        if len(set(funde)) > 20:
+            print("         ... und %d weitere" % (len(set(funde)) - 20))
+        print("         Ab 6.0 wird ffmpeg nicht mehr mit ausgeliefert.")
+        print("         Bitte den Build verwerfen und die Ursache beheben.")
+    else:
+        print("[OK]     Kein ffmpeg-Programm im Build - so soll es ab 6.0 sein.")
+        print("         (Die LGPL-FFmpeg-Bibliotheken der GStreamer-Wheels")
+        print("          gehoeren dazu und werden hier bewusst nicht geprueft.)")
+    print("-" * 70)
+    return sorted(set(funde))
+
 
 def check_mpv_frei(target_dir):
     """
@@ -320,11 +369,9 @@ def build_windows(build_setup: bool = False):
         else:
             shutil.copy2(src_item, dst_item)
 
-    # _internal vorbereiten + ffmpeg hinein
+    # _internal vorbereiten
     internal_dir = os.path.join(target_dir, "_internal")
     os.makedirs(internal_dir, exist_ok=True)
-    print("[INFO] Kopiere ffmpeg →", os.path.join(internal_dir, "ffmpeg"))
-    copy_tree_all(LOCAL_FFMPEG, os.path.join(internal_dir, "ffmpeg"))
     print("[INFO] Kopiere gstreamer (Lizenztexte) →", os.path.join(internal_dir, "gstreamer"))
     if os.path.isdir(LOCAL_GSTREAMER):
         copy_tree_all(LOCAL_GSTREAMER, os.path.join(internal_dir, "gstreamer"))
@@ -413,6 +460,8 @@ def build_windows(build_setup: bool = False):
     # merkt, und zoege die GPL-Quellcodepflicht nach sich.
     if check_mpv_frei(target_dir):
         raise SystemExit("[ABBRUCH] Build enthaelt mpv - nicht ausliefern.")
+    if check_ffmpeg_frei(target_dir):
+        raise SystemExit("[ABBRUCH] Build enthaelt ffmpeg - nicht ausliefern.")
 
     # ---------------- portable ZIP + SHA ----------------
     ARCH_SUFFIX = "Win_x64"

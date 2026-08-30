@@ -67,8 +67,10 @@ sudo apt update
 sudo apt install ffmpeg python3-venv git
 ```
 
-`ffmpeg` wird nur noch fuer den Copy-Mode gebraucht. Rendern, Blenden und
-Vorschau laufen seit 6.0 komplett ueber GES.
+`ffmpeg` wird nur noch fuer den Copy-Mode gebraucht und seit 6.0 auch nicht
+mehr mitgeliefert - unter Linux kam es ohnehin schon aus der Distribution.
+Rendern, Blenden und Vorschau laufen komplett ueber GES. Wer den Copy-Mode
+nicht braucht, kann `ffmpeg` weglassen; er ist dann ausgegraut.
 
 ---
 
@@ -156,7 +158,8 @@ python3 check_ges.py
 
 Das Skript startet die Anwendung nicht und veraendert nichts. Es prueft der
 Reihe nach PySide6, PyGObject, die drei Typelibs, die GES-Engine, eine
-brauchbare Video-Senke, einen H.264-Dekoder und ffmpeg - und nennt bei jedem
+brauchbare Video-Senke, einen H.264-Dekoder und die GL-Elemente fuer die
+360-Grad-Ansicht - und nennt bei jedem
 Fehlschlag das Paket, das fehlt. Erwartete Ausgabe sinngemaess:
 
 ```
@@ -208,7 +211,7 @@ Damit gehen allerdings alle Oberflaechen-Einstellungen verloren.
 | Ton laeuft, Bild bleibt schwarz | Fenstereinbettung ueber das X11-Handle schlaegt fehl, vermutlich Wayland-Sitzung | `QT_QPA_PLATFORM=xcb python3 KVRouite.py` |
 | `No such element: ...` beim Abspielen | Plugin-Satz unvollstaendig | `sudo apt install gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav` |
 | Ruckeln bei 4K, `check_ges.py` meldet nur `avdec_h264` | keine Hardware-Dekodierung | `sudo apt install gstreamer1.0-vaapi` plus Treiber (`intel-media-va-driver` bei Intel, `mesa-va-drivers` bei AMD) |
-| `ffmpeg nicht im PATH` | Grundpaket fehlt | `sudo apt install ffmpeg` |
+| `Copy-Mode nicht verfuegbar, es fehlt: ffmpeg` | nur ein Hinweis, kein Fehler - alles ausser dem Copy-Mode laeuft | `sudo apt install ffmpeg` |
 
 Zum genaueren Hinsehen hilft GStreamers eigene Ausgabe:
 
@@ -266,4 +269,5 @@ abspielt, ist der Weg bestaetigt.
 
 Windows bekommt GStreamer als pip-Wheel ins venv und spaeter durch
 PyInstaller in den Installer gepackt - der Endanwender installiert nichts
-zusaetzlich. Linux nimmt die Distributionspakete, so wie schon bei ffmpeg.
+zusaetzlich. Linux nimmt die Distributionspakete - so wie bei ffmpeg, das
+seit 6.0 auf keinem der beiden Systeme mehr mitgeliefert wird.

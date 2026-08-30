@@ -294,25 +294,61 @@ def main():
             "Run check_ges.py to see what exactly is missing.")
         sys.exit(1)
 
-    # ffmpeg ist KEINE Startbedingung. Gebraucht wird es nur noch fuer den
-    # Copy-Mode und ein paar Hilfsschritte; Wiedergabe, Vorschau samt Blenden,
-    # Bildraten, Laengen, Drehung, Hardware-Erkennung und der Export laufen
-    # ueber GStreamer. Es wird deshalb nur GESUCHT und, wenn vorhanden, in den
-    # PATH gelegt. Bewusst NICHT ueber path_manager.ensure_ffmpeg(): das
-    # oeffnet bei Misserfolg einen Ordner-Dialog, und genau das soll beim
-    # Start nicht passieren.
-
+    # ffmpeg ist KEINE Startbedingung und wird seit 6.0 auch nicht mehr
+    # mitgeliefert. Gebraucht wird es allein vom Copy-Mode; Wiedergabe,
+    # Vorschau samt Blenden, Bildraten, Laengen, Drehung, Hardware-Erkennung
+    # und der Export laufen ueber GStreamer. Gesucht wird deshalb nur, was auf
+    # dem Rechner schon da ist, und es wird in den PATH gelegt, damit die
+    # spaeteren Pruefungen mit shutil.which() es auch finden.
+    #
+    # Bewusst NICHT ueber path_manager.ensure_ffmpeg(): das oeffnet bei
+    # Misserfolg einen Ordner-Dialog, und genau das soll beim Start nicht
+    # passieren.
     ffmpeg_ordner = (path_manager.find_ffmpeg_folder_mac()
                      if current_os == "Darwin"
                      else path_manager.find_ffmpeg_folder())
     if ffmpeg_ordner and path_manager.is_ffmpeg_in_folder(ffmpeg_ordner):
         path_manager.add_to_process_path(ffmpeg_ordner)
         print("[DEBUG] ffmpeg gefunden in", ffmpeg_ordner)
-    elif not shutil.which("ffmpeg"):
-        print("[WARN] ffmpeg nicht gefunden - Copy-Mode und der ffmpeg-Export "
-              "stehen nicht zur Verfuegung.")
-        ##
-    # ++ADD++ Ende
+
+    # Einmal deutlich sagen, was ohne ffmpeg fehlt. Nur der Copy-Mode haengt
+    # daran, deshalb ein Hinweis und kein Abbruch - und nur beim ersten Mal.
+    # Ohne das faende der Anwender bloss einen ausgegrauten Menueeintrag vor
+    # und wuesste nicht, warum.
+    #
+    # Der Merker wird zurueckgenommen, sobald ffmpeg wieder da ist. Sonst
+    # hiesse "einmal" ein einziges Mal ueberhaupt: wer ffmpeg spaeter
+    # deinstalliert oder den PATH aendert, saesse wieder vor einem
+    # ausgegrauten Menueeintrag ohne Erklaerung. So kommt der Hinweis bei
+    # jedem NEUEN Fehlen genau einmal.
+    from PySide6.QtCore import QSettings as _QS
+    einstellungen = _QS("KVRouite", "KVRouite")
+    MERKER = "hints/ffmpeg_missing_shown"
+
+    fehlende_werkzeuge = path_manager.fehlende_ffmpeg_werkzeuge()
+    if not fehlende_werkzeuge:
+        if einstellungen.contains(MERKER):
+            einstellungen.remove(MERKER)
+    else:
+        print("[WARN] " + path_manager.copy_mode_fehlgrund()
+              + " - der Copy-Mode steht nicht zur Verfuegung.")
+        if not einstellungen.value(MERKER, False, type=bool):
+            kasten = QMessageBox(None)
+            kasten.setIcon(QMessageBox.Information)
+            kasten.setWindowTitle("ffmpeg not found")
+            kasten.setText(
+                "KVRouite did not find " + " and ".join(fehlende_werkzeuge)
+                + " in your PATH.\n\n"
+                "This affects one thing: COPY MODE stays greyed out. It cuts "
+                "on keyframes with ffmpeg and uses ffprobe to index them, so "
+                "it cannot run without them.\n\n"
+                "Nothing else is affected - KVRouite works as usual.\n\n"
+                "If you want copy mode: install ffmpeg - it includes ffprobe - "
+                "and make sure it is in your PATH. You can also point KVRouite "
+                "at it under Config > FFmpeg > Set ffmpeg Path.")
+            kasten.setStandardButtons(QMessageBox.Ok)
+            kasten.exec()
+            einstellungen.setValue(MERKER, True)
     
     
     from views.mainwindow import MainWindow

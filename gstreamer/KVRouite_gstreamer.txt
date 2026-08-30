@@ -15,8 +15,8 @@ installed from the distribution's packages. See README.md.
 
 Files here:
   NOTICE.txt                notice, licensing, patent notice
-  CORRESPONDING-SOURCE.txt  where the source code is, and why it is not on
-                            kvrouite.com like the ffmpeg sources
+  CORRESPONDING-SOURCE.txt  where the source code is, and why none of it is
+                            hosted on kvrouite.com
   COMPONENTS.txt            the exact packages shipped and their licenses
   COPYING.LGPL-2.1          GNU Lesser General Public License, version 2.1
   COPYING.GPL-2             GNU General Public License, version 2

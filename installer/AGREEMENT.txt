@@ -36,9 +36,6 @@ Third-Party Libraries
 ---------------------
 This application includes and distributes open-source libraries:
 
-- FFmpeg 7.1 (GPL build)
-  License: GPL-3.0-or-later - https://ffmpeg.org
-
 - GStreamer 1.28.6, including GStreamer Editing Services (GES) and PyGObject
   License: LGPL-2.1-or-later. The bundled x264 and x265 encoder plugins, and the
   a52dec/dtsdec/dvdread plugins, are GPL-2.0-or-later. Individual components are
@@ -47,15 +44,20 @@ This application includes and distributes open-source libraries:
   are proprietary Microsoft components and are System Libraries in the sense of the
   GNU GPL. https://gstreamer.freedesktop.org
 
+  The bundle also contains the FFmpeg 7.1 shared libraries (libavcodec,
+  libavformat, libavutil, libswresample, libswscale) that the GStreamer
+  gst-libav plugin uses. Those are an LGPL-2.1-or-later build and are covered
+  by the same arrangement as the rest of GStreamer; see
+  `_internal/gstreamer/COMPONENTS.txt`.
+
   GStreamer is what plays, cuts and renders video in KVRouite. It is always
-  loaded.
+  loaded. (Copy mode additionally calls the ffmpeg and ffprobe programs, but
+  those are NOT part of this distribution - KVRouite uses whatever is
+  installed on your own system, and copy mode stays disabled without them.)
 
-Full license texts for these libraries are located in the `_internal/ffmpeg`
-and `_internal/gstreamer` folders. `_internal/gstreamer/COMPONENTS.txt` lists
+Full license texts for these libraries are located in the
+`_internal/gstreamer` folder. `_internal/gstreamer/COMPONENTS.txt` lists
 every GStreamer package shipped and its exact license.
-
-Corresponding source code for FFmpeg, as used in this distribution, is
-available at: https://kvrouite.com/downloads/index.php
 
 The GStreamer binaries are the GStreamer Project's own prebuilt binaries, passed on
 unchanged. Their corresponding source is published by that project, in the same

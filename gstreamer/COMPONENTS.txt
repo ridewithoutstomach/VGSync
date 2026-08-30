@@ -85,16 +85,17 @@ under GPL-3.0-or-later WITH GCC-exception-3.1 (the GCC Runtime Library
 Exception), which permits their distribution with any program.
 --------------------------------------------------------------------------------
 
-Note on the two FFmpeg copies
+Note on FFmpeg
 -----------------------------
-KVRouite ships FFmpeg twice, and the two are licensed differently:
+KVRouite ships the FFmpeg 7.1 shared libraries (libavcodec, libavformat,
+libavutil, libswresample, libswscale) inside gstreamer-plugins-libs. They are
+used by the GStreamer gst-libav plugin. This is an LGPL build and is covered
+by this file and by NOTICE.txt.
 
-  1. "_internal/ffmpeg"  - the FFmpeg 7.1 full build (ffmpeg.exe / ffprobe.exe)
-                           used for cutting and rendering. GPL build (GPLv3).
-                           See _internal/ffmpeg/NOTICE.txt.
-
-  2. inside gstreamer-plugins-libs - the FFmpeg 7.1 shared libraries used by
-                           the GStreamer gst-libav plugin. LGPL build.
-                           Covered by this file and NOTICE.txt.
+Nothing else of FFmpeg is distributed. Up to version 5.01 there was a second
+copy - the FFmpeg 7.1 full build (ffmpeg.exe / ffprobe.exe, a GPL build) in
+"_internal/ffmpeg", used for cutting and rendering. From 6.0 on it is gone:
+rendering runs through GES, and copy mode calls whatever ffmpeg and ffprobe
+the user has installed. If neither is present, copy mode stays disabled.
 
 ================================================================================

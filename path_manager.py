@@ -19,11 +19,17 @@
 #
 # path_manager.py
 #
-# Sucht die externen Werkzeuge, die KVRouite braucht, und legt sie in den
-# PATH des Prozesses. Seit 6.0 ist das nur noch ffmpeg (Copy-Mode und einige
-# Hilfsschritte). Die frueheren libmpv-Funktionen sind entfallen: die
-# Wiedergabe laeuft ueber GStreamer/GES, und dessen Bibliotheken kommen ueber
-# das Python-Paket bzw. die Distributionspakete, nicht ueber diesen Weg.
+# Sucht ffmpeg und legt es in den PATH des Prozesses.
+#
+# Seit 6.0 wird ffmpeg NICHT mehr mitgeliefert und nur noch vom Copy-Mode
+# gebraucht. Gesucht wird deshalb ausschliesslich, was auf dem Rechner des
+# Anwenders schon da ist: ein selbst gesetzter Pfad, die ueblichen
+# Windows-Installationsorte, sonst der PATH. Der frueher bevorzugte Ordner
+# ffmpeg/bin neben der Anwendung ist entfallen - den gibt es nicht mehr.
+#
+# Die libmpv-Funktionen sind ebenfalls entfallen; die Wiedergabe laeuft ueber
+# GStreamer/GES, dessen Bibliotheken kommen ueber das Python-Paket bzw. die
+# Distributionspakete.
 
 import os
 import platform
@@ -46,6 +52,36 @@ def is_ffmpeg_in_folder(folder: str) -> bool:
     path_exe = os.path.join(folder, exe_name)
     return os.path.isfile(path_exe)
 
+#: Was dem Anwender angezeigt wird, wenn der Copy-Mode nicht zur Verfuegung
+#: steht. An einer Stelle formuliert, damit Menue, Werkzeugtipp und Log nicht
+#: auseinanderlaufen.
+COPY_MODE_FEHLT = ("Copy mode needs ffmpeg and ffprobe. "
+                   "They were not found in your PATH.")
+
+
+def fehlende_ffmpeg_werkzeuge():
+    """Welche der beiden Werkzeuge fehlen. Leere Liste heisst: beide da.
+
+    Der Copy-Mode braucht BEIDE: ffmpeg schneidet an den Keyframes mit
+    "-c copy", ffprobe indiziert die Keyframes und misst die Segmentlaengen.
+    Frueher wurde nur auf ffmpeg geprueft - wer nur eines von beiden hatte,
+    landete in einem Modus, der beim Export scheiterte.
+    """
+    return [n for n in ("ffmpeg", "ffprobe") if not shutil.which(n)]
+
+
+def copy_mode_moeglich() -> bool:
+    return not fehlende_ffmpeg_werkzeuge()
+
+
+def copy_mode_fehlgrund() -> str:
+    """Kurzer Klartext fuers Log. Leer, wenn nichts fehlt."""
+    fehlt = fehlende_ffmpeg_werkzeuge()
+    if not fehlt:
+        return ""
+    return " und ".join(fehlt) + " nicht im PATH"
+
+
 def find_ffmpeg_folder() -> str:
     """
     1) QSettings
@@ -58,12 +94,6 @@ def find_ffmpeg_folder() -> str:
     stored_folder = s.value("paths/ffmpeg", "", type=str)
     if is_ffmpeg_in_folder(stored_folder):
         return stored_folder
-
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    local_path = os.path.join(base_dir, "ffmpeg", "bin")
-    if is_ffmpeg_in_folder(local_path):
-        return local_path
-
 
     # 2) Windows standard paths
     if platform.system().lower().startswith("win"):

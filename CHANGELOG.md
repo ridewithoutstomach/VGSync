@@ -11,6 +11,38 @@ Versions up to and including 5.0 are documented in the GitHub releases only.
 
 ### Removed
 
+**ffmpeg is no longer shipped — copy mode uses yours**
+
+Rendering moved to GES, so the FFmpeg full build in `ffmpeg/` (435 MB) was
+only still needed by copy mode, which cuts on keyframes with `-c copy`. It is
+no longer distributed:
+
+- `build_with_pyinstaller.py` does not copy `ffmpeg/` into the build any more.
+  A new `check_ffmpeg_frei()` runs before packing and aborts if an `ffmpeg`
+  folder or an ffmpeg/ffprobe/ffplay executable turns up in it. It deliberately
+  ignores `av*.dll` — the GStreamer wheels bring their own **LGPL** FFmpeg
+  libraries for gst-libav, and those stay.
+- Copy mode is greyed out unless **both** `ffmpeg` and `ffprobe` are in your
+  PATH. It used to check only `ffmpeg`, so having just one of them led into a
+  mode that failed at export. KVRouite now also says once at startup what is
+  missing and what it costs, instead of leaving you with a greyed-out menu
+  entry and no explanation.
+- `path_manager` no longer prefers a bundled `ffmpeg/bin`; it looks at your
+  stored path, the usual Windows install locations and your PATH.
+- `check_ges.py` treats a missing ffmpeg as a hint, not as a failure.
+- The ffmpeg render engine — `xfade_main()` with its pre-cutting, keyframe
+  search, `copy_cut`, `crossfade_2`, concat, overlay encode and the
+  VAAPI/NVENC parameters — was dead since the encode mode moved to GES. It is
+  deleted, about 1200 lines. What remains of `managers/encoder_manager.py` is
+  the export dialog and the segment length check that copy mode needs.
+
+**What this means for licensing:** 6.0 no longer distributes an FFmpeg
+program, so no GPL source obligation arises from it. It does still distribute
+the FFmpeg **libraries** inside the GStreamer wheels — an LGPL build, covered
+by `gstreamer/COMPONENTS.txt` and the GStreamer source directions. The source
+offer for the GPL build shipped with 5.01 and earlier stays up: that
+obligation belongs to the builds already handed out.
+
 **mpv / libmpv is gone — GStreamer is now the only engine**
 
 Up to 5.01 there were two playback paths and mpv was the default. It could

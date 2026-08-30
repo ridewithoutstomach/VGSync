@@ -28,6 +28,8 @@ import shutil
 import base64
 import config
 import path_manager  # your module above
+from path_manager import (COPY_MODE_FEHLT, copy_mode_fehlgrund,
+                          copy_mode_moeglich)
 import urllib.request
 import copy
 import tempfile
@@ -737,16 +739,16 @@ class MainWindow(QMainWindow):
         self.copy_action.triggered.connect(lambda: self._set_edit_mode("copy"))
         self.encode_action.triggered.connect(lambda: self._set_edit_mode("encode"))
 
-        # Copy-Mode braucht ffmpeg: er schneidet an Keyframes mit "-c copy"
-        # und indiziert die Keyframes. Ohne ffmpeg im PATH ist er nicht
-        # benutzbar, also wird er gar nicht erst angeboten.
-        if not shutil.which("ffmpeg"):
+        # Copy-Mode braucht ffmpeg UND ffprobe: er schneidet an Keyframes mit
+        # "-c copy" (ffmpeg), indiziert die Keyframes und misst die
+        # Segmentlaengen (beides ffprobe). Seit 6.0 wird nichts davon mehr
+        # mitgeliefert - fehlt eines von beiden im PATH, wird der Modus gar
+        # nicht erst angeboten.
+        if not copy_mode_moeglich():
             self.copy_action.setEnabled(False)
-            self.copy_action.setStatusTip(
-                "Copy-Mode needs ffmpeg. It was not found in your PATH.")
-            self.copy_action.setToolTip(
-                "Copy-Mode needs ffmpeg. It was not found in your PATH.")
-            print("[INFO] Copy-Mode ist abgeschaltet: ffmpeg nicht gefunden.")
+            self.copy_action.setStatusTip(COPY_MODE_FEHLT)
+            self.copy_action.setToolTip(COPY_MODE_FEHLT)
+            print("[INFO] Copy-Mode ist abgeschaltet: " + copy_mode_fehlgrund())
        
         
         
@@ -819,12 +821,14 @@ class MainWindow(QMainWindow):
         ffmpeg_menu.addAction(action_show_ffmpeg_path)
         
         action_set_ffmpeg_path = QAction("Set ffmpeg Path...", self)
-        action_set_ffmpeg_path.setStatusTip("In case you want use your own ffmpeg, change the Path here")
+        action_set_ffmpeg_path.setStatusTip(
+            "Point KVRouite at your ffmpeg if it is not in your PATH")
         action_set_ffmpeg_path.triggered.connect(self._on_set_ffmpeg_path)
         ffmpeg_menu.addAction(action_set_ffmpeg_path)
     
         action_clear_ffmpeg_path = QAction("Clear ffmpeg Path", self)
-        action_clear_ffmpeg_path.setStatusTip("reset the ffmpeg to our own delivered ffmpeg")
+        action_clear_ffmpeg_path.setStatusTip(
+            "forget the stored path and look for ffmpeg in your PATH again")
         action_clear_ffmpeg_path.triggered.connect(self._on_clear_ffmpeg_path)
         ffmpeg_menu.addAction(action_clear_ffmpeg_path)
         
@@ -1984,9 +1988,9 @@ class MainWindow(QMainWindow):
         # Ein gespeichertes Projekt kann "copy" enthalten. Ohne ffmpeg geht das
         # nicht, dann wird auf Encode ausgewichen statt in einen Modus zu
         # schalten, der beim Export scheitert.
-        if new_mode == "copy" and not shutil.which("ffmpeg"):
-            print("[WARN] Copy-Mode nicht moeglich (ffmpeg fehlt) - "
-                  "schalte auf Encode-Mode.")
+        if new_mode == "copy" and not copy_mode_moeglich():
+            print("[WARN] Copy-Mode nicht moeglich (" + copy_mode_fehlgrund()
+                  + ") - schalte auf Encode-Mode.")
             new_mode = "encode"
 
         old_mode = self._edit_mode
@@ -3903,22 +3907,25 @@ class MainWindow(QMainWindow):
             
             <h3>Third-Party Libraries &amp; Patent Notice</h3>
             This application includes and distributes open-source libraries:<br>
-            <b>1. FFmpeg 7.1</b> - <a href='https://ffmpeg.org'>ffmpeg.org</a>
-            (GPL build, GPL-3.0-or-later)<br>
-            <b>2. GStreamer 1.28.6</b>, incl. GStreamer Editing Services (GES) and
+            <b>GStreamer 1.28.6</b>, incl. GStreamer Editing Services (GES) and
             PyGObject -
             <a href='https://gstreamer.freedesktop.org'>gstreamer.freedesktop.org</a>
             (LGPL-2.1-or-later; the bundled x264 and x265 encoder plugins are
-            GPL-2.0-or-later)<br><br>
+            GPL-2.0-or-later). The bundle also contains the FFmpeg 7.1 shared
+            libraries (LGPL build) used by its gst-libav plugin - see
+            <code>COMPONENTS.txt</code>.<br><br>
 
             GStreamer is what plays, cuts and renders video in KVRouite, so it is
             always loaded. On Linux it is not distributed with KVRouite at all -
             it comes from your distribution's own packages.<br><br>
 
-            Full license texts are located in the <code>_internal/ffmpeg</code>
-            and <code>_internal/gstreamer</code> folders.<br>
-            The complete source code for FFmpeg as used in this software is
-            available at <a href='https://kvrouite.com/downloads/index.php'>kvrouite.com/downloads</a>.
+            Copy mode additionally calls the <b>ffmpeg</b> and <b>ffprobe</b>
+            programs. Those are <b>not</b> part of this distribution - KVRouite
+            uses whatever is installed on your system, and copy mode stays
+            disabled without them.<br><br>
+
+            Full license texts are located in the
+            <code>_internal/gstreamer</code> folder.<br>
             The GStreamer binaries are the GStreamer Project's own, passed on unchanged;
             their source is published by that project at
             <a href='https://gstreamer.freedesktop.org/src/'>gstreamer.freedesktop.org/src</a>
@@ -4232,10 +4239,10 @@ class MainWindow(QMainWindow):
             # Button Box
             btns = QDialogButtonBox()
 
-            # Add "Copy" button - nur wenn ffmpeg da ist. Copy-Mode schneidet
-            # an Keyframes mit "-c copy"; ohne ffmpeg fuehrt die Wahl nur in
-            # einen Modus, der beim Export scheitert.
-            if shutil.which("ffmpeg"):
+            # Add "Copy" button - nur wenn ffmpeg und ffprobe da sind.
+            # Copy-Mode schneidet an Keyframes mit "-c copy"; ohne die beiden
+            # fuehrt die Wahl nur in einen Modus, der beim Export scheitert.
+            if copy_mode_moeglich():
                 btn_copy = QPushButton("Copy")
                 btns.addButton(btn_copy, QDialogButtonBox.YesRole)
                 btn_copy.clicked.connect(lambda: dlg.done(1))
@@ -8535,8 +8542,8 @@ class MainWindow(QMainWindow):
         vbox.addWidget(QLabel("Select video edition mode"))
 
         btns = QDialogButtonBox()
-        # "Copy" nur anbieten, wenn ffmpeg vorhanden ist (siehe oben).
-        if shutil.which("ffmpeg"):
+        # "Copy" nur anbieten, wenn ffmpeg und ffprobe vorhanden sind.
+        if copy_mode_moeglich():
             b_copy = QPushButton("Copy")
             btns.addButton(b_copy, QDialogButtonBox.YesRole)
             b_copy.clicked.connect(lambda: dlg.done(1))
