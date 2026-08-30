@@ -283,7 +283,7 @@ def main():
                      "gstreamer1.0-gl gstreamer1.0-x\n\n"
                      "Das venv muss mit --system-site-packages angelegt sein.")
         else:
-            hilfe = "pip install -r requirements-ges.txt"
+            hilfe = "pip install -r requirements.txt"
         QMessageBox.critical(
             None, "GStreamer is missing",
             "KVRouite plays, cuts and renders video through GStreamer "

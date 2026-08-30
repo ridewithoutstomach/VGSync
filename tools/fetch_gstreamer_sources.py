@@ -33,7 +33,7 @@ eine Anfrage beantwortet werden kann. Ein Ordner auf der Backup-Platte reicht.
 
     python tools/fetch_gstreamer_sources.py --out D:/Archiv/gstreamer-1.28.6
 
-Ohne --version wird die Version aus requirements-ges.txt gelesen.
+Ohne --version wird die Version aus requirements.txt gelesen.
 Bereits vorhandene, korrekt gepruefte Dateien werden uebersprungen, der Lauf
 ist also wiederholbar.
 """
@@ -70,16 +70,16 @@ MODULES = [
 
 
 def read_pinned_version(repo_root):
-    """Holt die Version aus requirements-ges.txt (Zeile 'gstreamer-bundle==x')."""
-    path = os.path.join(repo_root, "requirements-ges.txt")
+    """Holt die Version aus requirements.txt (Zeile 'gstreamer-bundle==x')."""
+    path = os.path.join(repo_root, "requirements.txt")
     try:
         text = open(path, encoding="utf-8").read()
     except OSError as exc:
-        print("[WARN] requirements-ges.txt nicht lesbar:", exc)
+        print("[WARN] requirements.txt nicht lesbar:", exc)
         return None
     match = re.search(r"^\s*gstreamer[-_]bundle\s*==\s*([0-9][0-9.]*)", text, re.M)
     if not match:
-        print("[WARN] Keine Zeile 'gstreamer-bundle==...' in requirements-ges.txt.")
+        print("[WARN] Keine Zeile 'gstreamer-bundle==...' in requirements.txt.")
         return None
     return match.group(1)
 
@@ -165,7 +165,7 @@ def main():
                         help="Zielordner fuer die Tarballs")
     parser.add_argument("--version", default=None,
                         help="GStreamer-Version, z.B. 1.28.6 "
-                             "(Standard: aus requirements-ges.txt)")
+                             "(Standard: aus requirements.txt)")
     args = parser.parse_args()
 
     version = args.version or read_pinned_version(repo_root)

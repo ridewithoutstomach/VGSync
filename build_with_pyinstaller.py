@@ -247,7 +247,7 @@ def check_gstreamer_payload(internal_dir):
         print("[FEHLER] GStreamer ist NICHT im Build enthalten.")
         print("         Seit 6.0 laeuft Wiedergabe, Schnitt und Export allein")
         print("         darueber - dieses Bundle startet nicht. Bitte aus einem")
-        print("         venv bauen, in dem requirements-ges.txt installiert ist.")
+        print("         venv bauen, in dem requirements.txt installiert ist.")
     print("-" * 70)
 
 

@@ -21,26 +21,20 @@ Requirements
 ------------
 
 - Python 3.10.9 (64-bit) or Python 3.12.0 (64-bit)
-- GStreamer with GES - **required**, see "requirements-ges.txt"
 - ffmpeg and ffprobe in your PATH - **only** for the Copy-Mode. They are not
   shipped with KVRouite; without them Copy-Mode stays disabled and everything
   else works.
 
-Python packages are split into two files:
+There are two requirements files:
 
-- "requirements.txt" - everything the application needs to run.
-  The same list on Linux and Windows.
-- "requirements-ges.txt" - the GStreamer runtime, Windows/macOS. On Linux this
-  comes from the distribution instead. This is not optional: without GStreamer
-  KVRouite stops at startup and says so.
+- "requirements.txt" - everything the application needs to run, GStreamer
+  included. On Windows and macOS one command installs all of it. On Linux the
+  GStreamer line is skipped automatically, because there are no Linux wheels -
+  there it comes from the distribution, see below.
 - "requirements-build.txt" - additional packages needed only to build the
   Windows executable (PyInstaller and its dependencies).
 
 If you just want to run KVRouite, "requirements.txt" is all you need.
-
-Note:
-Binaries are NOT included in the Git repository due to size limitations.
-You must manually download and extract them from the GitHub Releases page.
 
 -------------------------------------------------------------------------------
 ## 🔧 Installation & Usage (Linux & Windows)
@@ -77,7 +71,7 @@ sudo apt install python3-gi python3-gi-cairo \
 `gir1.2-ges-1.0` is in the *universe* component; if apt cannot find it,
 enable it once with `sudo add-apt-repository universe`. Ubuntu 24.04 LTS
 ships GStreamer 1.24.2, Ubuntu 26.04 LTS ships 1.28.2; the Windows build
-uses the 1.28.6 wheels (see `requirements-ges.txt`).
+uses the 1.28.6 wheels (see `requirements.txt`).
 
 These are **system** packages. A plain venv hides them and `import gi`
 fails although everything is installed -- create the venv with
@@ -139,17 +133,12 @@ python KVRouite.py
 
 ---
 
-#### Required: GStreamer / GES
+#### GStreamer / GES
 
 On Windows the whole GStreamer runtime comes as pip wheels - no MSYS2, no
-system installation:
-
-```cmd
-pip install -r requirements-ges.txt
-```
-
-That installs `gstreamer-bundle` 1.28.6 (~80 MB in site-packages; uninstalling
-removes every file). Check the result with `python check_ges.py`.
+system installation. It is part of `requirements.txt`, so the install above
+already covers it: `gstreamer-bundle` 1.28.6, ~80 MB in site-packages,
+uninstalling removes every file. Check the result with `python check_ges.py`.
 
 Licensing note: these wheels contain GPL- and LGPL-licensed binaries, among
 them the x264/x265 encoder plugins that the GES encoder renders with. **If you
@@ -179,10 +168,10 @@ External Binaries (Windows)
 
 There is nothing to download and unpack.
 
-GStreamer is installed with `pip install -r requirements-ges.txt` (see above).
-The "gstreamer/" folder in this repository contains no binaries - only the
-license texts, the component list and the source code directions, which the
-build process copies next to the runtime.
+GStreamer comes from `requirements.txt` (see above). The "gstreamer/" folder
+in this repository contains no binaries - only the license texts, the component
+list and the source code directions, which the build process copies next to the
+runtime.
 
 ffmpeg is optional and only needed for the Copy-Mode. Install it yourself and
 make sure `ffmpeg` and `ffprobe` are in your PATH, or point KVRouite at them
@@ -250,7 +239,7 @@ FFmpeg
 
 GStreamer / GStreamer Editing Services (GES)
 - Version: 1.28.6 on Windows (pip package "gstreamer-bundle", see
-  requirements-ges.txt); on Linux whatever the distribution ships
+  requirements.txt); on Linux whatever the distribution ships
 - License: LGPL-2.1-or-later for GStreamer core, gst-plugins-base/good/bad,
   GES and PyGObject. The bundled x264 and x265 encoder plugins - which the GES
   encoder uses for rendering - and the a52dec/dtsdec/dvdread plugins are

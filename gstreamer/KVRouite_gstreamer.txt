@@ -3,7 +3,7 @@ GStreamer components - NOT the binaries.
 
 On WINDOWS the GStreamer binaries are installed with
 
-    pip install -r requirements-ges.txt
+    pip install -r requirements.txt
 
 and the build process (build_with_pyinstaller.py) places them into the
 "_internal" folder of the finished application. This folder is copied to

@@ -8,9 +8,9 @@ Schnitt, Blenden, die 360-Grad-Ansicht und der Export allein ueber GStreamer
 Editing Services. Fehlt GStreamer, bricht KVRouite beim Start mit einer
 Meldung ab. Den frueheren zweiten Weg ueber libmpv gibt es nicht mehr.
 
-Unter Windows kommt GStreamer als pip-Wheel (`requirements-ges.txt`, eine
-Zeile). Unter Linux gibt es keine Wheels - dort kommt alles aus der
-Distribution. Genau darum geht es hier.
+Unter Windows kommt GStreamer als pip-Wheel aus `requirements.txt`. Unter
+Linux gibt es keine Wheels - dort kommt es aus der Distribution. Genau darum
+geht es hier.
 
 ---
 
@@ -24,7 +24,7 @@ sudo apt install python3-gi python3-gi-cairo gir1.2-gstreamer-1.0 gir1.2-gst-plu
 cd KVRouite
 python3 -m venv --system-site-packages venv     # das Flag ist Pflicht!
 source venv/bin/activate
-pip install -r requirements.txt                 # NICHT requirements-ges.txt
+pip install -r requirements.txt
 python3 check_ges.py
 python3 KVRouite.py
 ```
@@ -144,9 +144,11 @@ rm -rf venv
 python3 -m venv --system-site-packages venv
 ```
 
-**`requirements-ges.txt` wird unter Linux nicht installiert.** Darin steht
-`gstreamer-bundle`, und dafuer gibt es keine Linux-Wheels. pip wuerde
-versuchen, aus dem Quelltext zu bauen, und das endet im Compiler.
+**`gstreamer-bundle` wird unter Linux nicht installiert.** Die Zeile in
+`requirements.txt` traegt die Bedingung `sys_platform != "linux"`, pip
+ueberspringt sie also von selbst. Linux-Wheels gibt es dafuer nicht; ohne die
+Bedingung wuerde pip versuchen, aus dem Quelltext zu bauen, und das endet im
+Compiler.
 
 ---
 

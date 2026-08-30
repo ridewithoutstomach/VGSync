@@ -1,15 +1,9 @@
-# KVRouite - additional packages for BUILDING the Windows executable.
-# Install on top of requirements.txt:
+# KVRouite - additional packages needed to BUILD the Windows executable.
 #
 #     pip install -r requirements.txt
 #     pip install -r requirements-build.txt
 #     python build_with_pyinstaller.py
-#
-# Nothing in here is imported by the application itself.
-#
-# All versions are the current releases. Verified by actually building 5.0 with
-# them: PyInstaller run, KVRouite.exe and the Inno Setup installer produced and
-# started.
+
 altgraph==0.17.5
 packaging==26.3
 pefile==2024.8.26

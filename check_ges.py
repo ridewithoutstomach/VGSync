@@ -23,7 +23,7 @@ APT = ("sudo apt install python3-gi python3-gi-cairo "
        "gstreamer1.0-plugins-base gstreamer1.0-plugins-good "
        "gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly "
        "gstreamer1.0-libav gstreamer1.0-gl gstreamer1.0-x")
-PIP = "pip install -r requirements-ges.txt"
+PIP = "pip install -r requirements.txt"
 
 _warnungen = []
 
