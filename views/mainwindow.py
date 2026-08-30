@@ -85,7 +85,7 @@ from .encoder_setup_dialog import EncoderSetupDialog  # Import Dialog
 
 from config import TMP_KEYFRAME_DIR, MY_GLOBAL_TMP_DIR, is_soft_opengl_enabled
 from core.mp4_keyframes import keyframe_times_from_index
-from core.player_backend import BACKEND_MPV, BACKEND_GES, DEFAULT_BACKEND
+from core import view360
 from core.fade_cache import FadeJob, FadeRenderer
 from .dialogs import PreviewPrepareDialog, OutputFrameRateDialog
 from core import framerate
@@ -114,7 +114,6 @@ from core.gpx_parser import recalc_gpx_data, get_gpx_video_shift, set_gpx_video_
 from tools.merge_keyframes_incremental import merge_keyframes_incremental
 from config import APP_VERSION
 
-from path_manager import is_valid_mpv_folder
 from config import reset_config
 from managers.encoder_manager import EncoderDialog
 
@@ -563,6 +562,11 @@ class MainWindow(QMainWindow):
         # Playlist / Keyframe-Daten
         self.playlist = []
         self.video_durations = []
+        # 360-Blickwinkel, ein Eintrag je Video - siehe _blick360_liste().
+        self.view360_views = []
+        # True, sobald ein Projekt den 360-Zustand mitgebracht hat. Dann
+        # schaltet die Automatik nicht mehr dazwischen.
+        self._360_aus_projekt = False
         self.playlist_counter = 0
         self.first_video_frame_shown = False
         self.real_total_duration = 0.0
@@ -682,11 +686,22 @@ class MainWindow(QMainWindow):
         
          # 360° Video Toggle (Taste V)
         self.action_toggle_360 = QAction("360° Video", self, checkable=True)
-        self.action_toggle_360.setStatusTip("Toggle 360° mode for pan/tilt/zoom (key: V)")
+        self.action_toggle_360.setStatusTip(
+            "Toggle 360° view - drag to look around, wheel to zoom (key: V). "
+            "Needs the GES backend.")
         self.action_toggle_360.setShortcut(QKeySequence("V"))
         view_menu.addAction(self.action_toggle_360)
 
         self.action_toggle_360.triggered.connect(self._on_toggle_360_from_menu)
+
+        # Der Blickwinkel gehoert zu je einem Video. Material aus derselben
+        # Kamera hat aber praktisch immer dieselbe Ausrichtung - deshalb der
+        # Weg, ihn in einem Schritt auf alle zu uebertragen.
+        self.action_360_auf_alle = QAction("Apply 360° view to all videos", self)
+        self.action_360_auf_alle.setStatusTip(
+            "Copy the current viewing direction and zoom to every video")
+        view_menu.addAction(self.action_360_auf_alle)
+        self.action_360_auf_alle.triggered.connect(self._on_blick360_auf_alle)
         
         setup_menu = menubar.addMenu("Config")
         
@@ -813,54 +828,9 @@ class MainWindow(QMainWindow):
         action_clear_ffmpeg_path.triggered.connect(self._on_clear_ffmpeg_path)
         ffmpeg_menu.addAction(action_clear_ffmpeg_path)
         
-        mpv_menu = setup_menu.addMenu("libmpv")
-        action_show_mpv_path = QAction("Show current libmpv path", self)
-        action_show_mpv_path.setStatusTip("shows the current path of libmpv")
-        action_show_mpv_path.triggered.connect(self._on_show_mpv_path)
-        mpv_menu.addAction(action_show_mpv_path)
-
-        action_set_mpv_path = QAction("Set libmpv path...", self)
-        action_set_mpv_path.setStatusTip("In case you want use your own libmpv, change the Path here")
-        action_set_mpv_path.triggered.connect(self._on_set_mpv_path)
-        mpv_menu.addAction(action_set_mpv_path)
-
-        action_clear_mpv_path = QAction("Clear libmpv path", self)
-        action_clear_mpv_path.setStatusTip("reset the libmpv to our own delivered libmpv")
-        action_clear_mpv_path.triggered.connect(self._on_clear_mpv_path)
-        mpv_menu.addAction(action_clear_mpv_path)
-
-        # --- Wiedergabe-Backend: mpv oder GES ---
-        backend_menu = setup_menu.addMenu("Video Backend")
-        # Das Video-Widget gibt es hier noch nicht (es entsteht weiter unten),
-        # deshalb der Blick direkt in die Einstellungen. Welches Backend dann
-        # wirklich laeuft, zeigt "Show current backend".
-        current_backend = QSettings("KVRouite", "KVRouite").value(
-            "player/backend", DEFAULT_BACKEND, type=str)
-        backend_group = QActionGroup(self)
-        backend_group.setExclusive(True)
-
-        self.action_backend_mpv = QAction("mpv (default)", self, checkable=True)
-        self.action_backend_mpv.setStatusTip(
-            "Playback via libmpv. Fast and proven, but cannot show transitions.")
-        self.action_backend_mpv.setChecked(current_backend == BACKEND_MPV)
-        self.action_backend_mpv.triggered.connect(
-            lambda: self._on_select_player_backend(BACKEND_MPV))
-        backend_group.addAction(self.action_backend_mpv)
-        backend_menu.addAction(self.action_backend_mpv)
-
-        self.action_backend_ges = QAction("GStreamer / GES (experimental)", self, checkable=True)
-        self.action_backend_ges.setStatusTip(
-            "Playback via GStreamer Editing Services. Needed to see crossfades.")
-        self.action_backend_ges.setChecked(current_backend == BACKEND_GES)
-        self.action_backend_ges.triggered.connect(
-            lambda: self._on_select_player_backend(BACKEND_GES))
-        backend_group.addAction(self.action_backend_ges)
-        backend_menu.addAction(self.action_backend_ges)
-
-        backend_menu.addSeparator()
-        action_backend_info = QAction("Show current backend", self)
-        action_backend_info.triggered.connect(self._on_show_player_backend)
-        backend_menu.addAction(action_backend_info)
+        # Ein Menue fuer die Wahl des Wiedergabewegs gibt es seit 6.0 nicht
+        # mehr: es laeuft nur noch GStreamer / GES. Ebenso entfaellt der
+        # libmpv-Pfad.
 
         temp_dir_menu = setup_menu.addMenu("Temp Directory")
 
@@ -1090,8 +1060,6 @@ class MainWindow(QMainWindow):
         if hasattr(self, "action_toggle_360"):
             self.action_toggle_360.setChecked(bool(getattr(self.video_editor, "_is_360_mode", False)))
 
-        # Menuehaken auf das Backend setzen, das wirklich laeuft - GES kann
-        # beim Start fehlgeschlagen und auf mpv zurueckgefallen sein.
         # Blenden fuer die Vorschau werden im Hintergrund vorgerendert.
         self._fade_jobs = {}
         self._fade_dialog = None
@@ -1099,13 +1067,6 @@ class MainWindow(QMainWindow):
         self._fade_renderer.progress.connect(self._on_fades_progress)
         self._fade_renderer.finished.connect(self._on_fades_ready)
 
-        running_backend = self.video_editor.backend_name()
-        if hasattr(self, "action_backend_mpv"):
-            self.action_backend_mpv.setChecked(running_backend == BACKEND_MPV)
-            self.action_backend_ges.setChecked(running_backend == BACKEND_GES)
-        if getattr(self.video_editor, "backend_warning", None):
-            QTimer.singleShot(0, lambda: QMessageBox.warning(
-                self, "Video Backend", self.video_editor.backend_warning))
             
             
         
@@ -1426,6 +1387,8 @@ class MainWindow(QMainWindow):
         self.video_editor.videosDropped.connect(self._on_videos_dropped)       # Player
         self.video_editor.overlayImBildGeaendert.connect(
             self._overlay_im_bild_geaendert)                                   # Overlay ziehen
+        self.video_editor.blick360Geaendert.connect(
+            self._on_blick360_geaendert)                                       # 360 schwenken
         self.gpx_widget.gpx_list.tracksDropped.connect(self._on_tracks_dropped)  # GPX-Liste
         self.map_widget.tracksDropped.connect(self._on_tracks_dropped)    
         
@@ -1587,87 +1550,6 @@ class MainWindow(QMainWindow):
         self._on_sync_point_video_time_toggled(True)
         self.action_map_directions.setChecked(True)
         self._on_map_directions_toggled(True)
-        
-    def _on_select_player_backend(self, name: str):
-        """
-        Waehlt das Wiedergabe-Backend. Wirkt erst nach einem Neustart - das
-        Backend wird beim Bau des Video-Widgets erzeugt und haengt am
-        Fenster-Handle; ein Tausch im laufenden Betrieb waere genau die
-        Reparenting-Falle, die beim Ab- und Andocken schon Aerger macht.
-        """
-        s = QSettings("KVRouite", "KVRouite")
-        if s.value("player/backend", DEFAULT_BACKEND, type=str) == name:
-            return
-        s.setValue("player/backend", name)
-
-        if name == BACKEND_GES:
-            text = ("The player will use GStreamer / GES after the next restart.\n\n"
-                    "GES can show the crossfades at your cuts - mpv cannot.\n\n"
-                    "Please note:\n"
-                    "  - This is experimental.\n"
-                    "  - 360° mode, zoom and pan are only available with mpv.\n"
-                    "  - Crossfades are pre-rendered on first use, so the very\n"
-                    "    first playback after loading needs a moment.\n"
-                    "  - If GStreamer is missing, KVRouite falls back to mpv\n"
-                    "    and tells you at startup.")
-        else:
-            text = "The player will use mpv again after the next restart."
-        QMessageBox.information(self, "Video Backend", text)
-
-    def _on_show_player_backend(self):
-        running = self.video_editor.backend_name()
-        wanted = QSettings("KVRouite", "KVRouite").value(
-            "player/backend", DEFAULT_BACKEND, type=str)
-        msg = f"Currently running: {running}\nSelected for next start: {wanted}"
-        if running != wanted:
-            msg += "\n\nThe selection takes effect after a restart."
-        QMessageBox.information(self, "Video Backend", msg)
-
-    def _on_show_mpv_path(self):
-        s = QSettings("KVRouite", "KVRouite")
-        path_stored = s.value("paths/mpv", "", type=str)
-        if path_stored and os.path.isfile(os.path.join(path_stored, "libmpv-2.dll")):
-            msg = f"Currently stored libmpv path:\n{path_stored}"
-        else:
-            msg = "No valid libmpv path stored in QSettings (or file not found)."
-        QMessageBox.information(self, "libmpv Path", msg)
-
-
-    def _on_set_mpv_path(self):
-        """
-        1) Dialog: User wählt Ordner
-        2) Prüfen, ob dort eine libmpv-2.dll liegt und ob sie sich laden lässt
-        3) Ggfs. in QSettings speichern
-        4) Hinweis: "Bitte neustarten"
-        """
-        
-        folder = QFileDialog.getExistingDirectory(self, "Select folder containing libmpv-2.dll")
-        if not folder:
-            return  # abgebrochen
-
-        if not is_valid_mpv_folder(folder):
-            QMessageBox.warning(self, "Invalid libmpv folder",
-                f"No valid 'libmpv-2.dll' found or library cannot be loaded:\n{folder}\n\n"
-                "We will continue using the default library.")
-            return
-    
-        # -> Okay, wir speichern es
-        s = QSettings("KVRouite", "KVRouite")
-        s.setValue("paths/mpv", folder)
-        QMessageBox.information(self, "libmpv Path set",
-            f"libmpv-2.dll path set to:\n{folder}\n\n"
-            "Please restart the application to take effect.")
-
-
-    def _on_clear_mpv_path(self):
-        s = QSettings("KVRouite", "KVRouite")
-        s.remove("paths/mpv")
-        QMessageBox.information(self, "libmpv Path cleared",
-            "The libmpv path has been removed from QSettings.\n"
-            "We will fallback to the built-in mpv/lib.\n"
-            "Please restart the application.")    
-        
-        
         
     def _increment_counter_on_server(self, mode: str):
         """
@@ -2144,17 +2026,20 @@ class MainWindow(QMainWindow):
             self._on_auto_sync_video_toggled(False)
         if new_mode == "off":
             self.video_editor.edit_status_label.setText("")
+            self.video_editor.edit_status_label.setStyleSheet("")
             self.video_control.set_editing_mode(False, False)
             print("[DEBUG] => OFF")
             self.encoder_setup_action.setEnabled(False)
             self.video_control.show_ovl_button(False)
             self.overlay_setup_action.setEnabled(False)
         elif new_mode == "copy":
-            self.video_editor.edit_status_label.setText("Edit:Cop")
+            # Nur der Sonderfall meldet sich. Klein und orange, damit es die
+            # Zeitanzeige darueber nicht ueberbietet.
+            self.video_editor.edit_status_label.setText("Copymode")
             self.video_editor.edit_status_label.setStyleSheet(
                 "background-color: rgba(0,0,0,120); "
                 "color: orange; "
-                "font-size: 14px; "
+                "font-size: 11px; "
                 "font-weight: bold;"
                 "padding: 2px;"
             )
@@ -2165,14 +2050,11 @@ class MainWindow(QMainWindow):
             self.video_control.show_ovl_button(False)
             self.overlay_setup_action.setEnabled(False)
         elif new_mode == "encode":
-            self.video_editor.edit_status_label.setText("Edit:ENC")
-            self.video_editor.edit_status_label.setStyleSheet(
-                "background-color: rgba(0,0,0,120); "
-                "color: lime; "
-                "font-size: 14px; "
-                "font-weight: bold;"
-                "padding: 2px;"
-            )
+            # Encode ist der Normalfall - dafuer braucht es keine Beschriftung
+            # ueber dem Bild. Auch der Stil muss weg, sonst bliebe vom
+            # dunklen Kasten ein kleiner Rest stehen.
+            self.video_editor.edit_status_label.setText("")
+            self.video_editor.edit_status_label.setStyleSheet("")
 
             cut_on= not self.gpx_widget.gpx_list._gpx_data or is_gpx_video_shift_set()
             self.video_control.set_editing_mode(True,cut_on)
@@ -2192,9 +2074,6 @@ class MainWindow(QMainWindow):
             self._index_question_pending = True
             QTimer.singleShot(0, self._maybe_ask_index)
         
-        if hasattr(self, "autocut_button"):
-            self.autocut_button.setVisible(enabled)
-            
         self._update_set_gpx2video_enabled()
 
     def _fps_nach_laden(self, nur_bei_abweichung=False):
@@ -4025,22 +3904,20 @@ class MainWindow(QMainWindow):
             <h3>Third-Party Libraries &amp; Patent Notice</h3>
             This application includes and distributes open-source libraries:<br>
             <b>1. FFmpeg 7.1</b> - <a href='https://ffmpeg.org'>ffmpeg.org</a>
-            (GPL build, GPL-2.0-or-later)<br>
-            <b>2. mpv 0.40.0 / libmpv</b> - <a href='https://mpv.io'>mpv.io</a>
-            (GPL build, GPL-2.0-or-later)<br>
-            <b>3. GStreamer 1.28.6</b>, incl. GStreamer Editing Services (GES) and
+            (GPL build, GPL-3.0-or-later)<br>
+            <b>2. GStreamer 1.28.6</b>, incl. GStreamer Editing Services (GES) and
             PyGObject -
             <a href='https://gstreamer.freedesktop.org'>gstreamer.freedesktop.org</a>
             (LGPL-2.1-or-later; the bundled x264 and x265 encoder plugins are
             GPL-2.0-or-later)<br><br>
 
-            GStreamer is loaded only when the video backend is set to GES
-            (Config &rarr; Video Backend). On Linux it is not distributed with
-            KVRouite at all - it comes from your distribution's own packages.<br><br>
+            GStreamer is what plays, cuts and renders video in KVRouite, so it is
+            always loaded. On Linux it is not distributed with KVRouite at all -
+            it comes from your distribution's own packages.<br><br>
 
-            Full license texts are located in the <code>_internal/ffmpeg</code>,
-            <code>_internal/mpv</code> and <code>_internal/gstreamer</code> folders.<br>
-            The complete source code for FFmpeg and mpv as used in this software is
+            Full license texts are located in the <code>_internal/ffmpeg</code>
+            and <code>_internal/gstreamer</code> folders.<br>
+            The complete source code for FFmpeg as used in this software is
             available at <a href='https://kvrouite.com/downloads/index.php'>kvrouite.com/downloads</a>.
             The GStreamer binaries are the GStreamer Project's own, passed on unchanged;
             their source is published by that project at
@@ -4220,11 +4097,11 @@ class MainWindow(QMainWindow):
         self.left_v_layout.insertWidget(0, self.video_area_widget, 1)
 
         # 4) Erst jetzt den leeren Dialog schliessen. Die Reihenfolge ist
-        #    wichtig: mpv rendert in die native Fenster-ID von video_frame.
-        #    Wird der Dialog geschlossen, solange das Video noch darin haengt,
-        #    zerstoert Qt dieses Fenster und legt beim Umhaengen ein neues an -
-        #    mpv verliert seine ID und beendet sich ("libmpv core has been
-        #    shutdown", schwarzes bzw. verschwundenes Video).
+        #    wichtig: die Rueckfall-Videosenke rendert in die native
+        #    Fenster-ID von video_frame. Wird der Dialog geschlossen, solange
+        #    das Video noch darin haengt, zerstoert Qt dieses Fenster und legt
+        #    beim Umhaengen ein neues an - die Senke verliert ihre ID, und das
+        #    Bild ist weg.
         dlg.close()
 
        
@@ -4381,9 +4258,10 @@ class MainWindow(QMainWindow):
             elif result == 2:
                 self._set_edit_mode("encode")
 
-            w, h = self.video_editor.get_video_size()
-            if w==h*2 and not self.video_editor.is_360_mode():
-                self._on_toggle_360_from_menu(True)
+            if not getattr(self, "_360_aus_projekt", False):
+                w, h = self.video_editor.get_video_size()
+                if view360.ist_equirect(w, h) and not self.video_editor.is_360_mode():
+                    self._on_toggle_360_from_menu(True)
             self.proposeVideoGpxSync()
 
     def proposeVideoGpxSync(self):
@@ -5108,7 +4986,7 @@ class MainWindow(QMainWindow):
         if total_s > self.real_total_duration:
             total_s = self.real_total_duration
     
-        # 3) Aufruft der mpv-Funktion => "globaler" Sprung
+        # 3) Globaler Sprung im Player
         self.video_editor.set_time(total_s)
         #
         # Damit ruft Ihr intern video_editor.seek_global(total_s) auf,
@@ -5131,9 +5009,8 @@ class MainWindow(QMainWindow):
         """
         Schnitte und Blenden an die Vorschau geben.
 
-        Kann das Backend das (GES), zeigt die Vorschau danach das FERTIGE
-        Video: geschnittene Bereiche fehlen, an den Schnitten liegt die Blende.
-        Bei mpv passiert nichts - dort springt der CutManager wie bisher.
+        Die Vorschau zeigt danach das FERTIGE Video: geschnittene Bereiche
+        fehlen, an den Schnitten liegt die Blende.
 
         Die Verteilung der Blenden ist bewusst dieselbe wie beim Export
         (siehe skip_array in on_render_clicked): Start- und Endschnitt werden
@@ -5144,8 +5021,8 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "video_editor"):
             return
         if not self.video_editor.supports_preview_cuts():
-            print("[DEBUG] preview-cuts: Backend kann das nicht "
-                  f"({self.video_editor.backend_name()}) => uebersprungen")
+            print("[DEBUG] preview-cuts: Player kann das nicht "
+                  "=> uebersprungen")
             return
         try:
             cuts = self.cut_manager.get_cut_intervals()
@@ -5571,7 +5448,11 @@ class MainWindow(QMainWindow):
                 "crf": crf_val,
                 "fps": fps_val,
                 "width": width_val,
-                "preset": preset_val
+                "preset": preset_val,
+                # 360: derselbe Abschnitt wie in der Projektdatei. Ist er an,
+                # rendert ges_encoder_manager das projizierte 16:9-Bild statt
+                # des verzerrten 2:1-Equirects.
+                "view360": self._blick360_export_cfg()
             }
 
             
@@ -7168,7 +7049,8 @@ class MainWindow(QMainWindow):
                 "markE_idx": self.gpx_widget.gpx_list._markE_idx
             },
             "overlays": self._overlay_manager.get_all_overlays(),
-            "edit_mode": self._edit_mode
+            "edit_mode": self._edit_mode,
+            "view360": self._blick360_export_cfg()
         }
         
         if is_gpx_video_shift_set():
@@ -7317,6 +7199,12 @@ class MainWindow(QMainWindow):
                 self.video_editor.set_multi_durations(self.video_durations)
 
             self.video_editor.set_cut_intervals(self.cut_manager._cut_intervals)
+
+            # 6b. 360-Blickwinkel. Vor dem Aufbau der Vorschau, damit sie
+            # gleich richtig gerechnet wird - das Einschalten aendert das
+            # Zielformat und baut die Timeline ohnehin neu auf.
+            self._blick360_laden(project_data)
+
             self._refresh_preview_timeline(blockierend=True)
 
             if self.video_durations:
@@ -8334,15 +8222,84 @@ class MainWindow(QMainWindow):
             # YouTube-Kanal im Browser öffnen
             QDesktopServices.openUrl(url)
             
-    def _on_toggle_360_from_menu(self,checked: bool):
-        # Editor schaltet selbst um; Menü-Check danach mit tatsächlichem Zustand synchronisieren
-        self.video_editor.toggle_360_mode()
-        self.action_toggle_360.setChecked(bool(getattr(self.video_editor, "_is_360_mode", False)))
+    def _on_toggle_360_from_menu(self, checked: bool = None):
+        # Editor schaltet um; Menü-Check danach mit tatsächlichem Zustand
+        # synchronisieren. Ohne `checked` wird umgeschaltet - das ist der Weg
+        # über Taste V und über den Menüeintrag.
+        self.video_editor.toggle_360_mode(checked)
+        an = bool(getattr(self.video_editor, "_is_360_mode", False))
+        self.action_toggle_360.setChecked(an)
+        if an:
+            # Beim Einschalten den gespeicherten Blickwinkel des laufenden
+            # Videos wiederherstellen.
+            self._blick360_an_player()
+
+    # ------------------------------------------------------------------
+    # 360: Blickwinkel je Video
+    # ------------------------------------------------------------------
+    # `self.view360_views` liegt parallel zu `self.playlist` - ein Eintrag je
+    # Video, wie `self.video_durations`. Gespeichert wird in Radiant, weil das
+    # Backend so rechnet.
+
+    def _blick360_liste(self):
+        """Die Liste auf die Länge der Playlist bringen und zurückgeben."""
+        if not hasattr(self, "view360_views") or self.view360_views is None:
+            self.view360_views = []
+        fehlend = len(self.playlist) - len(self.view360_views)
+        if fehlend > 0:
+            self.view360_views += [view360.Blickwinkel()
+                                   for _ in range(fehlend)]
+        elif fehlend < 0:
+            del self.view360_views[len(self.playlist):]
+        return self.view360_views
+
+    def _blick360_an_player(self):
+        """Alle Blickwinkel an das Backend geben.
+
+        Nicht nur den des laufenden Videos: die Vorschau ist EINE Timeline mit
+        allen Clips, und jeder Clip traegt den Blickwinkel seiner Quelldatei.
+        """
+        liste = self._blick360_liste()
+        self.video_editor.set_blick360_liste([b.werte() for b in liste])
+
+    def _on_blick360_geaendert(self, index, yaw, pitch, fov):
+        """Der Editor meldet einen neuen Blickwinkel - merken."""
+        liste = self._blick360_liste()
+        if 0 <= index < len(liste):
+            liste[index].setzen(yaw, pitch, fov)
+
+    def _on_blick360_auf_alle(self):
+        """Den Blickwinkel des laufenden Videos auf alle übertragen.
+
+        Material aus derselben Kamera hat praktisch immer dieselbe Ausrichtung
+        - ohne das müsste man ihn für jede Datei neu einstellen.
+        """
+        liste = self._blick360_liste()
+        if not liste:
+            return
+        yaw, pitch, fov = self.video_editor.blick360()
+        for blick in liste:
+            blick.setzen(yaw, pitch, fov)
+        self._blick360_an_player()
+        QMessageBox.information(
+            self, "360°",
+            f"View applied to all {len(liste)} video(s):\n"
+            f"yaw {math.degrees(yaw):+.1f}°, pitch {math.degrees(pitch):+.1f}°, "
+            f"field of view {math.degrees(fov):.0f}°")
+
+    def _blick360_export_cfg(self):
+        """Der Abschnitt "view360" für Projektdatei und Export."""
+        return {
+            "enabled": bool(getattr(self.video_editor, "_is_360_mode", False)),
+            "views": [b.als_dict() for b in self._blick360_liste()],
+        }
 
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_V:
-            self._on_toggle_360_from_menu(True)
+            # trigger() schaltet den Menuehaken um und ruft dabei
+            # _on_toggle_360_from_menu mit dem neuen Zustand auf.
+            self.action_toggle_360.trigger()
         else:
             super().keyPressEvent(event)
             
@@ -8482,8 +8439,10 @@ class MainWindow(QMainWindow):
         self.playlist = []
         self.playlist_counter = 0
         self.video_durations = []
+        self.view360_views = []
+        self._360_aus_projekt = False
         try:
-            self.video_editor.set_playlist([])   # mpv-Playlist leeren
+            self.video_editor.set_playlist([])   # Playlist leeren
         except Exception:
             pass
 
@@ -8602,12 +8561,42 @@ class MainWindow(QMainWindow):
         
     # NEU: kleine Hilfsfunktion neben deinem Helper platzieren
     def _auto_enable_360_if_needed(self):
+        """360 selbst einschalten, wenn das Material danach aussieht.
+
+        Erkennungsmerkmal ist das Seitenverhältnis 2:1. Ein geladenes Projekt
+        hat den Vorrang: wer 360 dort bewusst ausgeschaltet hat, soll es nicht
+        beim nächsten Öffnen wieder anhaben.
+        """
+        if getattr(self, "_360_aus_projekt", False):
+            return
         try:
             w, h = self.video_editor.get_video_size()
-            if h > 0 and w == h * 2 and not self.video_editor.is_360_mode():
+            if view360.ist_equirect(w, h) and not self.video_editor.is_360_mode():
                 self._on_toggle_360_from_menu(True)  # schaltet Menü+Player sauber um
         except Exception as e:
             print(f"[DEBUG] _auto_enable_360_if_needed: {e}")
+
+    def _blick360_laden(self, project_data):
+        """360-Zustand aus einer Projektdatei übernehmen.
+
+        Ältere Projekte haben den Abschnitt nicht - dann bleibt alles beim
+        Alten und die Automatik entscheidet wie bisher.
+        """
+        daten = project_data.get("view360")
+        if not isinstance(daten, dict):
+            self._360_aus_projekt = False
+            return
+        self._360_aus_projekt = True
+        self.view360_views = [view360.Blickwinkel.aus_dict(d)
+                              for d in (daten.get("views") or [])]
+        self._blick360_liste()          # auf die Länge der Playlist bringen
+        an = bool(daten.get("enabled"))
+        if an and not self.video_editor.supports_360():
+            self._360_aus_projekt = False
+            print("[WARN] Das Projekt hat 360 an, das Backend kann es nicht - "
+                  "bitte unter Config -> Video Backend auf GES stellen.")
+            return
+        self._on_toggle_360_from_menu(an)
 
     
     def _on_raise_track_above_sea(self, delta_m: float):
@@ -9201,7 +9190,7 @@ class MainWindow(QMainWindow):
 
         # Anwenden – KEIN Undo
         self.playlist = new_order[:]                  # 1) Reihenfolge setzen
-        self.video_editor.set_playlist(self.playlist) # 2) mpv-Playlist neu
+        self.video_editor.set_playlist(self.playlist) # 2) Playlist neu
         self.rebuild_timeline()                       # 3) Timeline neu berechnen
         self._rebuild_playlist_menu()                 # 4) Menü neu aufbauen
 

@@ -1,6 +1,6 @@
 # KVRouite - packages needed to RUN the application.
 # Identical for Linux and Windows: every entry here is imported by the code
-# (PySide6, python-mpv, pillow, fitparse). All versions are the current
+# (PySide6, pillow, fitparse). All versions are the current
 # releases; tested on Linux (Python 3.12.3) and Windows (Python 3.12.0).
 #
 # Qt 6.11 notes:
@@ -10,10 +10,14 @@
 #     dateutil was used in one place only (core/gpx_parser.py) and is replaced
 #     by datetime.fromisoformat; six only came in as a dateutil dependency.
 #   - KVRouite.py sets Qt.AA_ShareOpenGLContexts before QApplication, otherwise
-#     the detached map window stays black next to the mpv video surface.
+#     the detached map window stays black next to the video surface.
 #
-# python-mpv is the Python binding only. The bundled libmpv-2.dll in mpv/ is a
-# separate component and is not managed by pip.
+# From 6.0 on, video playback, cutting and rendering all go through GStreamer
+# Editing Services. That runtime is NOT in this file - install it with
+# requirements-ges.txt (Windows/macOS) or the distribution packages (Linux),
+# and check it with check_ges.py. Without it KVRouite will not start.
+#
+# python-mpv is gone: the second playback path it served was removed in 6.0.
 #
 # To build the Windows executable you additionally need requirements-build.txt.
 fitparse==1.2.0
@@ -21,5 +25,4 @@ pillow==12.3.0
 PySide6==6.11.2
 PySide6_Addons==6.11.2
 PySide6_Essentials==6.11.2
-python-mpv==1.0.8
 shiboken6==6.11.2

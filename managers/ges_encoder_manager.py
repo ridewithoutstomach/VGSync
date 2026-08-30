@@ -47,6 +47,11 @@ import time
 
 from PySide6.QtCore import QSettings
 
+# view360 faengt einen fehlenden GStreamer selbst ab und bleibt importierbar -
+# wer den ffmpeg-Weg benutzt, merkt davon nichts.
+from core import view360
+
+
 class GesRenderError(RuntimeError):
     pass
 
@@ -176,6 +181,17 @@ class _Quellen:
         den = s.get_framerate_denom() or 1
         return s.get_width(), s.get_height(), num, den
 
+    def index_bei(self, roh_ns):
+        """Platz in der Videoliste, zu dem diese Rohzeit gehoert.
+
+        Eindeutig auch dann, wenn dieselbe Datei mehrfach in der Playlist
+        steht - anders als die URI des Assets.
+        """
+        for index, (a, b) in enumerate(self.grenzen):
+            if a <= roh_ns < b:
+                return index
+        return len(self.grenzen) - 1 if self.grenzen else -1
+
     def stuecke(self, von_ns, bis_ns):
         """Zerlegt einen Rohbereich in (asset, inpoint, dauer, rohstart)."""
         ergebnis = []
@@ -257,9 +273,37 @@ def _raster(sekunden, fps_n, fps_d):
     return bilder * fps_d * NS // fps_n
 
 
+def _blicke_liste(quellen, view360_cfg):
+    """
+    Blickwinkel je Playlist-Eintrag, in der Reihenfolge der Videoliste.
+
+    Leere Liste heisst: 360 ist aus, es wird nichts projiziert.
+
+    NICHT ueber die URI des Assets zuordnen: steht dieselbe Datei zweimal in
+    der Playlist, liefert GES beidemal DASSELBE Asset, und der zweite
+    Blickwinkel wuerde den ersten verdraengen. Eindeutig ist der Platz auf der
+    Rohzeitachse - siehe _blick_fuer().
+    """
+    if not view360_cfg or not view360_cfg.get("enabled"):
+        return []
+    ansichten = view360_cfg.get("views") or []
+    return [view360.Blickwinkel.aus_dict(
+                ansichten[i] if i < len(ansichten) else None)
+            for i in range(len(quellen.assets))]
+
+
 def _timeline_bauen(quellen, skip_list, overlay_list, breite, hoehe, fps_n, fps_d,
-                    log):
+                    log, blicke=None):
     timeline = GES.Timeline.new_audio_video()
+    blicke = blicke or []
+    aspect = view360.ziel_aspect(breite, hoehe)
+
+    def blick_fuer(rohstart):
+        """Blickwinkel des Videos, aus dem dieses Stueck stammt."""
+        if not blicke:
+            return None
+        index = quellen.index_bei(rohstart)
+        return blicke[index] if 0 <= index < len(blicke) else None
 
     def ns(sekunden):
         return _raster(sekunden, fps_n, fps_d)
@@ -284,7 +328,7 @@ def _timeline_bauen(quellen, skip_list, overlay_list, breite, hoehe, fps_n, fps_
     for ebene in (ovl_ebene, oben, unten):
         ebene.set_auto_transition(False)
 
-    def clip_setzen(layer, asset, start, inpoint, dauer):
+    def clip_setzen(layer, asset, start, inpoint, dauer, rohstart=0):
         clip = layer.add_asset(asset, start, inpoint, dauer, GES.TrackType.UNKNOWN)
         if clip is None:
             raise GesRenderError("Clip konnte nicht eingefuegt werden")
@@ -293,6 +337,17 @@ def _timeline_bauen(quellen, skip_list, overlay_list, breite, hoehe, fps_n, fps_
             for element in clip.find_track_elements(None, GES.TrackType.VIDEO,
                                                     GES.VideoSource):
                 element.set_child_property("video-direction", richtung)
+        # 360: derselbe Shader wie in der Vorschau (core/view360.py). Jedes
+        # Stueck geht hier durch, auch die Haelften einer Blende - beide werden
+        # einzeln projiziert und danach ueber die alpha-Rampe gemischt, was
+        # richtig ist: gemischt wird im fertigen Bild, nicht auf der Kugel.
+        blick = blick_fuer(rohstart)
+        if blick is not None:
+            if view360.effekt_anhaengen(clip, blick, aspect) is None:
+                raise GesRenderError(
+                    "360-Effekt liess sich nicht anhaengen: "
+                    + (view360.fehlgrund() or "unbekannter Grund"))
+            view360.rahmen_setzen(clip, breite, hoehe)
         return clip
 
     keeps = _keep_segmente(skip_list, quellen.gesamt_ns / NS)
@@ -378,7 +433,7 @@ def _timeline_bauen(quellen, skip_list, overlay_list, breite, hoehe, fps_n, fps_
                     ns(roh_von), ns(roh_von + bl_davor)):
                 clip = clip_setzen(oben, asset,
                                    start_ns + (rohstart - ns(roh_von)),
-                                   inpoint, dauer)
+                                   inpoint, dauer, rohstart)
                 for element in clip.find_track_elements(None, GES.TrackType.VIDEO,
                                                         GES.VideoSource):
                     _alpha_rampe(element, 0, blende_ns, inpoint, 0.0, 1.0)
@@ -389,7 +444,7 @@ def _timeline_bauen(quellen, skip_list, overlay_list, breite, hoehe, fps_n, fps_
         for asset, inpoint, dauer, rohstart in quellen.stuecke(
                 ns(roh_von), ns(roh_bis)):
             clip_setzen(unten, asset, zeit_ns + (rohstart - ns(roh_von)),
-                        inpoint, dauer)
+                        inpoint, dauer, rohstart)
 
         abbildung.append((roh_anfang, roh_bis, out_anfang))
         zeit_ns += ns(roh_bis) - ns(roh_von)
@@ -742,6 +797,7 @@ def ges_xfade_main(cfg_path):
     fps = cfg.get("fps", 30)
     breite = cfg.get("width", None)
     preset = cfg.get("preset", None)
+    view360_cfg = cfg.get("view360") or {}
     bitrate_mbps = QSettings("KVRouite", "KVRouite").value(
         "encoder/bitrate_mbps", 20, type=int)
 
@@ -757,11 +813,22 @@ def ges_xfade_main(cfg_path):
 
     # Zielgroesse wie ffmpegs "scale=BREITE:-2": Seitenverhaeltnis halten,
     # Hoehe auf eine gerade Zahl bringen.
+    #
+    # Bei 360 gilt das NICHT: das 2:1-Format der Quelle ist dort die Kugel und
+    # kein Bildformat. Herauskommen soll ein normales 16:9-Video mit dem
+    # eingestellten Blickwinkel - ohne diese Ausnahme rendert der Export
+    # weiter das verzerrte Equirect-Bild.
+    ist_360 = bool(view360_cfg and view360_cfg.get("enabled"))
     if breite:
         breite = int(breite)
-        hoehe = int(round(q_hoehe * breite / float(q_breite)))
-        if hoehe % 2:
-            hoehe += 1
+        if ist_360:
+            hoehe = view360.ziel_hoehe(breite)
+        else:
+            hoehe = int(round(q_hoehe * breite / float(q_breite)))
+            if hoehe % 2:
+                hoehe += 1
+    elif ist_360:
+        breite, hoehe = q_breite, view360.ziel_hoehe(q_breite)
     else:
         breite, hoehe = q_breite, q_hoehe
 
@@ -787,8 +854,17 @@ def ges_xfade_main(cfg_path):
             was = f"crossfade {v:.1f}s (centred on the cut)"
         log(f"[GES] Cut {s:.2f}s - {e:.2f}s: {was}")
 
+    blicke = _blicke_liste(quellen, view360_cfg)
+    if blicke:
+        grund = view360.fehlgrund()
+        if grund:
+            raise GesRenderError(f"360 ist eingeschaltet, geht aber nicht: {grund}")
+        log(f"[GES] 360: {len(blicke)} Quelle(n) werden projiziert, "
+            f"Ausgabe {breite}x{hoehe}")
+
     timeline, gesamt_ns = _timeline_bauen(quellen, skip_list, overlay_list,
-                                          breite, hoehe, fps_n, fps_d, log)
+                                          breite, hoehe, fps_n, fps_d, log,
+                                          blicke)
     profil = _profil(encoder, hw_encode, crf, preset, bitrate_mbps, log)
 
     ordner = os.path.dirname(os.path.abspath(final_out))

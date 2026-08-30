@@ -33,7 +33,8 @@ Das funktioniert für normale Videos sofort. Zoomen > 0 macht das Panning sichtb
 import platform
 import math
 
-from core.player_backend import create_backend
+from core import view360
+from core.ges_backend import GesPlayerBackend
 from widgets.video_surface import VideoSurface
 
 from PySide6.QtWidgets import (
@@ -48,10 +49,10 @@ class VideoEditorWidget(QWidget):
     videosDropped = Signal(list)  # list[str]
     
     """
-    Video-Player-Widget. Die Wiedergabe selbst macht ein PlayerBackend
-    (core/player_backend.py, derzeit libmpv); hier liegen die Oberflaeche und
-    die Zeitrechnung ueber mehrere Clips. Es kann mehrere Videos als Playlist
-    laden und nacheinander abspielen.
+    Video-Player-Widget. Die Wiedergabe selbst macht der GES-Player
+    (core/ges_backend.py); hier liegen die Oberflaeche und die Zeitrechnung
+    ueber mehrere Clips. Es kann mehrere Videos als Playlist laden und
+    nacheinander abspielen.
     
     Zusätzlich mit 360°-Video-Unterstützung, die mit Taste 'V' umgeschaltet werden kann.
     """
@@ -61,6 +62,9 @@ class VideoEditorWidget(QWidget):
     #: Ein Overlay wurde im Vorschaubild verschoben oder skaliert:
     #: Platz in der Overlay-Liste, x, y in Exportpixeln, neue Skalierung.
     overlayImBildGeaendert = Signal(int, int, int, float)
+    # 360-Blickwinkel des Videos mit diesem Index hat sich
+    # geaendert: (index, yaw, pitch, fov) - alle drei in Radiant.
+    blick360Geaendert = Signal(int, float, float, float)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -101,13 +105,14 @@ class VideoEditorWidget(QWidget):
 
         # Zeichenflaeche fuer den Fall, dass Qt die Bilder selbst malt (GES).
         # Sie liegt in derselben Zelle ueber dem Frame und wird nur gezeigt,
-        # wenn das Backend Bilder liefert. mpv zeichnet weiterhin direkt in
-        # das Fensterhandle des Frames, dort bleibt sie unsichtbar.
+        # wenn der Player Bilder liefert.
         # Wichtig ist die Reihenfolge: sie kommt VOR den Beschriftungen und
         # dem Ablegebereich, damit die weiterhin darueber liegen.
         self.video_surface = VideoSurface(self)
         self.video_surface.hide()
         self.video_surface.overlayGeaendert.connect(self.overlayImBildGeaendert)
+        self.video_surface.blick360Gezogen.connect(self._auf_blick_zug)
+        self.video_surface.blick360Gezoomt.connect(self._auf_blick_zoom)
         layout.addWidget(self.video_surface, 0, 0)
         layout.setRowStretch(0, 1)
         layout.setColumnStretch(0, 1)
@@ -139,14 +144,24 @@ class VideoEditorWidget(QWidget):
 
         # Extra: Edit-Status
         self.edit_status_widget = QWidget(self)
-        self.edit_status_widget.setMaximumWidth(65)
+        # War 65 - dort passte "Copymode" nicht hinein, der Text wurde
+        # abgeschnitten (daher frueher das verstuemmelte "Edit:Cop"). 120
+        # reicht dafuer und bleibt deutlich schmaler als die Zeitanzeige
+        # darueber, die rund 195 Punkte breit ist.
+        self.edit_status_widget.setMaximumWidth(120)
 
         vbox_edit = QVBoxLayout(self.edit_status_widget)
         vbox_edit.setContentsMargins(0, 50, 0, 0)
         vbox_edit.setSpacing(0)
+        # Rechtsbuendig, damit jede Beschriftung nur so breit wird wie ihr
+        # Text - sonst zoege der dunkle Kasten ueber die ganze Breite.
+        vbox_edit.setAlignment(Qt.AlignTop | Qt.AlignRight)
 
         self.edit_status_label = QLabel("", self.edit_status_widget)
         self.acut_status_label = QLabel("", self.edit_status_widget)
+        # Unveraendert bei 65: bisher begrenzte der Behaelter diese
+        # Beschriftung, und an ihr soll sich nichts aendern.
+        self.acut_status_label.setMaximumWidth(65)
         vbox_edit.addWidget(self.edit_status_label)
         vbox_edit.addWidget(self.acut_status_label)
         layout.addWidget(self.edit_status_widget, 0, 0, alignment=Qt.AlignTop | Qt.AlignRight)
@@ -178,27 +193,27 @@ class VideoEditorWidget(QWidget):
         self._360_label.hide()
         layout.addWidget(self._360_label, 0, 0, alignment=Qt.AlignTop | Qt.AlignLeft)
 
-        # Wiedergabe-Backend: mpv oder GES, siehe core/player_backend.py.
-        self._backend, self._backend_name, backend_warning = create_backend(
+        # Der Player. Seit 6.0 gibt es nur noch GES; scheitert er, kann die
+        # App kein Video zeigen. Der Fehler wird deshalb durchgereicht - der
+        # Start faengt ihn ab und sagt, was zu installieren ist.
+        #
+        # window_id ist die Rueckfallebene: normalerweise liefert GStreamer
+        # die Bilder an video_surface, aber wenn sich die appsink-Kette nicht
+        # bauen laesst, zeichnet eine Fenstersenke direkt in video_frame.
+        self._backend = GesPlayerBackend(
             window_id=self.video_frame.winId(),
-            log_handler=self._mpv_log_handler,
+            log_handler=None,
             frame_callback=self.video_surface.bild_setzen,
         )
-        # Liefert das Backend wirklich Bilder, wird die Zeichenflaeche gezeigt.
-        #
-        # Die Stapelreihenfolge ist dabei entscheidend und war schon einmal
-        # falsch: mit raise_() lag die Flaeche ueber ALLEM und verdeckte die
-        # Zeiten, "Edit:ENC" und die uebrigen Einblendungen. Richtig ist
-        # zweimal lower(): danach liegt der Frame ganz unten, die Flaeche
-        # direkt darueber, und alle Beschriftungen bleiben obenauf - egal wie
-        # viele davon es gibt und in welcher Reihenfolge sie angelegt wurden.
-        if getattr(self._backend, "supports_frame_callback", lambda: False)():
-            self.video_surface.show()
-            self.video_surface.lower()
-            self.video_frame.lower()
-        # Meldung merken; MainWindow zeigt sie nach dem Aufbau der Oberflaeche.
-        self.backend_warning = backend_warning
-        print(f"[PLAYER] Backend: {self._backend_name}")
+        # Die Stapelreihenfolge ist entscheidend und war schon einmal falsch:
+        # mit raise_() lag die Flaeche ueber ALLEM und verdeckte die Zeiten,
+        # "Edit:ENC" und die uebrigen Einblendungen. Richtig ist zweimal
+        # lower(): danach liegt der Frame ganz unten, die Flaeche direkt
+        # darueber, und alle Beschriftungen bleiben obenauf - egal wie viele
+        # davon es gibt und in welcher Reihenfolge sie angelegt wurden.
+        self.video_surface.show()
+        self.video_surface.lower()
+        self.video_frame.lower()
 
         self.is_playing = False
         self.playlist = []
@@ -245,19 +260,19 @@ class VideoEditorWidget(QWidget):
         # -------- Keyboard Shortcuts --------
         # Speed: + / - (mehrere Varianten für unterschiedliche Tastaturen/Numpad)
         
-        # Viewport Zoom/Pan dürfen beim bisherigen Kontext bleiben:
-        QShortcut(QKeySequence("Ctrl++"), self, activated=lambda: self._nudge_zoom(+0.10))
-        QShortcut(QKeySequence("Ctrl+-"), self, activated=lambda: self._nudge_zoom(-0.10))
+        # 360-Blickwinkel ueber die Tastatur. Schrittweite 5 Grad, in Radiant,
+        # weil das Backend in Radiant rechnet.
+        _SCHRITT = math.radians(5.0)
+        QShortcut(QKeySequence("Ctrl++"), self, activated=lambda: self._nudge_zoom(+_SCHRITT))
+        QShortcut(QKeySequence("Ctrl+-"), self, activated=lambda: self._nudge_zoom(-_SCHRITT))
         QShortcut(QKeySequence("Ctrl+0"),  self, activated=self._reset_view)
 
-        #QShortcut(QKeySequence(Qt.CTRL | Qt.Key_Left),  self, activated=lambda: self._nudge_pan(dx=-0.05))
-        #QShortcut(QKeySequence(Qt.CTRL | Qt.Key_Right), self, activated=lambda: self._nudge_pan(dx=+0.05))
-        #QShortcut(QKeySequence(Qt.CTRL | Qt.Key_Up),    self, activated=lambda: self._nudge_pan(dy=-0.05))
-        #QShortcut(QKeySequence(Qt.CTRL | Qt.Key_Down),  self, activated=lambda: self._nudge_pan(dy=+0.05))
-        QShortcut(QKeySequence(Qt.CTRL | Qt.Key_Left),  self, activated=lambda: self._nudge_pan(dx=+0.05))
-        QShortcut(QKeySequence(Qt.CTRL | Qt.Key_Right), self, activated=lambda: self._nudge_pan(dx=-0.05))
-        QShortcut(QKeySequence(Qt.CTRL | Qt.Key_Up),    self, activated=lambda: self._nudge_pan(dy=+0.05))
-        QShortcut(QKeySequence(Qt.CTRL | Qt.Key_Down),  self, activated=lambda: self._nudge_pan(dy=-0.05))
+        # Links druecken heisst nach links schauen, und nach links ist yaw
+        # kleiner. Hoch heisst nach oben, und nach oben ist pitch groesser.
+        QShortcut(QKeySequence(Qt.CTRL | Qt.Key_Left),  self, activated=lambda: self._nudge_pan(dx=-_SCHRITT))
+        QShortcut(QKeySequence(Qt.CTRL | Qt.Key_Right), self, activated=lambda: self._nudge_pan(dx=+_SCHRITT))
+        QShortcut(QKeySequence(Qt.CTRL | Qt.Key_Up),    self, activated=lambda: self._nudge_pan(dy=+_SCHRITT))
+        QShortcut(QKeySequence(Qt.CTRL | Qt.Key_Down),  self, activated=lambda: self._nudge_pan(dy=-_SCHRITT))
 
    # ----------------------------
    # Drag&Drop (Videos)
@@ -312,34 +327,40 @@ class VideoEditorWidget(QWidget):
             e.ignore()
         
 
-    def backend_name(self) -> str:
-        """'mpv' oder 'ges' - welches Backend gerade laeuft."""
-        return self._backend_name
+    def supports_360(self) -> bool:
+        """Ob 360 moeglich ist - braucht die GL-Elemente, siehe view360."""
+        return self._backend.supports_360()
 
-    def supports_view(self) -> bool:
-        """Ob das Backend Zoom/Pan/360 kann (mpv ja, GES nein)."""
-        return self._backend.supports_view()
-
-    def toggle_360_mode(self):
-        """Schaltet den 360°-Video-Modus um"""
-        if not self._backend.supports_view():
-            self._show_speed_label("360° braucht das mpv-Backend")
+    def toggle_360_mode(self, an=None):
+        """
+        360-Modus umschalten. Ohne Angabe wird umgeschaltet, mit Angabe
+        wird genau darauf gesetzt - die Automatik beim Laden braucht das.
+        """
+        if not self._backend.supports_360():
+            grund = getattr(self._backend, "unsupported_360_reason",
+                            lambda: "")()
+            self._show_speed_label(grund or "360° braucht das GES-Backend")
             return
 
-        self._is_360_mode = not self._is_360_mode
+        ziel = (not self._is_360_mode) if an is None else bool(an)
+        if ziel == self._is_360_mode:
+            return
 
         try:
-            self._backend.set_360(self._is_360_mode)
-            if self._is_360_mode:
+            if not self._backend.set_360(ziel):
+                self._show_speed_label("360° liess sich nicht einschalten")
+                return
+            self._is_360_mode = ziel
+            self.video_surface.set_360_aktiv(ziel)
+            if ziel:
                 self._360_label.show()
-                print("360°-Modus aktiviert")
+                # Beim Einschalten den Blickwinkel NICHT anfassen: beim Laden
+                # eines Projekts steht er schon, und ihn hier zu nullen wuerde
+                # ihn genau dann wegwerfen.
+                self._show_speed_label("360°-Modus: AN")
             else:
                 self._360_label.hide()
-                self._reset_view()
                 self._show_speed_label("360°-Modus: AUS")
-                print("360°-Modus deaktiviert")
-                
-                
         except Exception as e:
             print(f"Fehler beim Umschalten des 360°-Modus: {e}")
 
@@ -410,8 +431,8 @@ class VideoEditorWidget(QWidget):
                 self._backend.set_paused(True)
                 self.is_playing = False
             except SystemError as e:
-                # -12 bedeutet oft, dass mpv in Idle ist oder "keine Datei mehr hat"
-                print(f"[WARN] show_first_frame: mpv refused to seek => {e}")
+                # Kommt vor, wenn der Player gerade nichts geladen hat.
+                print(f"[WARN] show_first_frame: Sprung abgelehnt => {e}")
 
         QTimer.singleShot(80, do_seek)
 
@@ -569,7 +590,7 @@ class VideoEditorWidget(QWidget):
         """
         Schnitte an das Backend geben: Liste von (start_s, ende_s, blende_s).
 
-        Wirkt nur bei Backends, die das koennen (GES). Bei mpv passiert nichts,
+        Wirkt nur, wenn der Player das kann. Sonst passiert nichts,
         dort springt der CutManager wie bisher ueber die Schnitte hinweg.
         """
         try:
@@ -606,8 +627,7 @@ class VideoEditorWidget(QWidget):
         """
         Backend beim Beenden sauber herunterfahren.
 
-        Fuer mpv war das nie noetig - der Prozess endet ohnehin. Die
-        GES-Pipeline haelt aber eigene Threads; ohne dieses Abschalten laeuft
+        Die GES-Pipeline haelt eigene Threads; ohne dieses Abschalten laeuft
         die Anwendung nach dem Schliessen des Fensters weiter.
         """
         try:
@@ -646,15 +666,11 @@ class VideoEditorWidget(QWidget):
         Laedt die Videoliste ins Backend.
 
         `fortschritt(nummer, gesamt, pfad)` wird - sofern das Backend das
-        unterstuetzt - vor jeder Datei gerufen. GES analysiert beim Oeffnen
-        die ganze Datei, was bei mehreren GB spuerbar dauert; damit laesst
-        sich anzeigen, woran gerade gearbeitet wird.
+        vor jeder Datei gerufen. GES analysiert beim Oeffnen die ganze
+        Datei, was bei mehreren GB spuerbar dauert; damit laesst sich
+        anzeigen, woran gerade gearbeitet wird.
         """
-        try:
-            self._backend.load_playlist(video_list, fortschritt)
-        except TypeError:
-            # Backend ohne Fortschrittsmeldung (mpv) - laedt ohnehin sofort.
-            self._backend.load_playlist(video_list)
+        self._backend.load_playlist(video_list, fortschritt)
         if not video_list:
             self.playlist = []
             self.set_empty_hint_visible(True)
@@ -725,10 +741,6 @@ class VideoEditorWidget(QWidget):
     # -----------------------------------------
     # Event-Handling
     # -----------------------------------------
-
-    # optionales Log
-    def _mpv_log_handler(self, level, component, message):
-        print(f"[MPV] {level} {component}: {message}", end="")
 
     def _update_time_label(self):
         if not self.playlist or self._backend.count() == 0:
@@ -826,42 +838,87 @@ class VideoEditorWidget(QWidget):
         new = max(0.10, min(32.00, cur + delta))  # Klammern 0.10x .. 4.00x
         self.set_playback_rate(new)
 
+    # ---- 360°: Blickwinkel -------------------------------------------------
+    # yaw/pitch/fov stehen in Radiant, angezeigt wird in Grad. Die Werte
+    # gehoeren zum aktuellen Video und werden im Projekt gespeichert; das
+    # Backend rechnet sie im Shader aus (core/view360.py).
+
     def _nudge_zoom(self, dz: float):
-        if not self._backend.supports_view():
-            self._show_speed_label("Zoom braucht das mpv-Backend")
+        """Bildwinkel aendern. Positives dz heisst naeher heran."""
+        if not self._360_bereit(melden=True):
             return
-        # Nur im 360°-Modus erlauben
-        if not getattr(self, "_is_360_mode", False):
-            self._show_speed_label("Zoom nur im 360°-Modus (Taste V)")
-            return
-        """Zoom der Videodarstellung."""
-        cur, _, _ = self._backend.view()
-        new = max(-0.90, min(5.00, cur + dz))     # -0.9 .. 5.0 sind praxistauglich
-        self._backend.set_view(zoom=new)
-        # Beim Zoomen Pan beibehalten (das Backend macht das), optional Overlay:
-        self._show_speed_label(f"Zoom: {new:+.2f}")
+        # Kleinerer Bildwinkel = staerkere Vergroesserung, deshalb minus.
+        self._blick_verschieben(d_fov=-dz)
+        _, _, fov = self._backend.view360()
+        self._show_speed_label(f"Zoom: {math.degrees(fov):.0f}° Bildwinkel")
 
     def _nudge_pan(self, dx: float = 0.0, dy: float = 0.0):
-        if not self._backend.supports_view():
+        """Schwenken und neigen."""
+        if not self._360_bereit(melden=True):
             return
-        if not getattr(self, "_is_360_mode", False):
-            self._show_speed_label("Pan/Tilt nur im 360°-Modus (Taste V)")
-            return
-        """Viewport verschieben. Sinnvoll bei Zoom > 0."""
-        _, px, py = self._backend.view()
-        px = max(-1.0, min(1.0, px + dx))
-        py = max(-1.0, min(1.0, py + dy))
-        self._backend.set_view(pan_x=px, pan_y=py)
-        # kleines Overlay, damit man Feedback hat:
-        self._show_speed_label(f"Pan: x={px:+.2f}, y={py:+.2f}")
+        self._blick_verschieben(d_yaw=dx, d_pitch=dy)
+        yaw, pitch, _ = self._backend.view360()
+        self._show_speed_label(f"Blick: {math.degrees(yaw):+.0f}° / "
+                               f"{math.degrees(pitch):+.0f}°")
 
     def _reset_view(self):
-        """Zoom/Pan auf Standard zurücksetzen."""
-        if not self._backend.supports_view():
+        """Blickwinkel auf geradeaus und 90° zuruecksetzen."""
+        if not self._360_bereit(melden=False):
             return
-        self._backend.set_view(zoom=0.0, pan_x=0.0, pan_y=0.0)
+        self._backend.set_view360(yaw=0.0, pitch=0.0, fov=view360.FOV_VORGABE)
+        self._blick_merken()
         self._show_speed_label("View reset")
-        
+
+    def _360_bereit(self, melden: bool = True) -> bool:
+        """Kann und soll gerade am Blickwinkel gedreht werden?"""
+        if not self._backend.supports_360():
+            if melden:
+                self._show_speed_label("360° braucht das GES-Backend")
+            return False
+        if not getattr(self, "_is_360_mode", False):
+            if melden:
+                self._show_speed_label("Nur im 360°-Modus (Taste V)")
+            return False
+        return True
+
+    def _blick_verschieben(self, d_yaw=0.0, d_pitch=0.0, d_fov=0.0):
+        """Blickwinkel relativ aendern und den neuen Stand merken."""
+        yaw, pitch, fov = self._backend.view360()
+        self._backend.set_view360(yaw + d_yaw, pitch + d_pitch, fov + d_fov)
+        self._blick_merken()
+
+    def _blick_merken(self):
+        """Den Blickwinkel des aktuellen Videos nach aussen melden.
+
+        MainWindow haengt sich hier ein, um ihn in der Projektdatei und in der
+        Export-Konfiguration mitzufuehren.
+        """
+        try:
+            self.blick360Geaendert.emit(self.get_current_index(),
+                                        *self._backend.view360())
+        except Exception:
+            pass
+
+    def blick360(self):
+        """(yaw, pitch, fov) des laufenden Backends."""
+        return self._backend.view360()
+
+    def set_blick360(self, yaw=None, pitch=None, fov=None):
+        """Blickwinkel des laufenden Videos absolut setzen."""
+        if not self._backend.supports_360():
+            return False
+        return self._backend.set_view360(yaw, pitch, fov)
+
+    def set_blick360_liste(self, ansichten):
+        """Alle Blickwinkel auf einmal - beim Laden eines Projekts.
+
+        `ansichten` ist eine Liste von (yaw, pitch, fov) je Video.
+        """
+        if not self._backend.supports_360():
+            return False
+        return self._backend.set_view360_liste(ansichten)
+
+
     # NEU in der Klasse ergänzen:
     def resizeEvent(self, e):
         super().resizeEvent(e)
@@ -878,29 +935,40 @@ class VideoEditorWidget(QWidget):
     
     
 
-        # ---- Mouse-based pan (for 360° view) ----
-    def mousePressEvent(self, event):
-        if event.buttons() & Qt.LeftButton and self._is_360_mode:
-            self._last_mouse_pos = event.pos()
-            self.setCursor(Qt.ClosedHandCursor)
-        super().mousePressEvent(event)
+    # Maus und Mausrad fuer 360 liegen in widgets/video_surface.py, nicht
+    # hier. Grund: unter GES liegt die Zeichenflaeche ueber diesem Widget und
+    # verschluckt die Ereignisse ohnehin. Sie meldet ihre Zuege ueber die
+    # Signale blick360Gezogen und blick360Gezoomt zurueck.
 
-    def mouseMoveEvent(self, event):
-        if hasattr(self, "_last_mouse_pos") and self._is_360_mode:
-            delta = event.pos() - self._last_mouse_pos
-            self._last_mouse_pos = event.pos()
+    def _auf_blick_zug(self, dx_punkte, dy_punkte):
+        """Mauszug in Winkel umrechnen.
 
-            # adjust sensitivity here
-            dx = delta.x() / 1000.0
-            dy = delta.y() / 1000.0
+        Der Umrechnungsfaktor haengt am Bildwinkel: ein Punkt auf dem
+        Bildschirm entspricht fov/Breite an Winkel. Dadurch bleibt sich das
+        Ziehen gleich, egal wie weit hineingezoomt ist - ohne das rast das
+        Bild bei starkem Zoom davon.
 
-            self._nudge_pan(dx, dy)
-        super().mouseMoveEvent(event)
+        Die Vorzeichen: das Bild soll dem Zeiger folgen. Nach rechts ziehen
+        heisst, die Welt nach rechts schieben, also nach links schauen.
+        """
+        if not self._360_bereit(melden=False):
+            return
+        breite = max(1, self.video_surface.width())
+        _, _, fov = self._backend.view360()
+        je_punkt = fov / float(breite)
+        self._blick_verschieben(d_yaw=-dx_punkte * je_punkt,
+                                d_pitch=dy_punkte * je_punkt)
 
-    def mouseReleaseEvent(self, event):
-        if hasattr(self, "_last_mouse_pos"):
-            del self._last_mouse_pos
-        self.setCursor(Qt.ArrowCursor)
-        super().mouseReleaseEvent(event)
+    #: Wieviel Bildwinkel eine Rastung des Mausrads aendert.
+    RAD_SCHRITT = math.radians(4.0)
+
+    def _auf_blick_zoom(self, schritte):
+        if not self._360_bereit(melden=False):
+            return
+        # Rad nach vorn (positiv) heisst naeher heran, also kleinerer
+        # Bildwinkel.
+        self._blick_verschieben(d_fov=-schritte * self.RAD_SCHRITT)
+        _, _, fov = self._backend.view360()
+        self._show_speed_label(f"Zoom: {math.degrees(fov):.0f}° Bildwinkel")
 
     

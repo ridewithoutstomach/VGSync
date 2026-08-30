@@ -47,7 +47,7 @@ Was die Modi damit tun:
 
   f      genau ein Bild weiter, im fertigen Video. Steht man auf dem letzten
          Bild vor einem Schnitt, fuehrt EIN Druck auf das erste Bild dahinter.
-         Solange kein Schnitt im Weg ist, macht das mpv selbst ("frame-step"),
+         Solange kein Schnitt im Weg ist, macht das der Player selbst,
          das ist bildgenau. Der Multiplier bleibt hier ohne Wirkung, wie bisher.
 
   k      zum naechsten Keyframe, DER IM FERTIGEN VIDEO NOCH EXISTIERT.
@@ -58,8 +58,8 @@ Was die Modi damit tun:
          Encode-Mode, siehe _require_encode_mode(). Der Multiplier bleibt ohne
          Wirkung, es geht immer eine Kante weiter.
 
-ZUM SPRINGEN: mpv zeigt bei "seek ... absolute exact" das ERSTE Bild AB der
-Zielzeit (nachgemessen an libmpv). Wer das letzte Bild VOR einem Zeitpunkt
+ZUM SPRINGEN: ein bildgenauer Sprung zeigt das ERSTE Bild AB der Zielzeit
+(so nachgemessen). Wer das letzte Bild VOR einem Zeitpunkt
 sehen will, muss deshalb eine ganze Bilddauer abziehen - eine Millisekunde
 reicht nicht, die liegt noch im selben Bild. Siehe _edge_seek_target().
 """
@@ -78,7 +78,7 @@ where the cut will really land."""
 
     def __init__(self, video_editor):
         """
-        :param video_editor: das VideoEditorWidget (mpv-Player, multi_durations)
+        :param video_editor: das VideoEditorWidget (Player, multi_durations)
         """
         self.video_editor = video_editor
         self.mainwindow = None
@@ -173,14 +173,14 @@ where the cut will really land."""
 
         if idx is None:
             print(f"[DEBUG] (frame-forward): {cur_s:.3f} liegt in keinem "
-                  f"Keep-Bereich => normaler mpv-Schritt")
+                  f"Keep-Bereich => normaler Bildschritt")
             self.video_editor.frame_step_forward()
             return
 
         ke = keeps[idx][1]
         if cur_s + d < ke - 0.25 * d:
-            # Das naechste Bild bleibt erhalten: mpv macht das bildgenau.
-            print(f"[DEBUG] (frame-forward): {cur_s:.3f} + 1 Bild (mpv)")
+            # Das naechste Bild bleibt erhalten: der Player macht das bildgenau.
+            print(f"[DEBUG] (frame-forward): {cur_s:.3f} + 1 Bild")
             self.video_editor.frame_step_forward()
             return
 
@@ -201,13 +201,13 @@ where the cut will really land."""
 
         if idx is None:
             print(f"[DEBUG] (frame-backward): {cur_s:.3f} liegt in keinem "
-                  f"Keep-Bereich => normaler mpv-Schritt")
+                  f"Keep-Bereich => normaler Bildschritt")
             self.video_editor.frame_step_backward()
             return
 
         ks = keeps[idx][0]
         if cur_s - d > ks - 0.25 * d:
-            print(f"[DEBUG] (frame-backward): {cur_s:.3f} - 1 Bild (mpv)")
+            print(f"[DEBUG] (frame-backward): {cur_s:.3f} - 1 Bild")
             self.video_editor.frame_step_backward()
             return
 
@@ -431,7 +431,7 @@ where the cut will really land."""
         """
         Rechnet eine Kante in die Zeit um, auf die wir springen.
 
-        Nachgemessen an libmpv (hr_seek + "exact"): mpv zeigt das ERSTE Bild AB
+        Nachgemessen an einem bildgenauen Sprung: gezeigt wird das ERSTE Bild AB
         der Zielzeit, nicht das davor. Also:
 
           "in"  (erstes Bild ab der Kante)   -> die Kante selbst, minus 0,1 ms,
@@ -453,9 +453,8 @@ where the cut will really land."""
     # ------------------------------------------------------------------------
     def _get_current_fps(self) -> float:
         """
-        Bildrate des aktuellen Videos. Fallback 25.0, wenn das Backend keine
-        liefert (welche Player-Eigenschaften dafuer taugen, steht in
-        core/player_backend.py).
+        Bildrate des aktuellen Videos. Fallback 25.0, wenn der Player keine
+        liefert - siehe GesPlayerBackend.fps() in core/ges_backend.py.
         """
         fps = self.video_editor.get_fps()
         if fps and float(fps) > 0:

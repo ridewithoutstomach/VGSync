@@ -19,23 +19,27 @@
 #
 
 """
-PlayerBackend auf Basis von GStreamer Editing Services (GES).
+Der Wiedergabe-Player von KVRouite, auf Basis von GStreamer Editing
+Services (GES).
 
-Warum ueberhaupt: mpv ist ein Player. Eine Blende zwischen zwei Clips kann er
-nicht darstellen - siehe die mpv-Issues zu --lavfi-complex. GES ist eine
-Schnitt-Engine mit Timeline, Spuren und Uebergaengen und kann das.
+Warum GES: ein reiner Player kann keine Blende zwischen zwei Clips zeigen und
+keine 360-Grad-Projektion rechnen. GES ist eine Schnitt-Engine mit Timeline,
+Spuren und Effekten und kann beides - und weil der Export dieselbe Timeline
+baut, zeigt die Vorschau wirklich das, was hinterher herauskommt.
 
-Modellunterschied, den diese Datei ueberbrueckt: mpv spielt eine PLAYLIST,
-also Clip fuer Clip, und rechnet in "Index + Sekunde im Clip". GES hat EINE
-Timeline mit einer durchgehenden Zeitachse. Hier liegen die Clips deshalb
-nahtlos hintereinander, und Index/lokale Zeit werden auf Timeline-Zeit
-umgerechnet (siehe _clip_at / _clip_start). Nach aussen verhaelt sich das
-Backend damit wie die Playlist, die das Widget erwartet.
+Modellunterschied, den diese Datei ueberbrueckt: die App denkt in einer
+PLAYLIST, also Clip fuer Clip, und rechnet in "Index + Sekunde im Clip". GES
+hat EINE Timeline mit einer durchgehenden Zeitachse. Hier liegen die Clips
+deshalb nahtlos hintereinander, und Index/lokale Zeit werden auf
+Timeline-Zeit umgerechnet (siehe _clip_at / _clip_start). Nach aussen
+verhaelt sich der Player damit wie die Playlist, die das Widget erwartet.
 
 Installation: `pip install gstreamer-bundle` (Windows/macOS, ab GStreamer
 1.28). Unter Linux ueber die Distributionspakete (python3-gi, gir1.2-ges-1.0,
 gstreamer1.0-plugins-base/good). Fehlt das Paket, wirft der Konstruktor
-ImportError - der Aufrufer faellt dann auf mpv zurueck.
+ImportError. Seit 6.0 gibt es dafuer keinen Ersatz mehr - ohne GStreamer
+kann KVRouite kein Video abspielen, und der Start bricht mit einer Meldung
+ab, die sagt, was zu installieren ist.
 
 BLENDEN werden NICHT von GES gemischt. GES verdrahtet seinen Crossfade mit dem
 Compositor-Operator "over" statt "source"/"add" und wird dadurch in der Mitte
@@ -46,10 +50,26 @@ Blende vorgerendert und als fertiger Clip eingesetzt - siehe core/fade_cache.py.
 Sie liegt mittig auf der Schnittkante; die angrenzenden Stuecke werden dafuer um
 je eine halbe Blendenlaenge gekuerzt, sodass die Gesamtlaenge gleich bleibt.
 
+FEHLERVERHALTEN, bewusst zweigeteilt - die Aufrufer verlassen sich darauf:
+  - Lesende Zugriffe (position, fps, video_size, ...) liefern ruhige Vorgaben,
+    wenn nichts geladen ist. Die Aufrufer fangen das mit getattr/try-except
+    ohnehin ab.
+  - Steuernde Zugriffe (seek_local, play_index) reichen Fehler durch. Die
+    Aufrufer fangen SystemError ab und setzen dann *bewusst* kein pause.
+    Wuerde das Backend schlucken, aendert sich dieses Verhalten.
+
+Die Zeitrechnung ueber mehrere Clips (boundaries, globale Zeit) liegt NICHT
+hier, sondern im VideoEditorWidget - sie ist von der Wiedergabe unabhaengig.
+
 BILDLAGE: GES stellt jeden Clip auf AUTO und liest die Drehung aus dem
 Datenstrom. Kommt die Kennzeichnung nicht rechtzeitig, steht der Clip auf dem
 Kopf - bei mehreren Clips mal dieser, mal jener. Deshalb wird sie hier fest
 vorgegeben, siehe _orientation_method().
+
+360 GRAD: der Shader haengt als GES.Effect an jedem Clip (core/view360.py)
+und wirkt dadurch in der Vorschau genauso wie im Export - beide bauen dieselbe
+Timeline. Ist 360 an, rechnet die Vorschau in 16:9 statt im 2:1-Format der
+Quelle, denn 2:1 ist bei Equirect-Material die Kugel und kein Bildformat.
 """
 
 import os
@@ -72,7 +92,7 @@ except Exception as exc:            # pragma: no cover - haengt an der Umgebung
     _GST_IMPORT_ERROR = exc
     Gst = GES = GstVideo = GstController = GLib = None
 
-from core.player_backend import PlayerBackend
+from core import view360
 
 
 def is_available():
@@ -163,8 +183,14 @@ class _AppsinkAnzeige:
         return Gst.FlowReturn.OK
 
 
-class GesPlayerBackend(PlayerBackend):
-    """PlayerBackend auf Basis von GES."""
+class GesPlayerBackend:
+    """Der Wiedergabe-Player von KVRouite, auf Basis von GES.
+
+    Bis 5.01 stand hier eine Weiche zwischen zwei Wiedergabewegen mit einer
+    gemeinsamen Basisklasse. Seit 6.0 gibt es nur
+    noch diesen: der zweite konnte weder Blenden noch 360 Grad zeigen und war
+    am Export ohnehin nicht beteiligt. Weiche und Basisklasse sind entfallen.
+    """
 
     # Reihenfolge der Video-Senken; der erste, der sich bauen laesst, gewinnt.
     _SINKS_WINDOWS = ("d3d11videosink", "d3d12videosink", "glimagesink", "autovideosink")
@@ -197,6 +223,25 @@ class GesPlayerBackend(PlayerBackend):
         self._warned_no_decoder = False
         self._orient = None
 
+        # 360 Grad, siehe core/view360.py. Die Effekte werden beim Aufbau der
+        # Timeline mitgefuehrt, damit sich der Blickwinkel spaeter aendern
+        # laesst, ohne die Timeline anzufassen.
+        self._360_an = False
+        # Ein Blickwinkel je Quelldatei, parallel zu self._assets. Die Liste
+        # waechst in load_playlist mit. Bis dahin dient _blick_vorgabe als
+        # Ablage - sonst ginge eine Einstellung verloren, die vor dem Laden
+        # gemacht wurde (etwa aus einer Projektdatei).
+        self._blicke = []
+        self._blick_vorgabe = view360.Blickwinkel()
+        # (Index der Quelldatei, Effekt) - damit ein Schwenk nur die Clips
+        # trifft, die zu diesem Video gehoeren.
+        self._effekte = []
+        # Drosselung fuers Auffrischen des Standbilds beim Schwenken.
+        self._blick_timer = QTimer()
+        self._blick_timer.setSingleShot(True)
+        self._blick_timer.timeout.connect(self._blick_timer_abgelaufen)
+        self._blick_offen = False
+
         self._assets = []         # [(pfad, asset, roh_start_ns, dauer_ns)]
         self._cuts = []           # [(start_s, ende_s, blende_s)]
         self._keeps = []          # [(roh_start_ns, roh_ende_ns, final_start_ns)]
@@ -211,6 +256,7 @@ class GesPlayerBackend(PlayerBackend):
         self._overlays = []
         self._overlay_export = None
         self._preview_w = 0
+        self._preview_h = 0
         self._pipeline = GES.Pipeline()
         self._pipeline.set_timeline(self._timeline)
         self._build_sink()
@@ -285,8 +331,6 @@ class GesPlayerBackend(PlayerBackend):
             self._note(f"Fenster-Handle konnte nicht gesetzt werden: {exc}")
 
     def _note(self, text):
-        # Bewusst nicht ueber den mpv-Log-Handler: dessen Praefix "[MPV]" waere
-        # hier irrefuehrend.
         print(f"[GES] {text}")
 
     def _on_sync_message(self, bus, msg, *_rest):
@@ -308,6 +352,13 @@ class GesPlayerBackend(PlayerBackend):
             if msg.type == Gst.MessageType.ERROR:
                 err, dbg = msg.parse_error()
                 self._note(f"FEHLER: {err} | {dbg}")
+                # Scheitert der 360-Shader - kein GL-Kontext ueber
+                # Remote-Desktop, Treiber uebersetzt ihn nicht -, bliebe die
+                # Vorschau sonst einfach schwarz. Lieber ohne 360 weiterlaufen
+                # und sagen, warum.
+                if self._360_an and self._ist_360_fehler(msg, str(err), str(dbg)):
+                    self._360_abschalten(str(err))
+                    continue
             elif msg.type == Gst.MessageType.WARNING:
                 err, _dbg = msg.parse_warning()
                 text = str(err)
@@ -325,6 +376,20 @@ class GesPlayerBackend(PlayerBackend):
                 self._paused = True
                 if self._end_callback:
                     self._end_callback()
+
+    @staticmethod
+    def _ist_360_fehler(msg, fehlertext, debugtext):
+        """Kommt dieser Bus-Fehler aus der 360-Kette?"""
+        quelle = ""
+        try:
+            if msg.src is not None:
+                quelle = msg.src.get_name() or ""
+        except Exception:
+            pass
+        text = f"{quelle} {fehlertext} {debugtext}".lower()
+        return any(w in text for w in
+                   ("kvr360", "glshader", "glupload", "gldownload",
+                    "shader compilation", "gl context", "opengl"))
 
     # ------------------------------------------------------------------
     # Schnitte, Blenden und der Aufbau der Timeline
@@ -365,7 +430,8 @@ class GesPlayerBackend(PlayerBackend):
     # das ist als Rechenaufwand gut gewaehlt, verzerrt aber Material, das
     # nicht 16:9 ist (etwa 2:1 bei 360-Grad-Aufnahmen). Deshalb setzen wir es
     # selbst: Breite und Bildrate gedeckelt, Seitenverhaeltnis der Quelle
-    # erhalten. WICHTIG ist der Deckel fuer die Bildrate - ohne ihn rechnet
+    # erhalten - ausser bei aktivem 360, da ist die Ausgabe 16:9.
+    # WICHTIG ist der Deckel fuer die Bildrate - ohne ihn rechnet
     # die Vorschau bei 60-fps-Material doppelt so viel wie noetig.
     # Geduld beim Oeffnen einer Datei.
     ASSET_TIMEOUT_S = 120
@@ -373,8 +439,17 @@ class GesPlayerBackend(PlayerBackend):
     PREVIEW_MAX_WIDTH = 1280
     PREVIEW_MAX_FPS = 30
 
+    def _preview_groesse(self):
+        """(breite, hoehe) der Vorschau. Vor dem ersten Asset (0, 0)."""
+        return self._preview_w, self._preview_h
+
     def _limit_preview_size(self):
-        """Vorschauaufloesung begrenzen, Seitenverhaeltnis der Quelle behalten."""
+        """Vorschauaufloesung begrenzen, Seitenverhaeltnis der Quelle behalten.
+
+        Ausnahme ist der 360-Betrieb: dort IST das 2:1-Format der Quelle die
+        Kugel und kein Bildformat. Die Vorschau rechnet dann in 16:9, weil
+        genau das hinterher aus dem Export kommt.
+        """
         if not self._assets:
             return
         try:
@@ -390,6 +465,8 @@ class GesPlayerBackend(PlayerBackend):
             if w > self.PREVIEW_MAX_WIDTH:
                 h = max(2, int(round(h * self.PREVIEW_MAX_WIDTH / w)) & ~1)
                 w = self.PREVIEW_MAX_WIDTH
+            if self._360_an:
+                h = view360.ziel_hoehe(w)
 
             # Bildrate immer festnageln. Ohne Angabe richtet sich der
             # Compositor nach seinen Eingaengen und liefert waehrend einer
@@ -407,7 +484,9 @@ class GesPlayerBackend(PlayerBackend):
                     track.set_restriction_caps(Gst.Caps.from_string(
                         f"video/x-raw,width={w},height={h},framerate={num}/{den}"))
             self._preview_w = w
-            self._note(f"Vorschau rechnet in {w}x{h} bei {num/den:.2f} fps")
+            self._preview_h = h
+            self._note(f"Vorschau rechnet in {w}x{h} bei {num/den:.2f} fps"
+                       + (" (360)" if self._360_an else ""))
         except Exception as exc:
             self._note(f"Vorschauaufloesung nicht gesetzt: {exc}")
 
@@ -445,16 +524,48 @@ class GesPlayerBackend(PlayerBackend):
             return self._ORIENT_180
         return None
 
-    def _apply_orientation(self, clip):
-        """Drehung dieses Clips festnageln, statt sie GES raten zu lassen."""
-        if self._orient is None or clip is None:
+    def _clip_vorbereiten(self, clip, roh_ns=0):
+        """
+        Alles, was jeder Clip auf der Timeline braucht: Bildlage und 360.
+
+        Der eine Trichter fuer beides. _rebuild() legt Clips an drei Stellen
+        an - Blenden-Schnipsel und zwei Materialwege -, und alle drei gehen
+        hier durch. Die vorgerenderten Blenden bekommen den 360-Effekt damit
+        ebenfalls, und das ist richtig: fade_cache rendert sie im
+        Seitenverhaeltnis der Quelle, sie sind also auch Equirect.
+
+        `roh_ns` sagt, aus welcher Stelle des Rohmaterials das Stueck stammt.
+        Daraus ergibt sich die Quelldatei und damit ihr Blickwinkel.
+        """
+        if clip is None:
+            return clip
+        if self._orient is not None:
+            try:
+                src = clip.find_track_element(None, GES.VideoSource)
+                if src is not None:
+                    src.set_child_property("video-direction", self._orient)
+            except Exception as exc:
+                self._note(f"Bildlage nicht setzbar: {exc}")
+        if self._360_an:
+            self._360_anhaengen(clip, self._clip_at(roh_ns))
+        return clip
+
+    def _360_anhaengen(self, clip, index):
+        """Shader an einen Clip haengen und ihn randlos aufs Zielbild legen."""
+        breite, hoehe = self._preview_groesse()
+        effekt = view360.effekt_anhaengen(
+            clip, self._blick(index), view360.ziel_aspect(breite, hoehe))
+        if effekt is None:
+            self._note("360-Effekt liess sich nicht anhaengen")
             return
-        try:
-            src = clip.find_track_element(None, GES.VideoSource)
-            if src is not None:
-                src.set_child_property("video-direction", self._orient)
-        except Exception as exc:
-            self._note(f"Bildlage nicht setzbar: {exc}")
+        view360.rahmen_setzen(clip, breite, hoehe)
+        self._effekte.append((index, effekt))
+
+    def _blick(self, index):
+        """Blickwinkel der Quelldatei mit diesem Platz."""
+        if 0 <= index < len(self._blicke):
+            return self._blicke[index]
+        return self._blick_vorgabe
 
     def _raw_total_ns(self):
         return self._assets[-1][2] + self._assets[-1][3] if self._assets else 0
@@ -523,6 +634,9 @@ class GesPlayerBackend(PlayerBackend):
 
         for clip in list(self._layer.get_clips()):
             self._layer.remove_clip(clip)
+        # Die 360-Effekte hingen an genau diesen Clips und sind mit ihnen weg.
+        # _clip_vorbereiten() sammelt gleich die neuen ein.
+        self._effekte = []
 
         self._compute_keeps()
 
@@ -567,9 +681,12 @@ class GesPlayerBackend(PlayerBackend):
             if sn is not None:
                 asset, dauer, halb = sn
                 # Die Blende beginnt eine halbe Laenge VOR der Kante.
-                self._apply_orientation(
+                # Fuer 360 zaehlt sie zu dem Video, in das sie fuehrt (ks ist
+                # die Rohzeit hinter dem Schnitt) - dorthin schaut man ja beim
+                # Ende der Blende.
+                self._clip_vorbereiten(
                     self._layer.add_asset(asset, fs - halb, 0, dauer,
-                                          GES.TrackType.UNKNOWN))
+                                          GES.TrackType.UNKNOWN), ks)
                 mit_blende += 1
                 # Das Folgematerial setzt dort an, wo die Blende WIRKLICH
                 # endet. Die gerenderte Datei ist gelegentlich ein Bild
@@ -581,9 +698,9 @@ class GesPlayerBackend(PlayerBackend):
             start, ende = ks + vorne, ke - hinten
             final = fs + vorne
             for (asset, inpoint, dur, rohstart) in self._pieces(start, ende):
-                self._apply_orientation(
+                self._clip_vorbereiten(
                     self._layer.add_asset(asset, final + (rohstart - start), inpoint,
-                                          dur, GES.TrackType.UNKNOWN))
+                                          dur, GES.TrackType.UNKNOWN), rohstart)
 
         ovl = self._overlays_einsetzen()
         self._timeline.commit_sync()
@@ -636,10 +753,10 @@ class GesPlayerBackend(PlayerBackend):
 
         Bei 4-fach muesste sonst jedes einzelne Bild dekodiert werden - bei
         4K-Material sind das 120 Bilder je Sekunde, das schafft kein Decoder,
-        und GStreamer meldet "A lot of buffers are being dropped". mpv wirft
-        in dieser Lage von sich aus Bilder weg; GStreamer macht das nur, wenn
-        man es beim Springen dazusagt. TRICKMODE ueberspringt aufwendige
-        Bilder, KEY_UNITS beschraenkt auf Keyframes.
+        und GStreamer meldet "A lot of buffers are being dropped". Bilder
+        wegzuwerfen macht GStreamer nur, wenn man es beim Springen dazusagt:
+        TRICKMODE ueberspringt aufwendige Bilder, KEY_UNITS beschraenkt auf
+        Keyframes.
         """
         tempo = abs(self._rate)
         if tempo <= self.TRICKMODE_AB_TEMPO:
@@ -698,9 +815,9 @@ class GesPlayerBackend(PlayerBackend):
         Asset holen, ohne die Oberflaeche einzufrieren.
 
         GES analysiert beim Oeffnen die ganze Datei. Gemessen an einer 8,6 GB
-        grossen GoPro-Aufnahme: rund 6 Sekunden - mpv brauchte dafuer keine
-        messbare Zeit, weil es die Datei erst beim Abspielen anfasst. Die
-        Analyse laesst sich nicht vermeiden, aber sie muss nicht blockieren.
+        grossen GoPro-Aufnahme: rund 6 Sekunden. Die Analyse laesst sich nicht
+        vermeiden, aber sie muss nicht blockieren - deshalb der Weg ueber
+        request_async statt request_sync.
 
         Wichtig dabei: GES stellt die Antwort ueber die GLib-Schleife zu, und
         die laeuft in einer Qt-Anwendung nicht von allein. Deshalb werden hier
@@ -770,6 +887,7 @@ class GesPlayerBackend(PlayerBackend):
             self._assets.append((path, asset, offset, dur))
             offset += dur
 
+        self._blicke_angleichen()
         self._limit_preview_size()
         self._orient = self._orientation_method()
         if self._orient is not None:
@@ -829,7 +947,11 @@ class GesPlayerBackend(PlayerBackend):
         return self._paused
 
     def seek_local(self, seconds):
-        """Sekunde INNERHALB der aktuellen Quelldatei - wie bei mpv."""
+        """Sekunde INNERHALB der aktuellen Quelldatei.
+
+        Nicht Timeline-Zeit: die App rechnet in Playlist-Sicht, siehe den
+        Hinweis zum Modellunterschied am Dateikopf.
+        """
         i = self.index()
         if i < 0:
             i = 0
@@ -902,7 +1024,7 @@ class GesPlayerBackend(PlayerBackend):
             return 0, 0
 
     # ------------------------------------------------------------------
-    # Ansicht - GES kennt kein Zoom/Pan/360 wie mpv
+    # Overlays
     # ------------------------------------------------------------------
     def set_overlays(self, overlays, export_groesse=None):
         """Overlays fuer die Vorschau setzen.
@@ -1019,11 +1141,146 @@ class GesPlayerBackend(PlayerBackend):
         self._bild_rueckruf = rueckruf
         return True
 
-    def supports_frame_callback(self):
+    # ------------------------------------------------------------------
+    # 360 Grad
+    # ------------------------------------------------------------------
+    def supports_360(self):
+        return view360.verfuegbar()
+
+    def unsupported_360_reason(self):
+        """Klartext, warum 360 nicht geht - fuer die Meldung an den Nutzer."""
+        return view360.fehlgrund()
+
+    def is_360(self):
+        return self._360_an
+
+    def set_360(self, enabled):
+        """
+        360-Projektion ein- oder ausschalten.
+
+        Das aendert Effektkette UND Zielformat (2:1 der Quelle gegen 16:9 der
+        Ausgabe), deshalb muss die Timeline hier einmal neu gebaut werden.
+        Fuer das blosse Aendern des Blickwinkels gilt das nicht - siehe
+        set_view360().
+        """
+        enabled = bool(enabled)
+        if enabled == self._360_an:
+            return True
+        if enabled and not view360.verfuegbar():
+            self._note(f"360 nicht moeglich: {view360.fehlgrund()}")
+            return False
+        self._360_an = enabled
+        self._limit_preview_size()
+        self._rebuild()
+        self._note("360 ist " + ("an" if enabled else "aus"))
         return True
 
-    def supports_view(self):
-        return False
+    def view360(self, index=None):
+        """Blickwinkel des laufenden - oder eines bestimmten - Videos."""
+        if index is None:
+            index = self.index()
+        return self._blick(index).werte()
+
+    def set_view360_liste(self, ansichten):
+        """
+        Alle Blickwinkel auf einmal setzen - beim Laden eines Projekts.
+
+        `ansichten` ist eine Liste von (yaw, pitch, fov) je Video. Sie darf
+        laenger oder kuerzer sein als die Playlist; fehlende Videos bekommen
+        die Vorgabe.
+        """
+        self._blicke = [view360.Blickwinkel(*w) for w in ansichten]
+        if self._blicke:
+            self._blick_vorgabe = self._blicke[0].kopie()
+        self._blicke_angleichen()
+        if self._360_an:
+            self._alle_uniforms_setzen()
+            if self._paused:
+                self._blick_auffrischen_anstossen()
+        return True
+
+    def _blicke_angleichen(self):
+        """Die Liste auf die Anzahl der Quelldateien bringen."""
+        fehlend = len(self._assets) - len(self._blicke)
+        if fehlend > 0:
+            self._blicke += [self._blick_vorgabe.kopie()
+                             for _ in range(fehlend)]
+        elif fehlend < 0:
+            del self._blicke[len(self._assets):]
+
+    def _alle_uniforms_setzen(self):
+        breite, hoehe = self._preview_groesse()
+        aspect = view360.ziel_aspect(breite, hoehe)
+        for index, effekt in self._effekte:
+            view360.uniforms_setzen(effekt, self._blick(index), aspect)
+
+    #: Kleinster Abstand zwischen zwei Auffrisch-Spruengen im Standbild.
+    #: 60 ms sind rund 16 Spruenge je Sekunde - fluessig genug fuers Auge und
+    #: wenig genug, dass der Decoder hinterherkommt.
+    BLICK_AUFFRISCHEN_MS = 60
+
+    def set_view360(self, yaw=None, pitch=None, fov=None):
+        """
+        Blickwinkel setzen.
+
+        Gilt fuer das Video, das gerade laeuft - jede Quelldatei hat ihren
+        eigenen Blickwinkel.
+
+        Bewusst OHNE Timeline-Umbau: die Werte gehen als Uniforms direkt an
+        die laufenden Shader und greifen am naechsten Bild. Ein _rebuild()
+        waere hier verschenkt und wuerde beim Ziehen mit der Maus stocken.
+        """
+        index = self.index()
+        self._blicke_angleichen()
+        if 0 <= index < len(self._blicke):
+            self._blicke[index].setzen(yaw, pitch, fov)
+        else:
+            self._blick_vorgabe.setzen(yaw, pitch, fov)
+        if not self._360_an:
+            return True
+        self._alle_uniforms_setzen()
+        # Im Standbild rechnet GES von sich aus kein neues Bild - die geaenderte
+        # Uniform waere erst beim naechsten Abspielen zu sehen. Gedreht wird
+        # aber fast immer im Standbild. Ein Sprung auf die aktuelle Stelle
+        # loest ein neues Vorschaubild aus (appsink meldet dann "new-preroll").
+        if self._paused:
+            self._blick_auffrischen_anstossen()
+        return True
+
+    def _blick_auffrischen_anstossen(self):
+        """Auffrischen anfordern, aber hoechstens alle BLICK_AUFFRISCHEN_MS.
+
+        Ohne die Drosselung setzt ein Mauszug hunderte Spruenge ab; jeder
+        davon leert die Pipeline und dekodiert neu. Der letzte Wunsch geht
+        nicht verloren - er wird nachgeholt, sobald die Sperre faellt.
+        """
+        if self._blick_timer.isActive():
+            self._blick_offen = True
+            return
+        self._blick_offen = False
+        self._blick_auffrischen()
+        self._blick_timer.start(self.BLICK_AUFFRISCHEN_MS)
+
+    def _blick_timer_abgelaufen(self):
+        if self._blick_offen:
+            self._blick_offen = False
+            self._blick_auffrischen()
+            self._blick_timer.start(self.BLICK_AUFFRISCHEN_MS)
+
+    def _blick_auffrischen(self):
+        try:
+            self._seek_ns(self._position_ns())
+        except Exception as exc:
+            self._note(f"Vorschaubild nicht aufgefrischt: {exc}")
+
+    def _360_abschalten(self, grund):
+        """Nach einem Fehler in der Effektkette zurueck auf normale Anzeige."""
+        if not self._360_an:
+            return
+        self._note(f"360 abgeschaltet: {grund}")
+        self._360_an = False
+        self._limit_preview_size()
+        self._rebuild()
 
     # ------------------------------------------------------------------
     # Ereignisse

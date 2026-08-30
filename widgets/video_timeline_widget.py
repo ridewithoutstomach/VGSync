@@ -104,11 +104,6 @@ class VideoTimelineWidget(QWidget):
         self._overlay_intervals.append((start_s, end_s))
         self.update()
 
-    def remove_last_overlay_interval(self):
-        if self._overlay_intervals:
-            self._overlay_intervals.pop()
-            self.update()
-
     def clear_overlay_intervals(self):
         self._overlay_intervals.clear()
         self.update()

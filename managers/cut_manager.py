@@ -82,7 +82,7 @@ class VideoCutManager(QObject):
             )
             return
         video_total = sum(self.video_durations)
-        if video_total - current_global_s < 1 : #impossible to select last frame on mpv, so we clamp manually
+        if video_total - current_global_s < 1 : # das letzte Bild laesst sich nicht anwaehlen, deshalb klemmen wir von Hand
             current_global_s = video_total
         self.markE_time_s = current_global_s
         self.timeline.set_markE_time(current_global_s)
@@ -256,7 +256,7 @@ class VideoCutManager(QObject):
         Keep-Segments). So gibt es am Videoende keine Konkurrenz zwischen beiden
         Mechanismen.
         """
-        # 1) Prüfen, ob mpv überhaupt ein File abspielt
+        # 1) Prüfen, ob der Player überhaupt ein File abspielt
         if not self._has_active_file():
             return  # => Kein Skip, da kein aktives Video
 
@@ -285,7 +285,7 @@ class VideoCutManager(QObject):
             self._last_skip_target = None
 
     def _has_active_file(self) -> bool:
-        """Prüft, ob mpv noch eine gültige Datei (playlist/current_index) geladen hat."""
+        """Prüft, ob der Player noch eine gültige Datei (playlist/current_index) geladen hat."""
         # 1) Hat der VideoEditor eine Playlist?
         if not self.video_editor.playlist:
             return False

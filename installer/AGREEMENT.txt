@@ -39,9 +39,6 @@ This application includes and distributes open-source libraries:
 - FFmpeg 7.1 (GPL build)
   License: GPL-3.0-or-later - https://ffmpeg.org
 
-- mpv 0.40.0 / libmpv (GPL build)
-  License: GPL-2.0-or-later - https://mpv.io
-
 - GStreamer 1.28.6, including GStreamer Editing Services (GES) and PyGObject
   License: LGPL-2.1-or-later. The bundled x264 and x265 encoder plugins, and the
   a52dec/dtsdec/dvdread plugins, are GPL-2.0-or-later. Individual components are
@@ -50,14 +47,14 @@ This application includes and distributes open-source libraries:
   are proprietary Microsoft components and are System Libraries in the sense of the
   GNU GPL. https://gstreamer.freedesktop.org
 
-  GStreamer is only used when the video backend is switched to GES
-  (Config -> Video Backend). With the default mpv backend it is never loaded.
+  GStreamer is what plays, cuts and renders video in KVRouite. It is always
+  loaded.
 
-Full license texts for these libraries are located in the `_internal/ffmpeg`,
-`_internal/mpv` and `_internal/gstreamer` folders. `_internal/gstreamer/COMPONENTS.txt`
-lists every GStreamer package shipped and its exact license.
+Full license texts for these libraries are located in the `_internal/ffmpeg`
+and `_internal/gstreamer` folders. `_internal/gstreamer/COMPONENTS.txt` lists
+every GStreamer package shipped and its exact license.
 
-Corresponding source code for FFmpeg and mpv, as used in this distribution, is
+Corresponding source code for FFmpeg, as used in this distribution, is
 available at: https://kvrouite.com/downloads/index.php
 
 The GStreamer binaries are the GStreamer Project's own prebuilt binaries, passed on

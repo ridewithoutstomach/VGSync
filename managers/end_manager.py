@@ -150,7 +150,7 @@ class EndManager(QObject):
         sofort. So bleiben wir garantiert am letzten Frame stehen.
 
         Stand bis 5.01 hier eine eigene Kopie der Clip-Rechnung, die noch die
-        python-vlc-API von vor mpv ansprach (media_list_player/media_player).
+        laengst abgeloeste Player-API ansprach (media_list_player/media_player).
         Diese Attribute gibt es im Widget nicht mehr - der Zweig waere mit
         AttributeError gestorben. Aufgerufen wurde er nie. Jetzt geht es ueber
         dieselbe Sprungfunktion wie ueberall sonst.

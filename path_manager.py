@@ -18,14 +18,18 @@
 # along with KVRouite. If not, see <https://www.gnu.org/licenses/>.
 #
 # path_manager.py
+#
+# Sucht die externen Werkzeuge, die KVRouite braucht, und legt sie in den
+# PATH des Prozesses. Seit 6.0 ist das nur noch ffmpeg (Copy-Mode und einige
+# Hilfsschritte). Die frueheren libmpv-Funktionen sind entfallen: die
+# Wiedergabe laeuft ueber GStreamer/GES, und dessen Bibliotheken kommen ueber
+# das Python-Paket bzw. die Distributionspakete, nicht ueber diesen Weg.
 
 import os
 import platform
 import shutil
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 from PySide6.QtCore import QSettings
-import ctypes
-
 
 
 def add_to_process_path(path_str: str):
@@ -79,84 +83,6 @@ def find_ffmpeg_folder() -> str:
 
     return ""
 
-def ensure_mpv(parent_widget) -> bool:
-    """
-    Stellt sicher, dass libmpv-2.dll verfügbar ist.
-    1) Versucht per find_mpv_folder() etwas zu finden.
-    2) Wenn nichts gefunden -> Dialog zum Ordnerauswählen.
-    3) Prüft Gültigkeit -> Speichert in QSettings -> passt PATH an.
-    
-    Gibt True zurück, wenn am Ende alles korrekt gefunden/eingestellt wurde,
-    sonst False.
-    """
-    s = QSettings("KVRouite", "KVRouite")
-    folder = find_mpv_folder()
-
-    if folder and is_valid_mpv_folder(folder):
-        # Falls der Pfad aus QSettings oder Fallback kam,
-        # und QSettings derzeit etwas anderes gespeichert hat:
-        stored_in_settings = s.value("paths/mpv", "", type=str)
-        if stored_in_settings != folder:
-            s.setValue("paths/mpv", folder)
-    else:
-        # => Info-Meldung anzeigen, bevor wir den Datei-Dialog öffnen
-        QMessageBox.information(
-            parent_widget,
-            "MPV library required",
-            "Please select the folder where libmpv-2.dll is located.\n"
-            "Example (Windows):\n"
-            "  C:\\mpv\\lib\n\n"
-            "This is needed for preview and playback."
-        )
-        chosen = QFileDialog.getExistingDirectory(parent_widget, "Select MPV Folder")
-        if not chosen:
-            return False
-        if not is_valid_mpv_folder(chosen):
-            QMessageBox.critical(
-                parent_widget,
-                "MPV Missing",
-                f"No valid libmpv-2.dll found in:\n{chosen}"
-            )
-            return False
-
-        # => store
-        s.setValue("paths/mpv", chosen)
-        folder = chosen
-
-    # Nun folder und libmpv-2.dll in PATH eintragen
-    mpv_dll_path = os.path.join(folder, "libmpv-2.dll")
-    os.environ["MPV_LIBRARY_PATH"] = mpv_dll_path
-    add_to_process_path(folder)
-
-    # Debug-Ausgaben (optional)
-    print("[DEBUG] Final MPV folder =", folder)
-    print("[DEBUG] MPV_LIBRARY_PATH =", os.environ["MPV_LIBRARY_PATH"])
-
-    return True
-
-    
-def find_mpv_folder() -> str:
-    """
-    Sucht nach libmpv-2.dll:
-      1) QSettings
-      2) lokaler Fallback mpv/lib
-    Gibt einen Ordnerpfad zurück oder "" wenn nichts gefunden.
-    """
-    s = QSettings("KVRouite", "KVRouite")
-    stored_folder = s.value("paths/mpv", "", type=str)
-    if is_valid_mpv_folder(stored_folder):
-        return stored_folder
-
-    # Lokaler Fallback, z.B. <base_dir>/mpv/lib
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    fallback_dir = os.path.join(base_dir, "mpv", "lib")
-    if is_valid_mpv_folder(fallback_dir):
-        return fallback_dir
-
-    return ""
-    
-    
-
 def ensure_ffmpeg(parent_widget) -> bool:
     """
     Ensures ffmpeg is available. 
@@ -203,149 +129,6 @@ def ensure_ffmpeg(parent_widget) -> bool:
         add_to_process_path(chosen)
         return True
         
-def is_valid_mpv_folder(folder: str) -> bool:
-    """
-    Prüft, ob in dem Ordner 'folder' eine libmpv-2.dll vorhanden ist 
-    und ob sie sich via ctypes laden lässt.
-    Gibt True zurück, falls ja.
-    """
-    if not folder or not os.path.isdir(folder):
-        return False
-    dll_path = os.path.join(folder, "libmpv-2.dll")
-    if not os.path.isfile(dll_path):
-        return False
-
-    # Optional: Test via ctypes
-    try:
-        _ = ctypes.cdll.LoadLibrary(dll_path)
-        return True
-    except Exception as e:
-        print(f"[WARN] libmpv-2.dll in {folder} konnte nicht geladen werden: {e}")
-        return False
-    
-### mac:
-def is_valid_mpv_folder_mac(folder: str) -> bool:
-    """
-    Prüft, ob in dem Ordner 'folder' eine libmpv.dylib/libmpv.1.dylib vorhanden ist
-    und ob sie sich via ctypes laden lässt.
-    """
-    if not folder or not os.path.isdir(folder):
-        return False
-
-    possible_names = ["libmpv.1.dylib", "libmpv.dylib", "libmpv.2.dylib"]  # je nach Version
-    found_any = False
-    dll_path = ""
-    for name in possible_names:
-        test_path = os.path.join(folder, name)
-        if os.path.isfile(test_path):
-            dll_path = test_path
-            found_any = True
-            break
-
-    if not found_any:
-        return False
-
-    # Test via ctypes:
-    try:
-        _ = ctypes.cdll.LoadLibrary(dll_path)
-        return True
-    except Exception as e:
-        print(f"[WARN macOS] libmpv konnte nicht geladen werden: {e}")
-        return False
-
-
-def find_mpv_folder_mac() -> str:
-    """
-    macOS: Sucht nach libmpv.dylib/libmpv.1.dylib:
-      1) QSettings (paths/mpv_mac)
-      2) Lokaler Fallback (<base_dir>/mpv/lib)
-      3) Mehrere Standardpfade (Homebrew, MacPorts, ...)
-      4) Falls nichts gefunden -> ""
-    """
-    s = QSettings("KVRouite", "KVRouite")
-    stored_folder = s.value("paths/mpv_mac", "", type=str)
-    if is_valid_mpv_folder_mac(stored_folder):
-        return stored_folder
-
-    # 2) Lokaler Fallback, falls du mpv beilegst in <base_dir>/mpv/lib
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    fallback_dir = os.path.join(base_dir, "mpv", "lib")
-    if is_valid_mpv_folder_mac(fallback_dir):
-        return fallback_dir
-
-    # 3) Liste mit Standardpfaden
-    possible_mpv_dirs = [
-        "/usr/local/lib",     # Homebrew (Intel)
-        "/opt/homebrew/lib",  # Homebrew (Apple Silicon)
-        "/opt/local/lib",     # MacPorts
-        # ggf. mehr
-    ]
-    for pathdir in possible_mpv_dirs:
-        if is_valid_mpv_folder_mac(pathdir):
-            return pathdir
-
-    # 4) Nichts gefunden
-    return ""
-
-
-def ensure_mpv_mac(parent_widget) -> bool:
-    """
-    Stellt sicher, dass libmpv.dylib (macOS) verfügbar ist.
-    1) Versucht per find_mpv_folder_mac() etwas zu finden.
-    2) Wenn nichts gefunden -> Dialog zum Ordnerauswählen.
-    3) Prüft Gültigkeit -> Speichert in QSettings -> passt PATH/MPV_LIBRARY_PATH an.
-    
-    Gibt True zurück, wenn alles gefunden/eingestellt wurde, sonst False.
-    """
-    s = QSettings("KVRouite", "KVRouite")
-    folder = find_mpv_folder_mac()
-
-    if folder and is_valid_mpv_folder_mac(folder):
-        # Falls der Pfad aus QSettings oder Fallback kam,
-        # und QSettings derzeit etwas anderes gespeichert hat:
-        stored_in_settings = s.value("paths/mpv_mac", "", type=str)
-        if stored_in_settings != folder:
-            s.setValue("paths/mpv_mac", folder)
-    else:
-        QMessageBox.information(
-            parent_widget,
-            "MPV library required (macOS)",
-            "Bitte wähle den Ordner, in dem libmpv.dylib/libmpv.1.dylib liegt.\n\n"
-            "Beispiel:\n"
-            "  /usr/local/lib\n"
-            "  /opt/homebrew/lib\n\n"
-            "Dies wird für Preview und Playback benötigt."
-        )
-        chosen = QFileDialog.getExistingDirectory(parent_widget, "Select MPV Folder (macOS)")
-        if not chosen:
-            return False
-        if not is_valid_mpv_folder_mac(chosen):
-            QMessageBox.critical(
-                parent_widget,
-                "MPV Missing (macOS)",
-                f"In {chosen} wurde keine gültige libmpv.dylib gefunden."
-            )
-            return False
-
-        # => store
-        s.setValue("paths/mpv_mac", chosen)
-        folder = chosen
-
-    # Nun folder + libmpv in PATH und MPV_LIBRARY_PATH eintragen
-    # Wir suchen nochmal den tatsächlichen Dateinamen:
-    possible_names = ["libmpv.1.dylib", "libmpv.dylib"]
-    for name in possible_names:
-        test_path = os.path.join(folder, name)
-        if os.path.isfile(test_path):
-            os.environ["MPV_LIBRARY_PATH"] = test_path
-            break
-
-    add_to_process_path(folder)  # optional; für macOS kann auch DYLD_LIBRARY_PATH nötig sein
-
-    print("[DEBUG] Final MPV folder (macOS) =", folder)
-    print("[DEBUG] MPV_LIBRARY_PATH (macOS) =", os.environ["MPV_LIBRARY_PATH"])
-    return True
-
 def find_ffmpeg_folder_mac() -> str:
     """
     macOS: Sucht nach ffmpeg (ohne .exe):
@@ -380,7 +163,6 @@ def find_ffmpeg_folder_mac() -> str:
 
     # 4) Keiner der Pfade war erfolgreich
     return ""
-
 
 
 def ensure_ffmpeg_mac(parent_widget) -> bool:
@@ -425,16 +207,3 @@ def ensure_ffmpeg_mac(parent_widget) -> bool:
         add_to_process_path(chosen)
         return True    
     
-def ensure_mpv_linux(path=None):
-    # Prüfe systemweite Installation oder direkten Pfad
-    candidates = [
-        path,
-        "/usr/lib/x86_64-linux-gnu/libmpv.so.2",
-        "/usr/local/lib/libmpv.so.2",
-        "libmpv.so.2"
-    ]
-    for candidate in candidates:
-        if candidate and os.path.exists(candidate):
-            return True
-    return False
-        

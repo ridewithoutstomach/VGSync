@@ -1,11 +1,12 @@
-# GES-Vorschau unter Kubuntu einrichten
+# GStreamer/GES unter Kubuntu einrichten
 
-Anleitung fuer das GStreamer/GES-Wiedergabe-Backend von KVRouite 6.0 unter
-Kubuntu/Ubuntu. Stand 29.08.2026, Branch `dev_6.0GES`.
+Anleitung fuer die Videoausgabe von KVRouite 6.0 unter Kubuntu/Ubuntu.
+Branch `dev_6.0GES`.
 
-Ohne dieses Backend laeuft KVRouite wie bisher mit mpv - dann ist hier nichts
-zu tun. Das GES-Backend wird nur gebraucht, damit **Ueberblendungen schon in
-der Vorschau sichtbar** sind. mpv bleibt die Vorgabe.
+**Das ist Pflicht, keine Option.** Seit 6.0 laufen Wiedergabe, Vorschau,
+Schnitt, Blenden, die 360-Grad-Ansicht und der Export allein ueber GStreamer
+Editing Services. Fehlt GStreamer, bricht KVRouite beim Start mit einer
+Meldung ab. Den frueheren zweiten Weg ueber libmpv gibt es nicht mehr.
 
 Unter Windows kommt GStreamer als pip-Wheel (`requirements-ges.txt`, eine
 Zeile). Unter Linux gibt es keine Wheels - dort kommt alles aus der
@@ -17,7 +18,7 @@ Distribution. Genau darum geht es hier.
 
 ```bash
 sudo apt update
-sudo apt install ffmpeg libmpv-dev python3-venv git
+sudo apt install ffmpeg python3-venv git
 sudo apt install python3-gi python3-gi-cairo gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 gir1.2-ges-1.0 gstreamer1.0-plugins-base gstreamer1.0-plugins-good  gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav gstreamer1.0-gl gstreamer1.0-x
 
 cd KVRouite
@@ -28,7 +29,7 @@ python3 check_ges.py
 python3 KVRouite.py
 ```
 
-Danach in der Anwendung: **Config -> Video Backend -> ges**, dann neu starten.
+Danach `python3 KVRouite.py` starten - es gibt nichts umzuschalten.
 
 Die beiden Punkte, an denen es sonst haengt, stehen in Schritt 3 und Schritt 5.
 
@@ -49,7 +50,7 @@ Welche GStreamer-Version dein Kubuntu mitbringt, haengt am Release:
 | 25.10 questing     | 1.26.6          |
 | 26.04 LTS resolute | 1.28.2          |
 
-Unter Windows benutzt KVRouite 1.28.6. Das Backend verwendet keine API, die
+Unter Windows benutzt KVRouite 1.28.6. Der Player verwendet keine API, die
 juenger als 1.24 ist - ab 24.04 sollte es also passen. Wer nah an der
 Windows-Version sein will, ist mit 26.04 (1.28.2) praktisch gleichauf.
 
@@ -59,16 +60,15 @@ Unter 22.04 (1.20) ist es ungetestet und eher unwahrscheinlich.
 
 ## Schritt 2 - Grundpakete
 
-Die braucht KVRouite unabhaengig vom Backend:
+Die braucht KVRouite in jedem Fall:
 
 ```bash
 sudo apt update
-sudo apt install ffmpeg libmpv-dev python3-venv git
+sudo apt install ffmpeg python3-venv git
 ```
 
-`ffmpeg` bleibt auch mit GES noetig: das Rendern laeuft weiterhin komplett
-ueber ffmpeg, und auch die Blenden, die die Vorschau anzeigt, werden vorher
-mit ffmpeg erzeugt.
+`ffmpeg` wird nur noch fuer den Copy-Mode gebraucht. Rendern, Blenden und
+Vorschau laufen seit 6.0 komplett ueber GES.
 
 ---
 
@@ -92,7 +92,7 @@ Was die Pakete tun:
 | `gir1.2-ges-1.0` | Typelib fuer `GES` - zieht `libges-1.0-0` nach, und darin stecken die eigentlichen Engine-Plugins `libgstnle.so` und `libgstges.so` |
 | `gstreamer1.0-plugins-base/good/bad/ugly` | Demuxer, Parser, Konverter |
 | `gstreamer1.0-libav` | H.264/H.265-Dekodierung (`avdec_h264`) |
-| `gstreamer1.0-gl` | `glimagesink` - die bevorzugte Video-Senke |
+| `gstreamer1.0-gl` | `glimagesink` - die bevorzugte Video-Senke; ausserdem `glshader` fuer die 360-Grad-Ansicht |
 | `gstreamer1.0-x` | `xvimagesink` als Rueckfallebene |
 
 **Falls apt `gir1.2-ges-1.0` nicht findet:** das Paket liegt in der
@@ -177,24 +177,23 @@ Rueckgabewert 0 heisst vollstaendig, 1 heisst es fehlt etwas.
 
 ---
 
-## Schritt 7 - Backend umschalten
+## Schritt 7 - Starten
 
 ```bash
 python3 KVRouite.py
 ```
 
-In der Anwendung **Config -> Video Backend -> ges** waehlen. Die Umstellung
-wirkt erst nach einem Neustart, weil der Player beim Start aufgebaut wird.
+Mehr ist nicht zu tun: es gibt keine Backend-Auswahl mehr. Startet die
+Anwendung nicht, sagt der Dialog, was an GStreamer fehlt - `check_ges.py`
+aus Schritt 6 zeigt dasselbe im Detail.
 
-Die Einstellung liegt in `~/.config/KVRouite/KVRouite.conf` unter
-`[player] backend=ges`. Falls die Anwendung mit GES nicht mehr startet,
-laesst sich das dort von Hand auf `mpv` zuruecksetzen - oder notfalls:
+Sollten die Oberflaechen-Einstellungen selbst das Problem sein, hilft
 
 ```bash
 rm ~/.config/KVRouite/KVRouite.conf
 ```
 
-Damit gehen allerdings auch die uebrigen Oberflaechen-Einstellungen verloren.
+Damit gehen allerdings alle Oberflaechen-Einstellungen verloren.
 
 ---
 
@@ -237,8 +236,8 @@ sudo apt autoremove
 
 Vorsicht: `python3-gi` und die Basis-Plugins haengen unter KDE an anderen
 Programmen. Vor dem Ausfuehren die Liste lesen, die apt zum Entfernen
-vorschlaegt. Wer nur das GES-Backend loswerden will, kommt mit dem Umschalten
-auf mpv aus - dann wird von alldem nichts mehr geladen.
+vorschlaegt. Wer diese Pakete entfernt, kann KVRouite 6.0 nicht mehr starten -
+es gibt keinen zweiten Wiedergabeweg, auf den es ausweichen koennte.
 
 Das venv liegt komplett im Projektordner und verschwindet mit `rm -rf venv`.
 
@@ -249,7 +248,7 @@ Das venv liegt komplett im Projektordner und verschwindet mit `rm -rf venv`.
 Diese Anleitung ist gegen das Ubuntu-Paketarchiv geprueft: Paketnamen,
 Versionen, Komponenten und der Inhalt von `libges-1.0-0` sind belegt. Ein
 tatsaechlicher Durchlauf auf Kubuntu hat noch nicht stattgefunden - das
-Backend lief bisher nur unter Windows mit 1.28.6.
+Der Player lief bisher nur unter Windows mit 1.28.6.
 
 Konkret ungeprueft:
 
@@ -267,5 +266,4 @@ abspielt, ist der Weg bestaetigt.
 
 Windows bekommt GStreamer als pip-Wheel ins venv und spaeter durch
 PyInstaller in den Installer gepackt - der Endanwender installiert nichts
-zusaetzlich. Linux nimmt die Distributionspakete, so wie heute schon bei
-ffmpeg und libmpv.
+zusaetzlich. Linux nimmt die Distributionspakete, so wie schon bei ffmpeg.

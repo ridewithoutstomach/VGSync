@@ -115,6 +115,19 @@ def main():
                       "sudo apt install gstreamer1.0-gl gstreamer1.0-x" if LINUX else PIP)
     ok(f"Video-Senke: {', '.join(senken)}")
 
+    # --- 360 Grad -----------------------------------------------------------
+    # Die 360-Ansicht rechnet die Equirect-Kugel mit einem Fragment-Shader in
+    # ein normales Bild um (core/view360.py). Ohne diese GL-Elemente laeuft
+    # alles andere weiter, nur 360 bleibt aus.
+    gl_fehlt = [n for n in ("glupload", "glcolorconvert", "glshader", "gldownload")
+                if not vorhanden(n)]
+    if gl_fehlt:
+        warnung("360-Grad-Ansicht nicht moeglich, es fehlt: "
+                + ", ".join(gl_fehlt),
+                "sudo apt install gstreamer1.0-gl" if LINUX else PIP)
+    else:
+        ok("360-Grad-Ansicht (glupload, glshader, gldownload)")
+
     # --- Dekoder ------------------------------------------------------------
     dekoder = [n for n in ("avdec_h264", "openh264dec", "vah264dec", "vaapih264dec",
                            "nvh264dec", "d3d11h264dec") if vorhanden(n)]

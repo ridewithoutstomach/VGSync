@@ -64,6 +64,12 @@ class VideoSurface(QWidget):
     overlayGeaendert = Signal(int, int, int, float)
     #: Welches Overlay gerade ausgewaehlt ist, -1 fuer keines.
     auswahlGeaendert = Signal(int)
+    #: 360-Zug mit der Maus: Weg in Bildschirmpunkten seit dem letzten
+    #: Ereignis. In Winkel rechnet das VideoEditorWidget um, weil dort der
+    #: aktuelle Bildwinkel bekannt ist.
+    blick360Gezogen = Signal(float, float)
+    #: 360-Zoom mit dem Mausrad: Rastschritte, positiv heisst naeher heran.
+    blick360Gezoomt = Signal(float)
 
     #: Halbe Kantenlaenge eines Anfassers in Bildschirmpunkten.
     GRIFF = 5
@@ -89,6 +95,11 @@ class VideoSurface(QWidget):
         self._start_rect = None     # (x, y, w, h) in Exportpixeln
         self._zug_rect = None       # laufender Zustand, Exportpixel
         self._ueber_flaeche = False
+
+        # 360: Schwenken mit der Maus. Nachrangig zu den Overlays - erst wenn
+        # weder ein Anfasser noch ein Overlay getroffen ist, wird geschwenkt.
+        self._360_aktiv = False
+        self._blick_von = None      # letzte Mausposition des laufenden Zugs
 
         # Der Hintergrund wird selbst gemalt; ohne das blitzt beim Groesse-
         # aendern kurz die Fensterfarbe durch.
@@ -259,11 +270,30 @@ class VideoSurface(QWidget):
                 return ovl
         return None
 
+    def set_360_aktiv(self, aktiv):
+        """Ob mit der Maus geschwenkt werden darf."""
+        self._360_aktiv = bool(aktiv)
+        if not self._360_aktiv:
+            self._blick_von = None
+
+    def _blick_zug_starten(self, punkt):
+        """Einen 360-Zug beginnen. True, wenn er wirklich begonnen hat."""
+        if not self._360_aktiv:
+            return False
+        self._blick_von = punkt
+        self.setCursor(Qt.ClosedHandCursor)
+        return True
+
     def mousePressEvent(self, ereignis):
-        if ereignis.button() != Qt.LeftButton or not self._overlays:
+        if ereignis.button() != Qt.LeftButton:
             super().mousePressEvent(ereignis)
             return
         punkt = ereignis.position().toPoint()
+        if not self._overlays:
+            # Ohne Overlays gibt es nichts zu treffen - direkt schwenken.
+            if not self._blick_zug_starten(punkt):
+                super().mousePressEvent(ereignis)
+            return
         in_export = self._nach_export(punkt)
         if in_export is None:
             return
@@ -282,8 +312,11 @@ class VideoSurface(QWidget):
 
         treffer = self._getroffenes_overlay(punkt)
         if treffer is None:
+            # Daneben geklickt: Auswahl aufheben und - wenn 360 laeuft - den
+            # Schwenk beginnen. Die Overlays behalten also den Vortritt.
             self._auswahl_setzen(-1)
             self.update()
+            self._blick_zug_starten(punkt)
             return
 
         self._auswahl_setzen(treffer["index"])
@@ -297,6 +330,13 @@ class VideoSurface(QWidget):
 
     def mouseMoveEvent(self, ereignis):
         punkt = ereignis.position().toPoint()
+
+        if self._blick_von is not None:
+            weg = punkt - self._blick_von
+            self._blick_von = punkt
+            if weg.x() or weg.y():
+                self.blick360Gezogen.emit(float(weg.x()), float(weg.y()))
+            return
 
         if self._modus is None:
             self._zeiger_anpassen(punkt)
@@ -333,6 +373,11 @@ class VideoSurface(QWidget):
         self.update()
 
     def mouseReleaseEvent(self, ereignis):
+        if self._blick_von is not None:
+            self._blick_von = None
+            self.unsetCursor()
+            return
+
         if self._modus is None or self._zug_rect is None:
             super().mouseReleaseEvent(ereignis)
             return
@@ -358,7 +403,22 @@ class VideoSurface(QWidget):
         self.overlayGeaendert.emit(ovl["index"], int(round(x)), int(round(y)),
                                    float(neue_skalierung))
 
+    def wheelEvent(self, ereignis):
+        """Mausrad zoomt den 360-Blickwinkel."""
+        if not self._360_aktiv:
+            super().wheelEvent(ereignis)
+            return
+        # angleDelta ist in Achtelgrad, eine Raste sind 120 Achtelgrad.
+        schritte = ereignis.angleDelta().y() / 120.0
+        if schritte:
+            self.blick360Gezoomt.emit(float(schritte))
+        ereignis.accept()
+
     def keyPressEvent(self, ereignis):
+        if ereignis.key() == Qt.Key_Escape and self._blick_von is not None:
+            self._blick_von = None
+            self.unsetCursor()
+            return
         if ereignis.key() == Qt.Key_Escape and self._modus is not None:
             self._modus = self._griff = self._start_maus = None
             self._zug_rect = self._start_rect = None
@@ -391,6 +451,8 @@ class VideoSurface(QWidget):
                            else Qt.SizeBDiagCursor)
         elif self._getroffenes_overlay(punkt) is not None:
             self.setCursor(Qt.SizeAllCursor)
+        elif self._360_aktiv:
+            self.setCursor(Qt.OpenHandCursor)
         else:
             self.unsetCursor()
 

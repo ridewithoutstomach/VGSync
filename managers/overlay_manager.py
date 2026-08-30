@@ -156,12 +156,6 @@ class OverlayManager(QObject):
         print("[OverlayManager] => Overlay ADDED:", ovl_dict)
 
 
-    def remove_last_overlay(self):
-        if self._overlays:
-            self._overlays.pop()
-            self.timeline.remove_last_overlay_interval()
-            self.overlaysChanged.emit()
-
     def clear_overlays(self):
         self._overlays.clear()
         self.timeline.clear_overlay_intervals()

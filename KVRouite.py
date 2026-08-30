@@ -119,23 +119,13 @@ if platform.system() == "Windows":
 
 
 
-# ++ADD++  (Mac-spezifischer Monkeypatch + locale Setting)
+# Unter macOS muss LC_NUMERIC auf "C" stehen: sonst schreiben Bibliotheken,
+# die Zahlen als Text weiterreichen, ein Komma als Dezimaltrennzeichen, und
+# GStreamer nimmt das nicht an.
 current_os = platform.system()
 if current_os == "Darwin":
-    import ctypes.util
     import locale
-
-    old_find_library = ctypes.util.find_library
-
-    def custom_find_library(name: str) -> str:
-        if name == "mpv":
-            # Beispiel: Pfad zur Homebrew-liegenden libmpv.2.dylib
-            return "/opt/homebrew/lib/libmpv.2.dylib"
-        return old_find_library(name)
-
-    ctypes.util.find_library = custom_find_library
     locale.setlocale(locale.LC_NUMERIC, "C")
-# ++ADD++ Ende Mac-Patch
 
 base_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -152,11 +142,7 @@ def resource_path(rel_path: str) -> str:
     return os.path.join(base_dir, rel_path)
 
 # ---------------------------------------------------------
-# Zuerst mpv-Pfad einstellen, bevor wir "import mpv" machen
 import path_manager
-
-# wurde nach untern verschoben, damit wir den Pfad or dem laden angeben können ( mac)
-#path_manager.ensure_mpv_library(parent_widget=None, base_dir=base_dir)
 
 # ---------------------------------------------------------
 # Jetzt erst den Rest importieren
@@ -259,7 +245,7 @@ def main():
     if config.is_soft_opengl_enabled():
         QGuiApplication.setAttribute(Qt.AA_UseSoftwareOpenGL)
 
-    # QtWebEngine (Karte) und mpv (Video) leben im selben Prozess und nutzen
+    # QtWebEngine (Karte) und die Videoausgabe leben im selben Prozess und nutzen
     # beide OpenGL. Ohne geteilten Kontext verliert die Karte ab Qt 6.11 ihren
     # Inhalt, sobald sie ueber "Map (detach)" in ein eigenes Fenster wandert -
     # das Fenster bleibt dann schwarz. Muss VOR QApplication(...) gesetzt
@@ -272,55 +258,49 @@ def main():
     
     current_os = platform.system()
     
-    # Zuerst mpv-Pfad einstellen, bevor wir "import mpv" machen
-    #path_manager.ensure_mpv_library(parent_widget=None, base_dir=base_dir)
-    # dann erst mainwindow starten:
-    
-    # mpv und ffmpeg sind KEINE Startbedingungen mehr.
+    # GStreamer/GES IST seit 6.0 eine Startbedingung.
     #
-    # Gebraucht werden sie nur noch fuer den mpv-Player, den Copy-Mode und die
-    # ffmpeg-Render-Engine. Wiedergabe und Vorschau samt Blenden, Bildraten,
-    # Laengen, Drehung, Hardware-Erkennung, GoPro-Telemetrie und der Export
-    # laufen ueber GStreamer. Beides wird deshalb nur noch GESUCHT und, wenn
-    # vorhanden, in den PATH gelegt. Fehlt es, gibt es eine Zeile im Log und
-    # sonst nichts.
-    #
-    # Bewusst NICHT ueber path_manager.ensure_mpv() / ensure_ffmpeg(): die
-    # oeffnen bei Misserfolg einen Ordner-Dialog. Genau das soll beim Start
-    # nicht mehr passieren.
+    # Bis 5.01 gab es zwei Wiedergabewege, und wenn GES fehlte, lief die App
+    # auf libmpv weiter. Der zweite Weg ist entfallen: ohne GStreamer kann
+    # KVRouite kein Video anzeigen, schneiden oder exportieren. Es hier
+    # abzufangen ist freundlicher, als spaeter mit einem ImportError aus dem
+    # Aufbau der Oberflaeche zu fallen.
     if current_os not in ("Windows", "Darwin", "Linux"):
         QMessageBox.critical(
             None, "Unsupported OS",
             f"Dein Betriebssystem ({current_os}) wird derzeit nicht unterstützt.")
         sys.exit(1)
 
-    if current_os == "Windows":
-        mpv_ordner = path_manager.find_mpv_folder()
-        if mpv_ordner and path_manager.is_valid_mpv_folder(mpv_ordner):
-            os.environ["MPV_LIBRARY_PATH"] = os.path.join(mpv_ordner, "libmpv-2.dll")
-            path_manager.add_to_process_path(mpv_ordner)
-            print("[DEBUG] MPV_LIBRARY_PATH =", os.environ["MPV_LIBRARY_PATH"])
+    from core.ges_backend import is_available as ges_verfuegbar
+    from core.ges_backend import unavailable_reason as ges_grund
+    if not ges_verfuegbar():
+        if current_os == "Linux":
+            hilfe = ("sudo apt install python3-gi python3-gi-cairo "
+                     "gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 "
+                     "gir1.2-ges-1.0 gstreamer1.0-plugins-base "
+                     "gstreamer1.0-plugins-good gstreamer1.0-plugins-bad "
+                     "gstreamer1.0-plugins-ugly gstreamer1.0-libav "
+                     "gstreamer1.0-gl gstreamer1.0-x\n\n"
+                     "Das venv muss mit --system-site-packages angelegt sein.")
         else:
-            print("[WARN] libmpv nicht gefunden - der mpv-Player steht nicht "
-                  "zur Verfuegung, GES laeuft davon unabhaengig.")
-    elif current_os == "Darwin":
-        mpv_ordner = path_manager.find_mpv_folder_mac()
-        if mpv_ordner and path_manager.is_valid_mpv_folder_mac(mpv_ordner):
-            for name in ("libmpv.1.dylib", "libmpv.dylib"):
-                pfad = os.path.join(mpv_ordner, name)
-                if os.path.isfile(pfad):
-                    os.environ["MPV_LIBRARY_PATH"] = pfad
-                    break
-            path_manager.add_to_process_path(mpv_ordner)
-            print("[DEBUG] MPV_LIBRARY_PATH =", os.environ.get("MPV_LIBRARY_PATH"))
-        else:
-            print("[WARN] libmpv nicht gefunden - der mpv-Player steht nicht "
-                  "zur Verfuegung, GES laeuft davon unabhaengig.")
-    else:
-        if not path_manager.ensure_mpv_linux(
-                "/usr/lib/x86_64-linux-gnu/libmpv.so.2"):
-            print("[WARN] libmpv.so.2 nicht gefunden - der mpv-Player steht "
-                  "nicht zur Verfuegung (sudo apt install libmpv-dev).")
+            hilfe = "pip install -r requirements-ges.txt"
+        QMessageBox.critical(
+            None, "GStreamer is missing",
+            "KVRouite plays, cuts and renders video through GStreamer "
+            "Editing Services (GES). It could not be loaded, so the "
+            "application cannot start.\n\n"
+            f"Reason:\n{ges_grund()}\n\n"
+            f"To install it:\n{hilfe}\n\n"
+            "Run check_ges.py to see what exactly is missing.")
+        sys.exit(1)
+
+    # ffmpeg ist KEINE Startbedingung. Gebraucht wird es nur noch fuer den
+    # Copy-Mode und ein paar Hilfsschritte; Wiedergabe, Vorschau samt Blenden,
+    # Bildraten, Laengen, Drehung, Hardware-Erkennung und der Export laufen
+    # ueber GStreamer. Es wird deshalb nur GESUCHT und, wenn vorhanden, in den
+    # PATH gelegt. Bewusst NICHT ueber path_manager.ensure_ffmpeg(): das
+    # oeffnet bei Misserfolg einen Ordner-Dialog, und genau das soll beim
+    # Start nicht passieren.
 
     ffmpeg_ordner = (path_manager.find_ffmpeg_folder_mac()
                      if current_os == "Darwin"

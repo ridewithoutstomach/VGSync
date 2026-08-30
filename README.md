@@ -7,7 +7,9 @@ KVRouite
 
 ![Kinomap Logo](./doc/Kinomap_Logo.png)
 
-KVRouite is a Python-based desktop application designed to synchronize GPX data with video footage. Its a Video and GPX synchronising tool. It uses "mpv" for high-precision video playback and "ffmpeg" for media processing. From version 6.0 on, the timeline can optionally be played through "GStreamer Editing Services (GES)" instead of mpv.
+KVRouite is a Python-based desktop application designed to synchronize GPX data with video footage. Its a Video and GPX synchronising tool. From version 6.0 on it plays, cuts and renders video through "GStreamer Editing Services (GES)"; "ffmpeg" is still used for the Copy-Mode. Because preview and export build the same GES timeline, the preview shows what the export will produce - including the crossfades at your cuts and true 360°: equirectangular footage is reprojected to a normal picture, you pick the viewing direction and zoom in the preview by dragging and scrolling, and that view is what gets rendered.
+
+Up to 5.01 there was a second playback path based on libmpv. It was removed in 6.0, and no libmpv is distributed any more.
 
 ![KVRouite Main Window](./screenshots/mainwindow.png)
 
@@ -21,15 +23,16 @@ Requirements
 ------------
 
 - Python 3.10.9 (64-bit) or Python 3.12.0 (64-bit)
-- mpv binary (must be placed in "mpv/" folder)
-- ffmpeg binary (must be placed in "ffmpeg/" folder)
+- GStreamer with GES - **required**, see "requirements-ges.txt"
+- ffmpeg binary (must be placed in "ffmpeg/" folder), for the Copy-Mode
 
 Python packages are split into two files:
 
 - "requirements.txt" - everything the application needs to run.
   The same list on Linux and Windows.
-- "requirements-ges.txt" - optional, Windows/macOS only: the GStreamer runtime
-  for the GES video backend. On Linux this comes from the distribution instead.
+- "requirements-ges.txt" - the GStreamer runtime, Windows/macOS. On Linux this
+  comes from the distribution instead. This is not optional: without GStreamer
+  KVRouite stops at startup and says so.
 - "requirements-build.txt" - additional packages needed only to build the
   Windows executable (PyInstaller and its dependencies).
 
@@ -52,14 +55,14 @@ Install the required system packages (one-time setup):
 
 ```bash
 sudo apt update
-sudo apt install ffmpeg libmpv-dev python3-venv
+sudo apt install ffmpeg python3-venv
 ```
 
-#### Optional: GES video backend (6.0)
+#### Required: GStreamer / GES
 
-From 6.0 on, KVRouite can play the timeline through GStreamer Editing
-Services instead of mpv, which makes crossfades visible in the preview.
-mpv stays the default -- skip this section if you do not need it.
+From 6.0 on, KVRouite plays, cuts and renders the timeline through GStreamer
+Editing Services. This is not optional -- without it the application will not
+start.
 
 On Linux there are no GStreamer Python wheels, so this comes from the
 distribution:
@@ -137,7 +140,7 @@ python KVRouite.py
 
 ---
 
-#### Optional: GES video backend (6.0)
+#### Required: GStreamer / GES
 
 On Windows the whole GStreamer runtime comes as pip wheels - no MSYS2, no
 system installation:
@@ -147,8 +150,7 @@ pip install -r requirements-ges.txt
 ```
 
 That installs `gstreamer-bundle` 1.28.6 (~80 MB in site-packages; uninstalling
-removes every file). mpv stays the default; switch under Config -> Video
-Backend, it takes effect after a restart.
+removes every file). Check the result with `python check_ges.py`.
 
 Licensing note: these wheels contain GPL- and LGPL-licensed binaries, among
 them the x264/x265 encoder plugins that the GES encoder renders with. **If you
@@ -167,7 +169,7 @@ actually ended up in it.
 
 - Always create and activate the virtual environment **inside** the `KVRouite` folder.
 - Do **not** run `python KVRouite.py` outside the project folder.
-- On **Linux**, make sure required packages like `ffmpeg` and `libmpv-dev` are installed.
+- On **Linux**, make sure the GStreamer packages listed above are installed, and `ffmpeg` for the Copy-Mode.
 
 
 
@@ -179,9 +181,11 @@ Install External Binaries (Windows)
 Download the following ZIP files from the latest KVRouite Release:
 
 - ffmpeg.zip → extract into "ffmpeg/" folder
-- mpv.zip → extract into "mpv/" folder
 
-The "ffmpeg/" and "mpv/" folders include guidance files ("KVRouite_ffmpeg.txt" and "KVRouite_mpv.txt") describing the expected contents.
+The "ffmpeg/" folder includes a guidance file ("KVRouite_ffmpeg.txt") describing the expected contents.
+
+There is no mpv.zip any more: from 6.0 on KVRouite neither uses nor distributes
+libmpv.
 
 There is no ZIP for GStreamer: it is installed with `pip install -r requirements-ges.txt`
 (see above). The "gstreamer/" folder in this repository contains no binaries - only the
@@ -244,16 +248,6 @@ FFmpeg
 - Original source code included in: "third-party-src/ffmpeg-source_7.1.zip"
 - Notice and source code offer: "ffmpeg/NOTICE.txt"
 
-mpv / libmpv
-- Version: 0.40.0
-- License: GPL-2.0-or-later. mpv is LGPLv2.1+ only when built without any
-  GPL-only files; the libmpv-2.dll shipped here links libx264 and libx265 and
-  is therefore a GPL build.
-- Website: https://mpv.io
-- Binaries provided in: "mpv/"
-- Original source code included in: "third-party-src/mpv-0.40.0-source.zip"
-- Notice and source code offer: "mpv/NOTICE.txt"
-
 GStreamer / GStreamer Editing Services (GES)
 - Version: 1.28.6 on Windows (pip package "gstreamer-bundle", see
   requirements-ges.txt); on Linux whatever the distribution ships
@@ -266,7 +260,9 @@ GStreamer / GStreamer Editing Services (GES)
   Libraries in the sense of the GNU GPL.
 - Website: https://gstreamer.freedesktop.org
 - Binaries: **Windows only.** They are installed by pip and are placed into the
-  "_internal" folder of the Windows build. **On Linux nothing of this is
+  "_internal" folder of the Windows build. This is the engine KVRouite plays,
+  cuts and renders with, so it is always present in a Windows build - the build
+  script refuses to package a build without it. **On Linux nothing of this is
   distributed with KVRouite** - GStreamer is installed from the distribution's
   own packages, so KVRouite redistributes no GStreamer binary there.
 - Source code: the binaries are the GStreamer Project's own prebuilt wheels,
@@ -295,8 +291,12 @@ under any later version of the respective license.
 All third-party components are redistributed in accordance with their respective
 licenses.
 
-For FFmpeg and mpv the complete and unmodified source code is included in the
+For FFmpeg the complete and unmodified source code is included in the
 "third-party-src/" directory and offered at https://kvrouite.com/downloads/index.php.
+
+Up to 5.01 the same applied to mpv / libmpv, which was distributed with those
+releases. It is not part of 6.0 any more, but its source stays available at the
+same address for everyone who received one of those earlier builds.
 
 For GStreamer it is not, and does not need to be: those binaries are the
 GStreamer Project's own, redistributed unchanged, and their Corresponding Source

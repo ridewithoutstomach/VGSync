@@ -9,12 +9,73 @@ Versions up to and including 5.0 are documented in the GitHub releases only.
 
 ## 6.0 – unreleased
 
+### Removed
+
+**mpv / libmpv is gone — GStreamer is now the only engine**
+
+Up to 5.01 there were two playback paths and mpv was the default. It could
+not show the crossfades at your cuts, had no real 360° mode, and was never
+involved in the export anyway. Keeping it meant shipping a second video
+runtime and maintaining two code paths for every feature. It is now removed:
+
+- `core/player_backend.py` (the backend interface, the mpv implementation and
+  the factory) is deleted. `VideoEditorWidget` builds `GesPlayerBackend`
+  directly.
+- Gone from the menus: *Config → Video Backend* and *Config → libmpv*. The
+  QSettings keys `player/backend`, `paths/mpv` and `paths/mpv_mac` are no
+  longer read.
+- `path_manager.py` keeps only the ffmpeg helpers; the libmpv search, the
+  validity checks and the macOS `find_library` patch are gone.
+- `python-mpv` is out of `requirements.txt`.
+- `build_with_pyinstaller.py` no longer copies `mpv/` into the build, so
+  neither the portable ZIP nor the Inno Setup installer contains libmpv
+  any more (110 MB less). A new `check_mpv_frei()` runs right before
+  packing and aborts the build if any `mpv` folder, `libmpv*`/`mpv-*`
+  library or the `mpv.py` binding turns up in it - shipping libmpv again
+  by accident would silently re-create a GPL source obligation whose
+  license texts are no longer in the bundle. The `mpv/` folder itself
+  stays in the working tree; the 5.x branches still build from it.
+
+**GStreamer is therefore a startup requirement now.** If it cannot be loaded,
+KVRouite says so with the exact reason and the install command for the
+platform, and points at `check_ges.py` — instead of failing later somewhere
+in the user interface. ffmpeg stays optional (Copy-Mode only).
+
 ### Added
+
+**True 360° video**
+
+360° footage is stored equirectangular — the whole sphere squeezed into a 2:1
+rectangle. Up to 5.01 KVRouite only cropped that distorted picture and moved
+the crop around (mpv `panscan` + `video-zoom`/`video-pan`): no projection, no
+wrap-around across the 360° seam, no real zoom — and the view never reached
+the export, which always rendered the full distorted 2:1 image.
+
+KVRouite now does the real thing with an OpenGL fragment shader
+(`core/view360.py`), attached to each clip as a `GESEffect`:
+
+- Look around by dragging in the picture, zoom with the mouse wheel, or use
+  `Ctrl` + arrow keys / `Ctrl +` / `Ctrl -`, `Ctrl 0` to reset. Dragging is
+  scaled by the current field of view, so it feels the same at any zoom.
+- Straight lines stay straight, and panning across the seam is seamless.
+- One viewing direction per video, stored in the project file (`view360`).
+  *View → Apply 360° view to all videos* copies it to every clip, which is
+  what you want for material from one camera.
+- **The view is rendered.** Preview and export build the same timeline, so
+  the export produces a normal 16:9 video showing exactly what the preview
+  showed. Crossfades work: both halves are projected and then mixed.
+- Measured: the shader costs nothing noticeable in the preview (30.0 fps with
+  and without it on 1920x960 material), and it changes no timing — the same
+  project rendered with and without 360° gives the identical frame count and
+  duration.
+- If the GL elements are missing (`gstreamer1.0-gl` on Linux, or no GL context
+  over remote desktop), 360° simply stays off and says why; `check_ges.py`
+  reports it.
 
 **GStreamer / GES licensing and credits**
 
 The GES backend brings a third-party runtime with it, and on Windows KVRouite
-distributes that runtime. It is therefore documented like ffmpeg and mpv:
+distributes that runtime. It is therefore documented like ffmpeg:
 
 - New folder `gstreamer/` with `NOTICE.txt` (notice, patent notice, LGPL
   section 6 relinking note), `CORRESPONDING-SOURCE.txt`, `COMPONENTS.txt`
@@ -22,7 +83,7 @@ distributes that runtime. It is therefore documented like ffmpeg and mpv:
   declares) and the full texts `COPYING.LGPL-2.1`, `COPYING.GPL-2`,
   `COPYING.GPL-3`. The wheels ship no license text of their own, so these had
   to be supplied.
-- Unlike ffmpeg and mpv, no GStreamer sources are copied to kvrouite.com. These
+- Unlike ffmpeg, no GStreamer sources are copied to kvrouite.com. These
   binaries are the GStreamer Project's own wheels, passed on unchanged, so the
   Corresponding Source is that project's 1.28.6 release tarballs - which GPLv3
   section 6(d) allows us to point at instead of rehosting, as long as clear
@@ -33,12 +94,16 @@ distributes that runtime. It is therefore documented like ffmpeg and mpv:
   upstream links ever fail. That copy is kept, not published.
 - `build_with_pyinstaller.py` copies `gstreamer/` to `_internal/gstreamer` and
   now reports whether the GStreamer runtime actually ended up in the build -
-  if it did, the license texts are mandatory; if it did not, the GES backend is
-  missing from the binary and that belongs in the release notes.
+  if it did, the license texts are mandatory; if it did not, the build will not
+  even start and is unusable.
 - GStreamer, GES and PyGObject are named in the startup disclaimer, in
   `installer/AGREEMENT.txt`, in the README and on the website, with the split
   between the LGPL-2.1+ core and the GPL-2.0+ x264/x265 encoder plugins, and
-  with the note that Linux redistributes nothing.
+  with the note that Linux redistributes nothing. Since mpv is no longer part
+  of the distribution, it was taken out of all of those lists again, and out of
+  the `_internal/...` folder lists they point at. The source offer for the
+  libmpv shipped with 5.01 and earlier stays up at kvrouite.com - that
+  obligation does not end when the next version drops the library.
 - The patent notice now also names x264, AAC, MP3, AC-3 and DTS, not only x265.
 
 ### Fixed
@@ -46,9 +111,17 @@ distributes that runtime. It is therefore documented like ffmpeg and mpv:
 **mpv was documented under the wrong license**
 
 The README listed mpv as LGPLv2.1+. mpv is LGPL only when built without any
-GPL-only files; the `libmpv-2.dll` shipped here links libx264 and libx265 and
-is a GPL build. It is now documented as GPL-2.0-or-later everywhere, which is
-what the NOTICE always said.
+GPL-only files; the `libmpv-2.dll` that used to be shipped links libx264 and
+libx265 and is a GPL build. It was corrected to GPL-2.0-or-later - which is
+what the NOTICE always said - before mpv was dropped from the distribution
+altogether. `mpv/NOTICE.txt` still carries the correct statement, for the
+5.x branches that keep building from that folder.
+
+**FFmpeg was listed under two different licenses**
+
+The About dialog said GPL-2.0-or-later while `ffmpeg/NOTICE.txt`, the README,
+`installer/AGREEMENT.txt` and the startup disclaimer all said
+GPL-3.0-or-later. The About dialog now agrees with the other four.
 
 **Notice files were copies of each other**
 

@@ -34,9 +34,13 @@ import hashlib, zipfile
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Pfade zu ffmpeg/mpv (Original-Quellen), die du mit ausliefern möchtest:
+# Pfad zu ffmpeg (Original-Quellen), das mit ausgeliefert wird.
 LOCAL_FFMPEG = os.path.join(BASE_DIR, "ffmpeg")  # z.B. hier liegt dein ffmpeg/
-LOCAL_MPV    = os.path.join(BASE_DIR, "mpv")     # z.B. hier liegt dein mpv/
+
+# mpv wird seit 6.0 NICHT mehr mitgeliefert. Der Ordner mpv/ liegt weiterhin
+# im Arbeitsverzeichnis, weil die 5.x-Zweige ihn brauchen - dieser Builder
+# fasst ihn aber nicht mehr an. Dass nichts davon in den Build rutscht, prueft
+# check_mpv_frei() am Ende.
 
 # gstreamer/ enthaelt KEINE Binaries, nur die Rechtstexte (NOTICE, COMPONENTS,
 # COPYING.*). Die GStreamer-DLLs selbst kommen ueber die pip-Wheels
@@ -101,6 +105,50 @@ def ensure_license_txt():
     print("[INFO] LICENSE.txt wurde neu erstellt.")
     return license_path
 
+def check_mpv_frei(target_dir):
+    """
+    Gegenprobe: es darf KEIN mpv mehr im Build liegen.
+
+    Seit 6.0 laeuft die Wiedergabe allein ueber GStreamer/GES, und libmpv wird
+    nicht mehr ausgeliefert. Der Ordner mpv/ liegt aber weiterhin im
+    Arbeitsverzeichnis (die 5.x-Zweige brauchen ihn), und python-mpv kann noch
+    in einem venv stecken. Beides koennte unbemerkt wieder in ein Bundle
+    geraten - und mit 110 MB libmpv wuerde die GPL-Quellcodepflicht wieder
+    gelten, obwohl die Rechtstexte dafuer aus dem Build genommen wurden.
+
+    Deshalb wird hier nachgesehen statt darauf zu vertrauen. Rueckgabe ist die
+    Liste der Fundstellen, leer heisst sauber.
+    """
+    funde = []
+    for root, dirs, files in os.walk(target_dir):
+        rel = os.path.relpath(root, target_dir)
+        for d in dirs:
+            if d.lower() == "mpv":
+                funde.append(os.path.join(rel, d))
+        for f in files:
+            n = f.lower()
+            # libmpv-2.dll, mpv-1.dll, libmpv.so.2, libmpv.dylib ...
+            if n.startswith(("libmpv", "mpv-")) and not n.endswith(".txt"):
+                funde.append(os.path.join(rel, f))
+            # das Python-Modul python-mpv
+            elif n in ("mpv.py", "mpv.pyc"):
+                funde.append(os.path.join(rel, f))
+
+    print("-" * 70)
+    if funde:
+        print("[FEHLER] Im Build liegt noch mpv:")
+        for p in sorted(set(funde))[:20]:
+            print("        ", p)
+        if len(set(funde)) > 20:
+            print("         ... und %d weitere" % (len(set(funde)) - 20))
+        print("         Ab 6.0 darf libmpv nicht mehr mit ausgeliefert werden.")
+        print("         Bitte den Build verwerfen und die Ursache beheben.")
+    else:
+        print("[OK]     Kein mpv im Build - so soll es ab 6.0 sein.")
+    print("-" * 70)
+    return sorted(set(funde))
+
+
 def check_gstreamer_payload(internal_dir):
     """
     Prueft, ob PyInstaller die GStreamer-Runtime tatsaechlich mit eingepackt hat.
@@ -113,10 +161,9 @@ def check_gstreamer_payload(internal_dir):
       - DLLs vorhanden  -> wir verbreiten GPL/LGPL-Binaries. Die Rechtstexte in
                            _internal/gstreamer und das Quellcode-Angebot darin
                            sind dann Pflicht.
-      - DLLs fehlen     -> das GES-Backend laeuft im fertigen Build nicht. Das
-                           muss in den Release-Notes stehen, sonst waehlt der
-                           Anwender im Config-Menue ein Backend, das nicht da
-                           ist.
+      - DLLs fehlen     -> der Build ist UNBRAUCHBAR. Seit 6.0 gibt es keinen
+                           zweiten Wiedergabeweg mehr; KVRouite bricht dann
+                           beim Start mit einer Meldung ab.
 
     Die Funktion bricht nicht ab, sie sagt nur klar, welcher Fall vorliegt.
     """
@@ -148,9 +195,10 @@ def check_gstreamer_payload(internal_dir):
         print(f"         x264/x265-Plugins (GPL-2.0-or-later): {'ja' if x264 else 'nein'}"
               f"{'' if x264 else '  -> GES-Encoder kann nicht rendern!'}")
     else:
-        print("[LIZENZ] GStreamer ist NICHT im Build enthalten.")
-        print("         Das GES-Backend ist im fertigen Programm nicht verfuegbar -")
-        print("         bitte in den Release-Notes erwaehnen.")
+        print("[FEHLER] GStreamer ist NICHT im Build enthalten.")
+        print("         Seit 6.0 laeuft Wiedergabe, Schnitt und Export allein")
+        print("         darueber - dieses Bundle startet nicht. Bitte aus einem")
+        print("         venv bauen, in dem requirements-ges.txt installiert ist.")
     print("-" * 70)
 
 
@@ -272,13 +320,11 @@ def build_windows(build_setup: bool = False):
         else:
             shutil.copy2(src_item, dst_item)
 
-    # _internal vorbereiten + ffmpeg/mpv hinein
+    # _internal vorbereiten + ffmpeg hinein
     internal_dir = os.path.join(target_dir, "_internal")
     os.makedirs(internal_dir, exist_ok=True)
     print("[INFO] Kopiere ffmpeg →", os.path.join(internal_dir, "ffmpeg"))
     copy_tree_all(LOCAL_FFMPEG, os.path.join(internal_dir, "ffmpeg"))
-    print("[INFO] Kopiere mpv    →", os.path.join(internal_dir, "mpv"))
-    copy_tree_all(LOCAL_MPV, os.path.join(internal_dir, "mpv"))
     print("[INFO] Kopiere gstreamer (Lizenztexte) →", os.path.join(internal_dir, "gstreamer"))
     if os.path.isdir(LOCAL_GSTREAMER):
         copy_tree_all(LOCAL_GSTREAMER, os.path.join(internal_dir, "gstreamer"))
@@ -360,6 +406,13 @@ def build_windows(build_setup: bool = False):
 
     print(f"[INFO] PyInstaller-Struktur OK: {os.path.abspath(target_dir)}")
     print("[INFO] Enthält: KVRouite.exe, ol.css, ol.js, map_page.html, icon/, _internal/…")
+
+    # Letzte Gegenprobe, wenn nichts mehr dazukommt: kein mpv im Bundle.
+    # Findet sich doch welches, wird hier abgebrochen - ein ZIP oder ein
+    # Installer mit libmpv darin waere schon ausgeliefert, bevor es jemand
+    # merkt, und zoege die GPL-Quellcodepflicht nach sich.
+    if check_mpv_frei(target_dir):
+        raise SystemExit("[ABBRUCH] Build enthaelt mpv - nicht ausliefern.")
 
     # ---------------- portable ZIP + SHA ----------------
     ARCH_SUFFIX = "Win_x64"
