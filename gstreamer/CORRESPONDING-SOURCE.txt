@@ -14,9 +14,8 @@ Windows and macOS installers.
 KVRouite does not compile, patch, rebuild or otherwise modify any of them. They
 are passed on byte for byte, exactly as pip installs them.
 
-Up to version 5.01 this application also shipped a GPL build of ffmpeg, whose
-source was hosted on kvrouite.com. That build is gone from 6.0 on, and the
-arrangement below is the only one that applies.
+These are the only third-party binaries this application ships, so the
+arrangement below covers all of them.
 
 WHY THERE IS NO SOURCE ARCHIVE ON kvrouite.com
 ----------------------------------------------

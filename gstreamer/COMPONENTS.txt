@@ -92,10 +92,9 @@ libavutil, libswresample, libswscale) inside gstreamer-plugins-libs. They are
 used by the GStreamer gst-libav plugin. This is an LGPL build and is covered
 by this file and by NOTICE.txt.
 
-Nothing else of FFmpeg is distributed. Up to version 5.01 there was a second
-copy - the FFmpeg 7.1 full build (ffmpeg.exe / ffprobe.exe, a GPL build) in
-"_internal/ffmpeg", used for cutting and rendering. From 6.0 on it is gone:
-rendering runs through GES, and copy mode calls whatever ffmpeg and ffprobe
-the user has installed. If neither is present, copy mode stays disabled.
+Nothing else of FFmpeg is distributed. The ffmpeg and ffprobe programs are
+not part of this application: rendering runs through GES, and copy mode calls
+whatever ffmpeg and ffprobe the user has installed. Without them copy mode
+stays disabled.
 
 ================================================================================
