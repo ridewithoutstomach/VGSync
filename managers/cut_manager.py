@@ -256,6 +256,19 @@ class VideoCutManager(QObject):
         Keep-Segments). So gibt es am Videoende keine Konkurrenz zwischen beiden
         Mechanismen.
         """
+        # 0) Kann die Vorschau selbst schneiden, gibt es hier nichts zu tun.
+        #    Dieser Mechanismus stammt aus der mpv-Zeit: dort lief IMMER das
+        #    ganze Rohmaterial, und der Player musste ueber die geschnittenen
+        #    Bereiche geschoben werden. GES entfernt die Schnitte physisch aus
+        #    der Timeline (_rebuild in core/ges_backend.py) - eine geschnittene
+        #    Stelle kann also gar nicht mehr angefahren werden.
+        #
+        #    Feuern KANN er trotzdem, naemlich wenn die gemeldete Position
+        #    falsch ist. Dann springt er, obwohl niemand springen wollte, und
+        #    genau das ist als Zucken zu sehen.
+        if self.video_editor.supports_preview_cuts():
+            return
+
         # 1) Prüfen, ob der Player überhaupt ein File abspielt
         if not self._has_active_file():
             return  # => Kein Skip, da kein aktives Video
