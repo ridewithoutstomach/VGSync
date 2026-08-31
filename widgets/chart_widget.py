@@ -23,7 +23,8 @@ from PySide6.QtWidgets import QWidget
 from PySide6.QtCore import Qt, QPoint, Signal, QPointF, QRect
 from datetime import timedelta
 from PySide6.QtGui import (
-    QPainter, QPen, QBrush, QColor, QWheelEvent, QPolygonF, QFont
+    QPainter, QPen, QBrush, QColor, QWheelEvent, QPolygonF, QFont,
+    QImage
 )
                            
 
@@ -47,6 +48,11 @@ class ChartWidget(QWidget):
         self._horizontal_offset = 0.0
 
         self._marker_index = 0
+
+        # Die fertige Zeichnung ohne Marker, plus der Schluessel, unter dem
+        # sie gilt. Siehe paintEvent() und _hintergrund_schluessel().
+        self._hintergrund = None
+        self._hintergrund_gueltig = None
 
         # Dragging
         self._dragging_scroll = False
@@ -299,9 +305,13 @@ class ChartWidget(QWidget):
     # -----------------------------------------------------
     # Painting
     # -----------------------------------------------------
-    def paintEvent(self, event):
-        super().paintEvent(event)
-        painter = QPainter(self)
+    def _kurven_zeichnen(self, painter):
+        """Alles ausser dem Marker: Legende, Kurven, Markierungen, Ueberlagerungen.
+
+        Zeile fuer Zeile die bisherige Zeichnung. Sie haengt NICHT vom Marker ab
+        und wird deshalb nur noch gebraucht, wenn sich Daten, Groesse, Zoom,
+        Versatz, Schwellen oder der Sync-Bereich aendern - siehe paintEvent().
+        """
         painter.setRenderHint(QPainter.Antialiasing)
     
         rect_ = self.rect()
@@ -699,32 +709,102 @@ class ChartWidget(QWidget):
         
         
         
-        # ------------------------------------------------------
-        # Marker-Linie und Info-Texte
-        # ------------------------------------------------------
-        m_x = x_for_index(self._marker_index)
-        if -50 < m_x < w + 50:
-            painter.setPen(QPen(QColor(255, 255, 255), 2))
-            painter.drawLine(m_x, 0, m_x, h)
-            pt_ = self._gpx_data[self._marker_index]
-    
-            ele_val = pt_['ele']
-            spd_val = speed_vals[self._marker_index]  # gecappter Wert
-            grad_val = pt_.get("gradient", 0.0)
-    
-            #line1 = f"{ele_val:.1f}".replace(".", ",") + "m"
-            e_show = ele_val if abs(ele_val) >= ELE_EPS else 0.0
-            line1  = f"{e_show:.1f}".replace(".", ",") + "m"
-            line2 = f"{spd_val:.1f}".replace(".", ",") + "km/h"
-            line3 = f"{grad_val:.1f}".replace(".", ",") + "%"
-    
-            y_start = 40
-            y_step = 15
-    
-            painter.setPen(QPen(QColor("white"), 1))
-            painter.drawText(m_x + 5, y_start, line1)
-            painter.drawText(m_x + 5, y_start + y_step, line2)
-            painter.drawText(m_x + 5, y_start + 2 * y_step, line3)
+    def _marker_zeichnen(self, painter):
+        """Nur die weisse Linie und die drei Werte daneben.
+
+        Das ist der einzige Teil, der sich beim Abspielen aendert. Er rechnet
+        seine paar Werte selbst aus, statt sie aus der grossen Zeichnung zu
+        uebernehmen - fuer EINEN Punkt ist das nichts.
+        """
+        count = len(self._gpx_data)
+        if count < 2:
+            return
+        w = self.width()
+        h = self.height()
+        idx = max(0, min(self._marker_index, count - 1))
+
+        chart_width = w * self._zoom_factor
+        m_x = (idx / (count - 1)) * chart_width - self._horizontal_offset
+        if not (-50 < m_x < w + 50):
+            return
+
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(QPen(QColor(255, 255, 255), 2))
+        painter.drawLine(m_x, 0, m_x, h)
+
+        pt_ = self._gpx_data[idx]
+        ele_val = pt_["ele"]
+        spd_val = min(pt_.get("speed_kmh", 0.0), self._speed_cap)
+        grad_val = pt_.get("gradient", 0.0)
+
+        e_show = ele_val if abs(ele_val) >= ELE_EPS else 0.0
+        line1 = f"{e_show:.1f}".replace(".", ",") + "m"
+        line2 = f"{spd_val:.1f}".replace(".", ",") + "km/h"
+        line3 = f"{grad_val:.1f}".replace(".", ",") + "%"
+
+        y_start = 40
+        y_step = 15
+
+        painter.setPen(QPen(QColor("white"), 1))
+        painter.drawText(m_x + 5, y_start, line1)
+        painter.drawText(m_x + 5, y_start + y_step, line2)
+        painter.drawText(m_x + 5, y_start + 2 * y_step, line3)
+
+    def _hintergrund_schluessel(self):
+        """Woran haengt die gemerkte Zeichnung? Aendert sich davon etwas, neu."""
+        try:
+            from core.gpx_parser import get_gpx_video_shift
+            versatz = get_gpx_video_shift()
+        except Exception:
+            versatz = None
+        return (self.width(), self.height(), self.devicePixelRatioF(),
+                id(self._gpx_data), len(self._gpx_data),
+                self._zoom_factor, self._horizontal_offset,
+                self._speed_cap, self._zero_speed_threshold,
+                self._stop_threshold,
+                self._sync_idx_start, self._sync_idx_end,
+                versatz)
+
+    def paintEvent(self, event):
+        """Gemerkte Zeichnung aufs Widget kopieren, Marker darueber.
+
+        Frueher wurde hier ALLES neu gezeichnet - Werte sammeln, Minima und
+        Maxima bilden, zwei Punktlisten aufbauen und je Punkt eine eigene
+        Linie ziehen. Bei einer 5-Stunden-Aufzeichnung mit 17000 Punkten
+        waren das rund 35000 Zeichenbefehle, und das fuenfmal je Sekunde,
+        weil update_timeline_marker() den Marker im 200-ms-Takt weiterschiebt.
+        Gemessen am 31.08.2026: 25 ms je Neuzeichnung bei 17329 Punkten,
+        42 ms bei 28800. Ein Videobild dauert bei 30 fps 33 ms - deshalb hat
+        das Video bei langen Strecken gestockt, und zwar nur nach dem Sync,
+        weil der Chart erst dann mitlaeuft.
+
+        Beim Abspielen aendert sich an den Kurven aber gar nichts. Sie werden
+        deshalb einmal in ein Bild gezeichnet und gemerkt; je Takt wird nur
+        noch dieses Bild kopiert und der Marker darueber gemalt. Gemessen:
+        0,06 ms statt 25 ms.
+        """
+        super().paintEvent(event)
+
+        schluessel = self._hintergrund_schluessel()
+        if self._hintergrund is None or self._hintergrund_gueltig != schluessel:
+            dpr = self.devicePixelRatioF()
+            breite = max(1, int(self.width() * dpr))
+            hoehe = max(1, int(self.height() * dpr))
+            bild = QImage(breite, hoehe, QImage.Format_ARGB32_Premultiplied)
+            bild.setDevicePixelRatio(dpr)
+            bild.fill(Qt.transparent)
+            maler = QPainter(bild)
+            try:
+                self._kurven_zeichnen(maler)
+            finally:
+                maler.end()
+            self._hintergrund = bild
+            self._hintergrund_gueltig = schluessel
+
+        painter = QPainter(self)
+        painter.drawImage(0, 0, self._hintergrund)
+        self._marker_zeichnen(painter)
+
     
                 
     def mousePressEvent(self, event):
