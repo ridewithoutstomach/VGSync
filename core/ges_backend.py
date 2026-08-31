@@ -986,6 +986,35 @@ class GesPlayerBackend:
         raw = self._clip_start(i) + int(float(seconds) * NS)
         self._seek_ns(self._raw_to_final(raw))
 
+    def seek_global_raw(self, sekunden):
+        """Sprung auf eine ROHSEKUNDE ueber alle Dateien hinweg - EIN Sprung.
+
+        Die App hat diesen Weg bisher aus play_index() und seek_local()
+        zusammengesetzt, weil die Wiedergabe einmal eine Playlist war. Der
+        erste Sprung ging dabei an den CLIP-ANFANG, der zweite erst ans Ziel.
+
+        GES hat EINE durchgehende Zeitachse. In welcher Datei eine Rohsekunde
+        liegt, geht den Sprung nichts an; _raw_to_final() rechnet die
+        Schnitte heraus.
+        """
+        if not self._assets:
+            return
+        raw = max(0, int(float(sekunden) * NS))
+        self._seek_ns(self._raw_to_final(raw))
+
+    def position_global(self):
+        """Rohsekunde ueber alle Dateien hinweg, aus EINER Abfrage.
+
+        Das Gegenstueck zu seek_global_raw(). Wer stattdessen index() und
+        position() nacheinander abfragt, misst zweimal: der Versatz stammt
+        dann aus der einen Messung, die lokale Zeit aus der anderen - und
+        weichen sie voneinander ab, springt das Ergebnis um eine ganze
+        Cliplaenge.
+        """
+        if not self._assets:
+            return 0.0
+        return max(0.0, self._current_raw_ns() / NS)
+
     def position(self):
         """Sekunde innerhalb der aktuellen Quelldatei, in ROHZEIT."""
         i = self.index()

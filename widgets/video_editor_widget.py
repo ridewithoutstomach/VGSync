@@ -407,34 +407,23 @@ class VideoEditorWidget(QWidget):
         
 
     def show_first_frame_at_index(self, index: int):
-        """
-        Gehe zum playlist-Index 'index', pausiere + seek an den Anfang => 1. Frame
+        """An den Anfang von Clip 'index' springen, pausiert => erstes Bild.
+
+        Frueher folgte auf play_index() 80 ms spaeter noch ein seek_local(0).
+        Beide sprangen an dieselbe Stelle - den Clipanfang -, der zweite war
+        also reine Verdopplung. play_index() ist bei GES laengst kein
+        Umschalten mehr, sondern selbst schon ein Sprung dorthin.
         """
         if not self.playlist or index < 0 or index >= len(self.playlist):
             return  # Ungültig => Abbruch
 
         self.is_playing = False
-
-        # => Player springt zu Clip 'index'
-        self._backend.play_index(index)
-
-        def do_seek():
-            # 1) Prüfen, ob noch ein Video geladen ist + Position >=0
-            if self._backend.count() == 0:
-                return
-            if self._backend.index() < 0:
-                return
-
-            # 2) Seek an 0s
-            try:
-                self._backend.seek_local(0)
-                self._backend.set_paused(True)
-                self.is_playing = False
-            except SystemError as e:
-                # Kommt vor, wenn der Player gerade nichts geladen hat.
-                print(f"[WARN] show_first_frame: Sprung abgelehnt => {e}")
-
-        QTimer.singleShot(80, do_seek)
+        try:
+            self._backend.play_index(index)
+            self._backend.set_paused(True)
+        except SystemError as e:
+            # Kommt vor, wenn der Player gerade nichts geladen hat.
+            print(f"[WARN] show_first_frame: Sprung abgelehnt => {e}")
 
     def set_playback_rate(self, rate: float):
         print(f"DEBUG: set_playback_rate called with rate={rate}")  # Debug
@@ -681,9 +670,17 @@ class VideoEditorWidget(QWidget):
         self.set_empty_hint_visible(False)
 
     def seek_global(self, wanted_s: float):
-        """
-        'wanted_s' ist die globale Zeit über alle Clips.
-        Wir ermitteln clipIndex + local_s.
+        """Sprung auf die globale Zeit ueber alle Clips - EIN Sprung.
+
+        Frueher wurde hier in (Clip-Index, lokale Sekunde) zerlegt und mit
+        dem Live-Index des Backends verglichen. Waren die verschieden, ging
+        es ueber play_index() zuerst an den CLIP-ANFANG - bei Clip 0 also auf
+        0,000 s - und 100 ms spaeter per Timer ans eigentliche Ziel. Das war
+        der sichtbare Ruecksprung auf den Anfang beim Steppen ueber eine
+        Clipgrenze.
+
+        Der Umweg stammt aus der Playlist-Zeit. GES hat EINE durchgehende
+        Zeitachse, und seek_global_raw() trifft die Stelle direkt.
         """
         if not self.boundaries:
             return
@@ -692,50 +689,15 @@ class VideoEditorWidget(QWidget):
         if wanted_s < 0:
             wanted_s = 0.0
         elif wanted_s >= total:
-            # Wenn wir ans Ende oder darüber hinaus wollen, gehen wir zum Ende des letzten Videos
-            wanted_s = total
-            clip_idx = len(self.boundaries) - 1
-            offset_prev = self.boundaries[clip_idx-1] if clip_idx > 0 else 0.0
-            local_s = self.multi_durations[clip_idx] - 0.001  # Kurz vor das Ende setzen
-        else:
-            # Normaler Fall: finde den Clip-Index
-            clip_idx = 0
-            offset_prev = 0.0
-            for i, bound_val in enumerate(self.boundaries):
-                if wanted_s < bound_val:
-                    clip_idx = i
-                    break
-                offset_prev = bound_val
-            local_s = wanted_s - offset_prev
+            # Ans Ende oder darueber hinaus: kurz VOR das Ende, wie bisher.
+            wanted_s = max(0.0, total - 0.001)
 
-        # Aktueller Playlist-Index:
-        current_idx = self._backend.index()
-
-        if current_idx == clip_idx:
-            # Gleicher Clip => direkt seek
-            try:
-                self._backend.seek_local(local_s)
-                self._backend.set_paused(True)
-                self.is_playing = False
-            except SystemError as e:
-                print(f"[WARN] seek_global: player refused to seek => {e}")
-        else:
-            # Clip-Wechsel => Index setzen + Delay
-            self._backend.play_index(clip_idx)
-
-            def do_seek():
-                if self._backend.count() == 0:
-                    return
-                if self._backend.index() < 0:
-                    return
-                try:
-                    self._backend.seek_local(local_s)
-                    self._backend.set_paused(True)
-                    self.is_playing = False
-                except SystemError as e:
-                    print(f"[WARN] seek_global: player refused to seek => {e}")
-
-            QTimer.singleShot(100, do_seek)
+        try:
+            self._backend.seek_global_raw(wanted_s)
+            self._backend.set_paused(True)
+            self.is_playing = False
+        except SystemError as e:
+            print(f"[WARN] seek_global: player refused to seek => {e}")
 
 
     # -----------------------------------------
@@ -791,42 +753,25 @@ class VideoEditorWidget(QWidget):
             self.is_playing = False
 
         else:
-            # => kein Schnitt am Anfang => normaler Sprung an Clip=0, 0s
-            self._backend.play_index(0)
-
-            def do_seek_zero():
-                if self._backend.count() == 0:
-                    return
-                if self._backend.index() < 0:
-                    return
-
-                try:
-                    self._backend.seek_local(0)
-                    self._backend.set_paused(True)
-                    self.is_playing = False
-                except SystemError as e:
-                    print(f"[WARN] stop(): player refused to seek => {e}")
-
-            QTimer.singleShot(50, do_seek_zero)
+            # => kein Schnitt am Anfang => an den Anfang des ersten Videos.
+            # Frueher play_index(0) und 50 ms spaeter seek_local(0) - beide
+            # sprangen an dieselbe Stelle.
+            try:
+                self._backend.play_index(0)
+                self._backend.set_paused(True)
+                self.is_playing = False
+            except SystemError as e:
+                print(f"[WARN] stop(): player refused to seek => {e}")
 
     def get_current_global_time(self) -> float:
-        """
-        Gibt die 'globale' Zeit (in Sekunden) über alle Clips zurück.
-        Beispiel: wenn wir im 2. Clip sind, der erste Clip war 60s lang 
-        und im 2. Clip sind wir gerade bei Sekunde 10 => Rückgabe = 70.
-        """
-        clipIndex = self._backend.index()
-        local_s   = self._backend.position()
-        if clipIndex < 0:
-            return 0.0
+        """Globale Zeit in Sekunden ueber alle Clips.
 
-        # offset_prev = boundaries[clipIndex - 1] (0.0 wenn clipIndex==0)
-        if clipIndex == 0:
-            offset_prev = 0.0
-        else:
-            offset_prev = self.boundaries[clipIndex - 1]
-    
-        return offset_prev + local_s
+        Eine einzige Abfrage im Backend. Frueher wurden index() und
+        position() getrennt abgefragt und addiert - das sind zwei
+        Messungen, und liefen sie auseinander, sprang das Ergebnis um
+        eine ganze Cliplaenge.
+        """
+        return self._backend.position_global()
         
         
         # -------- Helpers: Speed / Zoom / Pan --------
