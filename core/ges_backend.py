@@ -219,6 +219,10 @@ class GesPlayerBackend:
         # die Antwort, wenn eine Abfrage ins Leere laeuft - siehe
         # _position_ns() und _position_ns_sicher().
         self._letzte_position_ns = 0
+        # Laeuft gerade ein Sprung? Solange antwortet _position_ns_sicher()
+        # mit dem Sprungziel statt zu messen - siehe _seek_ns().
+        self._seek_laeuft = False
+        self._seek_seit = 0.0
         self._sink = None
         self._anzeige = None      # _AppsinkAnzeige, wenn Qt malt
         # Ist ein Rueckruf da, malt Qt die Bilder selbst. Er muss VOR
@@ -380,8 +384,13 @@ class GesPlayerBackend:
                                    "(z.B. GoPro-Telemetrie) - Bild und Ton sind davon nicht betroffen")
                     continue
                 self._note(f"Warnung: {text}")
+            elif msg.type == Gst.MessageType.ASYNC_DONE:
+                # Der Sprung ist durch. Ab jetzt liefert query_position die
+                # neue Stelle, und es muss nicht mehr maskiert werden.
+                self._seek_laeuft = False
             elif msg.type == Gst.MessageType.EOS:
                 self._paused = True
+                self._seek_laeuft = False
                 if self._end_callback:
                     self._end_callback()
 
@@ -780,12 +789,48 @@ class GesPlayerBackend:
         self._letzte_position_ns = pos
         return pos
 
-    def _position_ns_sicher(self):
-        """Wie _position_ns, faellt aber auf die letzte bekannte Stelle zurueck.
+    # Laenger als so wird ein Sprung nie als "laeuft noch" behandelt. Es ist
+    # dieselbe Sekunde, die frueher blockierend abgewartet wurde. Der Deckel
+    # ist die Absicherung fuer den Fall, dass ASYNC_DONE ausbleibt - ohne ihn
+    # stuende die Zeitanzeige still, bis der naechste Sprung kommt.
+    SEEK_DECKEL_S = 1.0
 
-        Nach einem Sprung ist die Stelle bekannt, auch wenn die Pipeline noch
-        einen Moment braucht, bis sie sie meldet: _seek_ns() traegt das Ziel
-        gleich hier ein.
+    def _seek_laeuft_noch(self):
+        if not self._seek_laeuft:
+            return False
+        if time.time() - self._seek_seit > self.SEEK_DECKEL_S:
+            self._seek_laeuft = False
+            return False
+        return True
+
+    def _position_ns_sicher(self):
+        """Die Stelle, an der wir stehen SOLLEN.
+
+        Laeuft gerade ein Sprung, ist das sein Ziel - und zwar ohne zu messen.
+        Frueher wartete _seek_ns() blockierend auf das Ende des Sprungs, damit
+        die naechste Messung schon die neue Stelle liefert. Dieses Warten ist
+        weg (bis zu einer Sekunde Stillstand im Hauptthread); an seine Stelle
+        tritt diese Maskierung. Ohne sie lieferte jede Abfrage direkt nach
+        einem Sprung noch die ALTE Stelle, und der Stepper rechnete von dort
+        aus weiter - er machte denselben Schritt ein zweites Mal.
+
+        Sonst wird gemessen, und schlaegt die Messung fehl, gilt die letzte
+        bekannte Stelle.
+
+        Wer an die LAUFENDE Wiedergabe andocken will, braucht statt dessen
+        _position_ns_frisch().
+        """
+        if self._seek_laeuft_noch():
+            return self._letzte_position_ns
+        pos = self._position_ns()
+        return self._letzte_position_ns if pos is None else pos
+
+    def _position_ns_frisch(self):
+        """Die GEMESSENE Stelle, ohne Ruecksicht auf einen laufenden Sprung.
+
+        Fuer alles, was auf die aktuelle Stelle springt, um von dort
+        weiterzumachen: beim Abspielen ist das Ziel eines eben abgesetzten
+        Sprungs schon ueberholt, und ein Sprung dorthin ginge zurueck.
         """
         pos = self._position_ns()
         return self._letzte_position_ns if pos is None else pos
@@ -817,6 +862,25 @@ class GesPlayerBackend:
         return Gst.SeekFlags(f)
 
     def _seek_ns(self, pos_ns, flush=True):
+        # Kein zweiter Sprung, solange der erste noch laeuft.
+        #
+        # GStreamer rechnet den neuen sonst gegen ein Segment, das noch zum
+        # alten gehoert, und weist ihn ab:
+        #   gst_segment_do_seek: assertion 'start <= stop' failed
+        # Ein abgewiesener Sprung findet nicht statt. Das Bild bleibt stehen,
+        # wo es war - und liegt das nach einem gerade gesetzten Schnitt
+        # ausserhalb der Timeline, ist es schwarz. Nachgestellt am 31.08.2026:
+        # End-Cut setzen, danach GotoEnd.
+        #
+        # Ueberlappen tun Spruenge selten: Stepper, GotoEnd und Play setzen je
+        # einen einzelnen ab. Wo es doch vorkommt - ein Sprung kurz nach dem
+        # Neubau der Timeline, die dabei selbst einen absetzt -, wird auf das
+        # Ende des laufenden gewartet. Also so wie frueher, aber nur in diesem
+        # Fall und nicht mehr nach JEDEM Sprung.
+        if self._seek_laeuft_noch():
+            self._pipeline.get_state(Gst.SECOND)
+            self._seek_laeuft = False
+
         pos_ns = max(0, min(int(pos_ns), max(0, self._total_ns - 1)))
         # Ab hier ist die Stelle bekannt, auch wenn die Pipeline noch ein paar
         # Millisekunden braucht, bis sie sie meldet.
@@ -832,9 +896,15 @@ class GesPlayerBackend:
             self._pipeline.seek(self._rate, Gst.Format.TIME, flags,
                                 Gst.SeekType.SET, pos_ns,
                                 Gst.SeekType.NONE, -1)
-        # Auf das Ende des Seeks warten, sonst liefert query_position noch
-        # die alte Stelle und das Widget rechnet mit einem veralteten Wert.
-        self._pipeline.get_state(Gst.SECOND)
+        # Frueher stand hier get_state(Gst.SECOND) - ein blockierendes Warten
+        # auf das Ende des Sprungs, bis zu einer Sekunde Stillstand im
+        # Hauptthread, und das bei JEDEM Sprung. Stattdessen wird nur
+        # vermerkt, dass ein Sprung laeuft; ASYNC_DONE auf dem Bus loescht den
+        # Vermerk wieder (siehe _drain_bus), und solange er steht, antwortet
+        # _position_ns_sicher() mit dem Sprungziel statt mit einer Messung,
+        # die noch die alte Stelle liefern wuerde.
+        self._seek_laeuft = True
+        self._seek_seit = time.time()
 
     # ------------------------------------------------------------------
     # Lebenszyklus
@@ -960,6 +1030,7 @@ class GesPlayerBackend:
         self._total_ns = 0
         self._final_total_ns = 0
         self._preview_fps = 0.0
+        self._seek_laeuft = False
         self._pipeline.set_state(Gst.State.READY)
         self._paused = True
 
@@ -1052,9 +1123,15 @@ class GesPlayerBackend:
         self._seek_ns(self._position_ns_sicher() + (delta if forward else -delta))
 
     def set_rate(self, rate):
+        """Abspielgeschwindigkeit setzen.
+
+        Gesprungen wird auf die GEMESSENE Stelle, nicht auf ein laufendes
+        Sprungziel: beim Abspielen ist dieses Ziel schon ueberholt, und der
+        Sprung ginge ein paar Bilder zurueck.
+        """
         self._rate = float(rate) if rate else 1.0
         if self._assets:
-            self._seek_ns(self._position_ns_sicher())
+            self._seek_ns(self._position_ns_frisch())
 
     def rate(self):
         return self._rate
@@ -1374,8 +1451,10 @@ class GesPlayerBackend:
             self._blick_timer.start(self.BLICK_AUFFRISCHEN_MS)
 
     def _blick_auffrischen(self):
+        # Auch hier die gemessene Stelle: aufgefrischt wird da, wo das Bild
+        # gerade steht. Siehe set_rate() zur Begruendung.
         try:
-            self._seek_ns(self._position_ns_sicher())
+            self._seek_ns(self._position_ns_frisch())
         except Exception as exc:
             self._note(f"Vorschaubild nicht aufgefrischt: {exc}")
 
