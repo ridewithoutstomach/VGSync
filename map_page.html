@@ -534,7 +534,8 @@
         })
       });
 
-      initModify();
+      // initModify() wird NICHT mehr hier gerufen, sondern erst in
+      // enableMoveMode(true). Begruendung dort.
 
       map.on("singleclick", function(evt){
         if(addNewPointMode){
@@ -650,8 +651,30 @@
      * 5) initModify => Move
      ***********************************************************/
     function initModify(){
+      /* WICHTIG: features, NICHT source.
+       *
+       * Mit `source:` haengt sich ol.interaction.Modify an die Quelle und
+       * bekommt jede Aenderung und jede Entfernung eines Punktes gemeldet.
+       * Ihre Buchhaltung dazu ist teuer - removeFeatureSegmentData_() in
+       * ol.js geht dafuer JEDES MAL den gesamten eigenen Index durch und legt
+       * ihn vorher noch einmal als Kopie an:
+       *
+       *   removeFeatureSegmentData_(t){ const e=this.rBush_, i=[];
+       *     e.forEach(function(e){ t===e.feature && i.push(e) }); ... }
+       *
+       * Bei 17000 GPX-Punkten heisst das:
+       *   - Karte neu laden  -> 17000 Durchlaeufe ueber 17000 Eintraege,
+       *                         gemessen 14 bis 17 Sekunden
+       *   - End-Cut          -> mark_range_in_red() faerbt 16000 Punkte um,
+       *                         also nochmal 16000 solcher Durchlaeufe.
+       *                         Die Karte stand danach still.
+       *
+       * Mit `features:` und einer eigenen Liste hoert sie die Quelle gar
+       * nicht mehr ab. Die Liste wird hier frisch aus den aktuellen Punkten
+       * gebaut - initModify() wird nur noch aus enableMoveMode(true) gerufen.
+       */
       modifyInteraction= new ol.interaction.Modify({
-        source: vectorLayer.getSource()
+        features: new ol.Collection(vectorLayer.getSource().getFeatures())
       });
       modifyInteraction.on("modifyend", function(evt){
         let arr= evt.features.getArray();
@@ -674,12 +697,24 @@
     function enableMoveMode(enable){
       moveMode= enable;
       let b= document.getElementById("moveBtn");
-      if(!map || !modifyInteraction) return;
+      if(!map) return;
       if(moveMode){
+        // Erst jetzt anlegen, und zwar ueber die Punkte, die GERADE da sind.
+        // Solange der Knopf aus ist, gibt es diese Buchhaltung gar nicht -
+        // siehe initModify().
+        if(modifyInteraction){
+          map.removeInteraction(modifyInteraction);
+        }
+        initModify();
         map.addInteraction(modifyInteraction);
         b.style.backgroundColor="rgba(255,100,100,0.5)";
       } else {
-        map.removeInteraction(modifyInteraction);
+        if(modifyInteraction){
+          map.removeInteraction(modifyInteraction);
+          // Wegwerfen, nicht nur abhaengen: sonst blieben die Zuhoerer an den
+          // 17000 Punkten stehen und die Ersparnis waere keine.
+          modifyInteraction= null;
+        }
         b.style.backgroundColor="rgba(200,200,200,0.5)";
       }
     }
