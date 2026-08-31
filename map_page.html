@@ -854,6 +854,13 @@
           return;
         }
 
+        /* Erst alles bauen, dann in EINEM Zug einfuegen.
+         * addFeature() je Punkt loest jedes Mal ein Ereignis aus und macht
+         * den raeumlichen Index der Quelle ungueltig - bei 17000 Punkten
+         * 17000-mal. addFeatures() macht es einmal.
+         */
+        let neueFeatures = [];
+
         for (let feat of routeGeoJson.features) {
           let g = feat.geometry;
           let p = feat.properties || {};
@@ -863,23 +870,19 @@
             let coords = g.coordinates.map(c => ol.proj.fromLonLat(c));
             let lineF = new ol.Feature({
               geometry: new ol.geom.LineString(coords),
-			  color: normalizeColor(p.color || "black")
-              
+              color: normalizeColor(p.color || "black")
             });
-            vectorLayer.getSource().addFeature(lineF);
             updateFeatureStyle(lineF);
-          } 
+            neueFeatures.push(lineF);
+          }
           else if (g.type === "Point") {
             let coords = ol.proj.fromLonLat(g.coordinates);
             let idx = p.index;
             let sid = p.stable_id;
 
-            
-			let rawColor = p.color || "black";
-            let color = rawColor;
-
+            let color = p.color || "black";
             let size = p.size || 4;
-  
+
             let f = new ol.Feature({
               geometry: new ol.geom.Point(coords),
               index: idx,
@@ -887,14 +890,16 @@
               color: color,
               size: size
             });
-            vectorLayer.getSource().addFeature(f);
-    
+
             if (idx !== undefined) featuresMapIndex[idx] = f;
             if (sid) featuresMapSid[sid] = f;
-    
+
             updateFeatureStyle(f);
+            neueFeatures.push(f);
           }
         }
+
+        vectorLayer.getSource().addFeatures(neueFeatures);
 
         if (doFit) {
           let ext = vectorLayer.getSource().getExtent();
@@ -952,25 +957,63 @@
       hideLoading();
     }
 
-    function updateFeatureStyle(feature){
-	  let c = normalizeColor(feature.get("color") || "black");
-	  let s = getSizeForFeature(feature);
-	  let geom = feature.getGeometry();
+    /* Stile werden GETEILT, nicht je Punkt neu gebaut.
+     *
+     * OpenLayers zeichnet einen Kreis-Stil einmal auf eine unsichtbare
+     * Flaeche und benutzt das Ergebnis wieder - der Zwischenspeicher dafuer
+     * haengt aber am Stil-OBJEKT. Bekam jeder Punkt sein eigenes, griff er
+     * nie: bei einer 5-Stunden-Route mit 17000 Punkten wurden 17000 Kreise
+     * einzeln gezeichnet, und zwar bei jedem Verschieben und Zoomen neu.
+     *
+     * Verschiedene Stile gibt es in Wahrheit nur eine Handvoll - schwarz,
+     * grau, rot, blau, gelb in wenigen Groessen. Die stehen hier drin und
+     * werden von allen Punkten gemeinsam benutzt.
+     *
+     * Umfaerben bleibt unveraendert moeglich: Farbe und Groesse stehen als
+     * EIGENSCHAFT am Punkt, und hier wird ein anderer gemeinsamer Stil
+     * zugewiesen. Ein bestehender Stil wird nie veraendert - sonst faerbten
+     * sich alle Punkte mit.
+     */
+    let styleCache = {};
 
-	  if (geom.getType() === "LineString") {
-		feature.setStyle(new ol.style.Style({
-		  stroke: new ol.style.Stroke({ color: c, width: 2 })
-		}));
-	  } else {
-		feature.setStyle(new ol.style.Style({
-		  image: new ol.style.Circle({
-			radius: s,
-			fill: new ol.style.Fill({ color: c }),
-			stroke: new ol.style.Stroke({ color: "#fff", width: 1 })
-		  })
-		}));
-	  }
-	}
+    function styleFuerPunkt(farbe, groesse){
+      let key = "p|" + farbe + "|" + groesse;
+      let st = styleCache[key];
+      if (!st) {
+        st = new ol.style.Style({
+          image: new ol.style.Circle({
+            radius: groesse,
+            fill: new ol.style.Fill({ color: farbe }),
+            stroke: new ol.style.Stroke({ color: "#fff", width: 1 })
+          })
+        });
+        styleCache[key] = st;
+      }
+      return st;
+    }
+
+    function styleFuerLinie(farbe){
+      let key = "l|" + farbe;
+      let st = styleCache[key];
+      if (!st) {
+        st = new ol.style.Style({
+          stroke: new ol.style.Stroke({ color: farbe, width: 2 })
+        });
+        styleCache[key] = st;
+      }
+      return st;
+    }
+
+    function updateFeatureStyle(feature){
+      let c = normalizeColor(feature.get("color") || "black");
+      let geom = feature.getGeometry();
+
+      if (geom.getType() === "LineString") {
+        feature.setStyle(styleFuerLinie(c));
+      } else {
+        feature.setStyle(styleFuerPunkt(c, getSizeForFeature(feature)));
+      }
+    }
 
 
     /***********************************************************
