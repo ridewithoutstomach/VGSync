@@ -4815,10 +4815,16 @@ class MainWindow(QMainWindow):
             #    if getattr(self, "action_show_endcut_warning", None) and self.action_show_endcut_warning.isChecked():
             #        self._show_endcut_popup(final_end_position)
 
-            # Mehrfacher Jump für exaktes Einrasten
-            QTimer.singleShot(10,  lambda: self.video_editor.seek_global(final_end_position))
-            QTimer.singleShot(100, lambda: self.video_editor.seek_global(final_end_position))
-            QTimer.singleShot(250, lambda: self.video_editor.seek_global(final_end_position))
+            # Ein Sprung genuegt. Frueher standen hier drei auf dasselbe
+            # Ziel (10/100/250 ms) - ein Notbehelf aus der Zeit, als Spruenge
+            # unzuverlaessig wirkten. GesPlayerBackend._seek_ns() wartet das
+            # Ende des Sprungs blockierend ab; danach ist nichts mehr
+            # nachzubessern, die beiden Wiederholungen kosteten nur je einen
+            # weiteren Pipeline-Neustart samt Wartezeit.
+            #
+            # Die kurze Verzoegerung bleibt: _handle_video_end_state() hat
+            # gerade pausiert, und der Sprung soll erst danach kommen.
+            QTimer.singleShot(10, lambda: self.video_editor.seek_global(final_end_position))
 
             print(f"[GOTO_END] jumped to {final_end_position:.3f}s (total={total_duration:.3f}, endcut={has_endcut})")
         except Exception as e:
@@ -5899,10 +5905,8 @@ class MainWindow(QMainWindow):
                     if self.action_show_endcut_warning.isChecked():
                         self._show_endcut_popup(final_end_position)
                     
-                    # Springe zum Endcut mit mehrfachen Sprüngen für Stabilität
+                    # Ein Sprung genuegt - siehe on_goto_video_end_clicked().
                     QTimer.singleShot(10, lambda: self.video_editor.seek_global(final_end_position))
-                    QTimer.singleShot(100, lambda: self.video_editor.seek_global(final_end_position))
-                    QTimer.singleShot(250, lambda: self.video_editor.seek_global(final_end_position))
                     
                 else:
                     # Kein Endcut - einfach am Ende bleiben
