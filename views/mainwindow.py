@@ -2161,13 +2161,25 @@ class MainWindow(QMainWindow):
     
     
     def on_set_begin_clicked(self):
-        current_local_s = self.video_editor.get_current_position_s()
-    
+        # get_current_position_s() liefert die GLOBALE Zeit ueber alle
+        # Videos hinweg - der Versatz der vorherigen Dateien steckt also
+        # schon darin. Frueher hiess die Groesse hier current_local_s und
+        # der Versatz wurde ein zweites Mal addiert; ab dem zweiten Video
+        # lag der Schnitt dadurch um die Laenge der vorherigen Videos zu
+        # weit. Bei zwei Dateien und dem Marker in der zweiten war das
+        # mehr als die Gesamtlaenge - der Schnitt nahm dann alles weg.
+        # Nachgestellt am 31.08.2026 mit zwei Dateien, Marker bei 00:43:58
+        # von 01:10:28: die ganze Zeitachse wurde schwarz.
+        #
+        # CutEnd hat den Fehler nicht, siehe EndManager.go_to_end() - dort
+        # wird derselbe Wert direkt als globale Zeit genommen.
+        global_video_s = self.video_editor.get_current_position_s()
+
         if self._autoSyncVideoEnabled:
             ret = QMessageBox.question(
                 self,
                 "Confirm Cut Begin",
-                f"Cut gpx and video before {current_local_s}s?\n"
+                f"Cut gpx and video before {global_video_s}s?\n"
                 "Press Yes to proceed, No to abort.",
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.No
@@ -2176,21 +2188,17 @@ class MainWindow(QMainWindow):
             ret = QMessageBox.question(
                 self,
                 "Confirm Cut Begin",
-                f"Cut video before {current_local_s}s?\n"
+                f"Cut video before {global_video_s}s?\n"
                 "Press Yes to proceed, No to abort.",
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.No
             )
-        
+
         if ret != QMessageBox.Yes:
             return
 
-        # Videozeit => global_video_s
-        if current_local_s < 0:
-            current_local_s = 0.0
-        vid_idx = self.video_editor.get_current_index()
-        offset_s = sum(self.video_durations[:vid_idx])
-        global_video_s = offset_s + current_local_s
+        if global_video_s < 0:
+            global_video_s = 0.0
         print(f"[DEBUG] set_begin => global_video_s={global_video_s:.2f}")
     
         # GPX-Bearbeitung nur bei AutoSync
