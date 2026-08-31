@@ -261,6 +261,10 @@ class GesPlayerBackend:
         self._overlay_export = None
         self._preview_w = 0
         self._preview_h = 0
+        # Bildrate, in der die Vorschau wirklich rechnet - siehe
+        # _limit_preview_size() und preview_fps(). 0 heisst "noch nicht
+        # ermittelt".
+        self._preview_fps = 0.0
         self._pipeline = GES.Pipeline()
         self._pipeline.set_timeline(self._timeline)
         self._build_sink()
@@ -489,6 +493,7 @@ class GesPlayerBackend:
                         f"video/x-raw,width={w},height={h},framerate={num}/{den}"))
             self._preview_w = w
             self._preview_h = h
+            self._preview_fps = float(num) / float(den)
             self._note(f"Vorschau rechnet in {w}x{h} bei {num/den:.2f} fps"
                        + (" (360)" if self._360_an else ""))
         except Exception as exc:
@@ -954,6 +959,7 @@ class GesPlayerBackend:
         self._overlays = []
         self._total_ns = 0
         self._final_total_ns = 0
+        self._preview_fps = 0.0
         self._pipeline.set_state(Gst.State.READY)
         self._paused = True
 
@@ -1039,7 +1045,9 @@ class GesPlayerBackend:
         return max(0.0, (self._current_raw_ns() - self._clip_start(i)) / NS)
 
     def step_frame(self, forward=True):
-        fps = self.fps() or 25.0
+        # Vorschaurate, nicht Quellrate: gesprungen wird um das, was man
+        # wirklich sieht. Siehe preview_fps().
+        fps = self.preview_fps() or 25.0
         delta = int(NS / fps)
         self._seek_ns(self._position_ns_sicher() + (delta if forward else -delta))
 
@@ -1072,6 +1080,31 @@ class GesPlayerBackend:
                 return stream
         except Exception:
             pass
+        return None
+
+    def preview_fps(self):
+        """Bildrate, in der die VORSCHAU rechnet - nicht die der Quelle.
+
+        Die Vorschau ist auf PREVIEW_MAX_FPS gedeckelt; liegt die Quelle
+        darunter, gilt die Quelle (siehe _limit_preview_size). Bei 25, 29,97
+        oder 30 fps sind beide Werte also gleich und es aendert sich nichts.
+
+        Ueber dem Deckel gehen sie auseinander: bei 60 fps zeigt die Vorschau
+        jedes zweite Quellbild. Ein Schritt um eine QUELL-Bilddauer bewegt das
+        sichtbare Bild dann nur bei jedem zweiten Mal. Wer ein Bild weiter
+        will, muss um eine Bilddauer der VORSCHAU weiter - deshalb rechnet der
+        Stepper mit dieser Rate.
+
+        Ist sie noch nicht ermittelt - _limit_preview_size() kann vorzeitig
+        aussteigen, wenn kein Videostrom da ist -, gilt die Quellrate,
+        gedeckelt. Nicht der Deckel allein: bei 25-fps-Material waere der
+        Schritt sonst zu klein.
+        """
+        if self._preview_fps > 0:
+            return self._preview_fps
+        quelle = self.fps() or 0.0
+        if quelle > 0:
+            return min(quelle, float(self.PREVIEW_MAX_FPS))
         return None
 
     def fps(self):

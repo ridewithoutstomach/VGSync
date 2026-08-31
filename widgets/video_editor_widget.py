@@ -563,6 +563,14 @@ class VideoEditorWidget(QWidget):
         """Bildrate des aktuellen Videos oder None."""
         return self._backend.fps()
 
+    def get_preview_fps(self):
+        """Bildrate, in der die Vorschau rechnet, oder None.
+
+        Wer im Bildraster der Anzeige rechnet - der Stepper -, braucht diese
+        und nicht get_fps(). Bei Material bis 30 fps sind beide gleich.
+        """
+        return self._backend.preview_fps()
+
     def get_video_size(self):
         """(Breite, Hoehe) des aktuellen Videos, (0, 0) wenn unbekannt."""
         return self._backend.video_size()

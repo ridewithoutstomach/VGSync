@@ -454,10 +454,20 @@ where the cut will really land."""
     # ------------------------------------------------------------------------
     def _get_current_fps(self) -> float:
         """
-        Bildrate des aktuellen Videos. Fallback 25.0, wenn der Player keine
-        liefert - siehe GesPlayerBackend.fps() in core/ges_backend.py.
+        Bildrate, in der die VORSCHAU rechnet. Fallback 25.0, wenn der Player
+        keine liefert - siehe GesPlayerBackend.preview_fps().
+
+        Nicht die Quellrate. Der Stepper zaehlt in Bildern, die man sieht, und
+        die Vorschau ist nach oben gedeckelt. Beide Groessen muessen dieselbe
+        sein: mit dieser Bilddauer wird hier entschieden, ob das naechste Bild
+        noch im Keep-Bereich liegt (_step_frame_forward/-backward) und wie weit
+        vor eine Kante gesprungen wird (_edge_seek_target). Rechnete der Player
+        in Vorschaubildern und diese Datei in Quellbildern, faende der Stepper
+        an den Schnittkanten die falsche Stelle.
+
+        Bei Material bis 30 fps sind beide Raten gleich.
         """
-        fps = self.video_editor.get_fps()
+        fps = self.video_editor.get_preview_fps()
         if fps and float(fps) > 0:
             return float(fps)
         return 25.0
