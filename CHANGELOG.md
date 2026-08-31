@@ -8,7 +8,166 @@ Versions up to and including 5.0 are documented in the GitHub releases only.
 
 ---
 
-## 6.0 – unreleased
+## 6.01 – 2026-08-31
+
+Nothing was added and nothing moved. This release is about the application
+getting out of the way, plus three defects that shipped with 6.0.
+
+### Fixed
+
+**Cut Begin cut too far into the video from the second file onwards**
+
+`get_current_position_s()` returns the GLOBAL time across all files, but the
+caller in `on_set_begin_clicked()` treated it as a time within the current clip
+and added the offset of the preceding files a second time. From the second video
+on, the cut was placed too late by the summed length of everything before it.
+With two files and the marker in the second one, the computed cut end could
+exceed the total length and the whole timeline went black.
+
+`EndManager.go_to_end()` and the sync path were never affected - they use the
+value directly. The same block sits commented out in `on_sync_clicked()`, so it
+had been noticed there once before and fixed only in that one place.
+
+**Cut End left the last frame of the raw video behind**
+
+Cut marks come from `real_total_duration`, which is read from the mdhd box of
+the file. The preview computes its keep ranges against `asset.get_duration()`
+from GES. The two disagree by a fraction of a millisecond, so an end cut ended
+just short of the raw end - and `_compute_keeps()` appended what was left as a
+keep range of its own. That sliver was the very last frame of the raw video, and
+because it was the final piece of the preview, *Go to End* and playback landed
+on it instead of on the frame before the cut.
+
+Keep ranges shorter than 10 ms are no longer created. At any frame rate up to
+100 fps a range that short cannot hold a single complete frame, so it can only
+ever be a rounding remainder between the two sources.
+
+**An end cut could leave the map unusable**
+
+See the map entry below - it is the same cause.
+
+### Changed
+
+**The map**
+
+`ol.interaction.Modify`, the machinery behind the map's `Move` button, was
+created at startup with `source:` and therefore listened to the point source for
+the whole session, whether or not `Move` was ever pressed. Every change and
+every removal of a point is reported to it, and its bookkeeping walks its entire
+internal index for each one - `removeFeatureSegmentData_()` in `ol.js` builds a
+full copy of the index and scans it linearly.
+
+With a five-hour track at 1 Hz - about 17,000 points - that meant:
+
+- reloading the map after a cut, a deletion or a GoPro extraction: **14 to 17
+  seconds**, measured inside the map itself
+- an end cut, which recolours every point after the cut through
+  `mark_range_in_red()`: 16,000 of those scans, one after another. The map
+  stopped responding.
+
+It is now created when `Move` is switched on, over its own feature list rather
+than over the source, and discarded when `Move` is switched off. In normal use
+that index does not exist at all.
+
+Two further changes to the map, both in `map_page.html`:
+
+- Point styles are shared instead of built per point. OpenLayers caches the
+  rendered circle image on the style OBJECT, so 17,000 individual styles meant
+  the cache never applied and 17,000 circles were drawn separately - at load and
+  again on every pan and zoom. There are only a handful of distinct styles.
+- Features are inserted with one `addFeatures()` call instead of `addFeature()`
+  per point.
+
+**The elevation and speed chart no longer stutters the video**
+
+`ChartWidget.paintEvent()` recomputed everything on every repaint - collecting
+elevation and speed for all points, finding minima and maxima, building two
+point lists, then drawing one line per point. At 17,000 points that is about
+35,000 drawing calls, five times a second, in the same thread that paints the
+video frames. Measured offscreen: **25 ms at 17,329 points, 42 ms at 28,800**.
+A video frame lasts 33 ms at 30 fps.
+
+While the video plays, none of the curves change - only the marker moves. The
+curves are now drawn once into an image and reused; each tick copies that image
+and draws the marker on top. Measured: **0.06 ms**. The image is rebuilt when
+the data, size, zoom, offset, thresholds, sync range or GPX-video shift change.
+
+**One timing loop instead of two**
+
+The time display had its own 200 ms timer in `VideoEditorWidget` that queried
+the player position a second time and ran against the marker timer. Marker and
+time display could therefore show two different points in the same video. The
+display is now refreshed from the marker tick with the position already
+determined there.
+
+**The stepper goes straight to its target**
+
+Three things made stepping unsteady, all of them left over from the playlist
+model of the previous video engine:
+
+- `_position_ns()` returned `0` when the position query failed - which happens
+  regularly during a seek or a state change. `0` is also a valid position,
+  namely the beginning, so the caller could not tell the two apart, and that `0`
+  reached the timeline marker. It now returns `None`, and callers fall back to
+  the last known position.
+- `seek_global()` split the target into clip index plus local second, compared
+  that with the player's live index and, when they differed, first seeked to the
+  START of the clip - position 0.000 s for the first clip - and only 100 ms
+  later to the actual target. That was the visible jump to the beginning when
+  stepping across a clip boundary. GES has one continuous timeline; the seek now
+  goes straight there. `show_first_frame_at_index()` and *Go to Start* did the
+  same thing twice as well, both times to the identical position.
+- `get_current_global_time()` combined two separate position queries - the
+  offset from one, the local time from the other. If they drifted apart, the
+  result jumped by a whole clip length. It is one query now.
+
+**A 200 ms timer from the mpv era is gone**
+
+`VideoCutManager` checked five times a second whether the player had wandered
+into a cut range and pushed it out. GES removes cut ranges from the timeline
+physically, so a cut position cannot be reached at all - the timer could only
+fire on a distorted position reading, and then it moved the picture on its own.
+Its repair mechanisms went with it, including a monkey patch that disabled the
+timeline marker for 50 ms at a time. About 150 lines.
+
+**Seeks no longer block the interface**
+
+Every seek waited for its own completion with a one second cap, in the GUI
+thread. It now records that a seek is running and clears that on `ASYNC_DONE`
+from the bus; while it runs, the position query answers with the seek target
+instead of a measurement that would still return the old position. A seek that
+would overtake a running one still waits - GStreamer rejects it otherwise and
+the picture stays where it was.
+
+*Go to End* and the end-cut handler fired the same seek three times, at 10, 100
+and 250 ms. Once is enough.
+
+**Dragging the timeline marker**
+
+Every mouse movement triggered its own seek. At most one per 60 ms now; the last
+position is always reached.
+
+**Single-frame stepping above 30 fps**
+
+The preview is capped at 30 fps. `step_frame()` computed its step from the
+SOURCE frame rate, so with 50 or 60 fps material a step was less than one
+visible frame and only every second press changed the picture. The stepper now
+works in the frame rate of the preview - as does the edge arithmetic in
+`StepManager`, so both use the same duration. At 25, 29.97 or 30 fps nothing
+changes.
+
+**Finding the nearest GPX point**
+
+`get_closest_index_for_time()` scanned all timestamps on every call, twice per
+200 ms tick - 0.74 ms at 17,329 points. The timestamps are ascending, so a
+binary search does the same in 0.0004 ms. Whether they really are ascending is
+checked while the list is built; points without a timestamp get 0.0, and if that
+breaks the order the linear scan is used as before. 24,020 cases were checked
+against the old search with no difference in result.
+
+---
+
+## 6.0 – 2026-08-30
 
 ### Changed
 
