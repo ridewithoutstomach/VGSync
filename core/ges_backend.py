@@ -215,6 +215,10 @@ class GesPlayerBackend:
         self._rate = 1.0
         self._paused = True
         self._total_ns = 0
+        # Die letzte Stelle, die die Pipeline wirklich gemeldet hat. Sie ist
+        # die Antwort, wenn eine Abfrage ins Leere laeuft - siehe
+        # _position_ns() und _position_ns_sicher().
+        self._letzte_position_ns = 0
         self._sink = None
         self._anzeige = None      # _AppsinkAnzeige, wenn Qt malt
         # Ist ein Rueckruf da, malt Qt die Bilder selbst. Er muss VOR
@@ -619,7 +623,7 @@ class GesPlayerBackend:
         """Timeline neu aufbauen. Die Abspielstelle bleibt erhalten."""
         if not self._assets:
             return
-        merken = self._position_ns() if self._final_total_ns else 0
+        merken = self._position_ns_sicher() if self._final_total_ns else 0
         roh_vorher = self._final_to_raw(merken) if self._keeps else 0
 
         # Waehrend des Umbaus nicht abspielen. Clips zu entfernen und
@@ -736,13 +740,34 @@ class GesPlayerBackend:
         """Wo wir im ROHMATERIAL stehen - das ist die Sprache der App."""
         if not self._keeps:
             return 0
-        return self._final_to_raw(self._position_ns())
+        return self._final_to_raw(self._position_ns_sicher())
 
     def _position_ns(self):
+        """Stelle in der Timeline - oder None, wenn die Pipeline nicht antwortet.
+
+        NICHT 0. Die 0 ist eine gueltige Stelle, naemlich der Anfang, und
+        liesse sich von "weiss nicht" nicht unterscheiden. Waehrend eines
+        Sprungs oder eines Zustandswechsels scheitert die Abfrage
+        regelmaessig; die 0 lief dann durch _final_to_raw und _clip_at bis in
+        die Zeitanzeige, und der Marker stand fuer einen Takt am Anfang.
+
+        Wer nur eine brauchbare Zahl braucht, nimmt _position_ns_sicher().
+        """
         ok, pos = self._pipeline.query_position(Gst.Format.TIME)
         if not ok or pos < 0:
-            return 0
+            return None
+        self._letzte_position_ns = pos
         return pos
+
+    def _position_ns_sicher(self):
+        """Wie _position_ns, faellt aber auf die letzte bekannte Stelle zurueck.
+
+        Nach einem Sprung ist die Stelle bekannt, auch wenn die Pipeline noch
+        einen Moment braucht, bis sie sie meldet: _seek_ns() traegt das Ziel
+        gleich hier ein.
+        """
+        pos = self._position_ns()
+        return self._letzte_position_ns if pos is None else pos
 
     # Ab diesem Tempo wird nur noch grob dekodiert.
     TRICKMODE_AB_TEMPO = 2.0
@@ -772,6 +797,9 @@ class GesPlayerBackend:
 
     def _seek_ns(self, pos_ns, flush=True):
         pos_ns = max(0, min(int(pos_ns), max(0, self._total_ns - 1)))
+        # Ab hier ist die Stelle bekannt, auch wenn die Pipeline noch ein paar
+        # Millisekunden braucht, bis sie sie meldet.
+        self._letzte_position_ns = pos_ns
         trick = self._trick_flags()
         # Bildgenau und "grob dekodieren" schliessen sich aus.
         flags = trick if trick else Gst.SeekFlags.ACCURATE
@@ -968,12 +996,12 @@ class GesPlayerBackend:
     def step_frame(self, forward=True):
         fps = self.fps() or 25.0
         delta = int(NS / fps)
-        self._seek_ns(self._position_ns() + (delta if forward else -delta))
+        self._seek_ns(self._position_ns_sicher() + (delta if forward else -delta))
 
     def set_rate(self, rate):
         self._rate = float(rate) if rate else 1.0
         if self._assets:
-            self._seek_ns(self._position_ns())
+            self._seek_ns(self._position_ns_sicher())
 
     def rate(self):
         return self._rate
@@ -1269,7 +1297,7 @@ class GesPlayerBackend:
 
     def _blick_auffrischen(self):
         try:
-            self._seek_ns(self._position_ns())
+            self._seek_ns(self._position_ns_sicher())
         except Exception as exc:
             self._note(f"Vorschaubild nicht aufgefrischt: {exc}")
 
