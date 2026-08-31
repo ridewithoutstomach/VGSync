@@ -574,6 +574,22 @@ class GesPlayerBackend:
     def _raw_total_ns(self):
         return self._assets[-1][2] + self._assets[-1][3] if self._assets else 0
 
+    # Kuerzer als das behalten wir gar nichts erst. In 10 ms passt bei jeder
+    # Bildrate bis 100 fps nicht ein einziges vollstaendiges Bild - ein solches
+    # Stueck kann also nichts zeigen.
+    #
+    # Es entsteht auch nicht durch einen Schnitt des Benutzers, sondern durch
+    # zwei verschiedene Laengenquellen: die Schnittmarken der App kommen aus
+    # der mdhd-Box (framerate.dauer(), real_total_duration), die Rohlaenge hier
+    # aus asset.get_duration() von GES. Die beiden gehen um Millisekunden
+    # auseinander. Bei einem End-Cut endet der Schnitt deshalb ein Stueckchen
+    # VOR dem Rohende, und dahinter blieb bisher ein Splitter stehen - das
+    # allerletzte Bild des Rohvideos. Weil dieser Splitter das letzte Stueck
+    # der Vorschau war, landete jeder Sprung ans Ende dort, statt auf dem Bild
+    # vor dem End-Cut. Nachgestellt am 31.08.2026: 2 Schnitte ergaben
+    # 3 Stuecke, roh 120.834s gegen Schnittende 120.833s.
+    SPLITTER_NS = NS // 100
+
     def _compute_keeps(self):
         """Was vom Rohmaterial uebrig bleibt, plus die Position im Ergebnis."""
         total = self._raw_total_ns()
@@ -585,11 +601,11 @@ class GesPlayerBackend:
             s, e = int(a * NS), int(b * NS)
             if s > pos:
                 dur = min(s, total) - pos
-                if dur > 0:
+                if dur > self.SPLITTER_NS:
                     self._keeps.append((pos, pos + dur, final))
                     final += dur
             pos = max(pos, min(e, total))
-        if pos < total:
+        if total - pos > self.SPLITTER_NS:
             self._keeps.append((pos, total, final))
             final += total - pos
         self._final_total_ns = final

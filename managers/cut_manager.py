@@ -20,7 +20,7 @@
 
 # managers/cut_manager.py
 from PySide6.QtWidgets import QMessageBox
-from PySide6.QtCore import QObject, QTimer, Signal
+from PySide6.QtCore import QObject, Signal
 
 class VideoCutManager(QObject):
     cutsChanged = Signal(float)
@@ -36,26 +36,9 @@ class VideoCutManager(QObject):
         # Gespeichert als gerundete (start, end)-Schluessel, damit
         # _cut_intervals selbst unveraendert bleibt.
         self._hard_cuts = set()
-        self._skip_timer = QTimer(self)
-        self._skip_timer.timeout.connect(self._check_cut_skip)
-        self._skip_timer.start(200)
-
         self.video_durations = []
-        self._last_skip_target = None
-        self._orig_marker_func = None
         
         
-    def stop_skip_timer(self):
-        """Stoppt den 200ms-Timer, sodass _check_cut_skip nicht mehr aufgerufen wird."""
-        if self._skip_timer.isActive():
-            self._skip_timer.stop()
-
-    def start_skip_timer(self):
-        """Startet den Timer wieder, damit _check_cut_skip erneut aktiv wird."""
-        if not self._skip_timer.isActive():
-            self._skip_timer.start(200)
-            
-
     def set_video_durations(self, durations_list):
         self.video_durations = durations_list
 
@@ -244,59 +227,6 @@ class VideoCutManager(QObject):
         self._sync_timeline_hard_cuts()
         return removed
 
-    def _check_cut_skip(self):
-        """
-        Wird periodisch (200ms-Timer) waehrend der Wiedergabe aufgerufen und
-        laesst den Player ueber geschnittene (schwarze) Bereiche hinwegspringen,
-        damit der User nur das Ergebnis seines Schnitts sieht.
-
-        WICHTIG: Der End-Cut (ein Schnitt, der bis ans Timeline-Ende reicht)
-        wird hier bewusst NICHT behandelt. Das uebernimmt ausschliesslich
-        check_and_handle_video_end() im MainWindow (Sprung ans Ende des letzten
-        Keep-Segments). So gibt es am Videoende keine Konkurrenz zwischen beiden
-        Mechanismen.
-        """
-        # 0) Kann die Vorschau selbst schneiden, gibt es hier nichts zu tun.
-        #    Dieser Mechanismus stammt aus der mpv-Zeit: dort lief IMMER das
-        #    ganze Rohmaterial, und der Player musste ueber die geschnittenen
-        #    Bereiche geschoben werden. GES entfernt die Schnitte physisch aus
-        #    der Timeline (_rebuild in core/ges_backend.py) - eine geschnittene
-        #    Stelle kann also gar nicht mehr angefahren werden.
-        #
-        #    Feuern KANN er trotzdem, naemlich wenn die gemeldete Position
-        #    falsch ist. Dann springt er, obwohl niemand springen wollte, und
-        #    genau das ist als Zucken zu sehen.
-        if self.video_editor.supports_preview_cuts():
-            return
-
-        # 1) Prüfen, ob der Player überhaupt ein File abspielt
-        if not self._has_active_file():
-            return  # => Kein Skip, da kein aktives Video
-
-        current_global_s = self._get_current_global_time()
-        skip_target = self._find_skip_target(current_global_s)
-
-        # 2) End-Cut aussparen: liegt das Sprungziel praktisch am Timeline-Ende,
-        #    ueberlassen wir das dem End-Handler und springen hier nicht.
-        if skip_target is not None:
-            video_total = sum(self.video_durations) if self.video_durations else 0.0
-            if video_total > 0.0 and skip_target >= video_total - 0.05:
-                skip_target = None
-
-        if skip_target is not None:
-            if self._is_repeated_skip_target(skip_target):
-                return
-
-            was_playing = self.video_editor.is_playing
-            self._set_global_time_s(skip_target)
-            self._last_skip_target = skip_target
-
-            # NUR wenn wir wirklich vorher gespielt haben, wieder abspielen
-            if was_playing:
-                self._play_after_skip()
-        else:
-            self._last_skip_target = None
-
     def _has_active_file(self) -> bool:
         """Prüft, ob der Player noch eine gültige Datei (playlist/current_index) geladen hat."""
         # 1) Hat der VideoEditor eine Playlist?
@@ -317,86 +247,9 @@ class VideoCutManager(QObject):
     
     
 
-    def _find_skip_target(self, current_s: float):
-        """
-        Falls current_s in einem cut-Intervall liegt (start_s <= current_s < end_s),
-        soll direkt ans Ende (end_s) gesprungen werden.
-        """
-        for (start_s, end_s) in self._cut_intervals:
-            if start_s <= current_s < end_s:
-                return end_s
-        return None
-
-    def _is_repeated_skip_target(self, skip_target: float) -> bool:
-        """
-        Verhindert doppeltes Springen an dieselbe Stelle in schneller Folge.
-        """
-        if self._last_skip_target is None:
-            return False
-        return abs(skip_target - self._last_skip_target) < 0.001
-    
-    
     def _get_current_global_time(self) -> float:
         return self.video_editor.get_current_position_s()
     
-    def _set_global_time_s(self, new_global_s: float):
-        """
-        Springt in die Timeline => new_global_s, 
-        macht sofort Pause, so dass 1 Frame sichtbar ist.
-        """
-        was_playing = self.video_editor.is_playing  # Merke, ob das Video vorher lief
-        # 1) Sprung in der Timeline
-        self.video_editor.seek_global(new_global_s)
-        if not was_playing:
-            # 2) Pause => Freeze
-            self.video_editor.set_paused(True)
-        else:
-            self._play_after_skip()    
-            
-        # 3) Timeline-Update blocken
-        self._block_timeline_marker()
-    
-    
-
-    def _play_after_skip(self):
-        """
-        Wird nach dem Setzen der neuen Zeit aufgerufen, 
-        um (leicht verzögert) weiterzuspielen.
-        """
-        #return
-        
-        def _ensure_playing():
-            """Prüft, ob das Video läuft, und startet es falls nötig."""
-            if not self.video_editor.is_playing:
-                self.video_editor.set_paused(False)
-
-
-        from PySide6.QtCore import QTimer
-        #QTimer.singleShot(50, )
-        # 1) Normale Verzögerung für Sprünge innerhalb desselben Videos
-        QTimer.singleShot(50, _ensure_playing)
-
-        # 2) Falls ein Video-Wechsel stattfand, nochmals nachprüfen
-        QTimer.singleShot(500, _ensure_playing)
-    
-    def _block_timeline_marker(self):
-        if self._orig_marker_func is not None:
-            return
-        self._orig_marker_func = self.timeline.set_marker_position
-
-        def dummy_marker_position(pos: float):
-            pass
-
-        self.timeline.set_marker_position = dummy_marker_position
-
-        from PySide6.QtCore import QTimer
-        QTimer.singleShot(50, self._restore_timeline_marker)
-
-    def _restore_timeline_marker(self):
-        if self._orig_marker_func is not None:
-            self.timeline.set_marker_position = self._orig_marker_func
-            self._orig_marker_func = None
-
     def _emit_cuts_changed(self):
         total_cut = self.get_total_cuts()
         self.cutsChanged.emit(total_cut)

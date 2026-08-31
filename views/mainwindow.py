@@ -4751,7 +4751,6 @@ class MainWindow(QMainWindow):
             #    self.map_widget.highlight_gpx_point(self._last_map_idx, "#000000", 4, False)
             #    self._last_map_idx = None
             
-            self.cut_manager.stop_skip_timer()
 
         else:
             
@@ -4775,7 +4774,6 @@ class MainWindow(QMainWindow):
 
             # Optional: Einmalig Karte zentrieren
             ...
-            self.cut_manager.start_skip_timer()
     
     def on_stop(self):
         self.video_editor.stop()

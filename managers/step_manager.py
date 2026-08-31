@@ -440,8 +440,9 @@ where the cut will really land."""
 
         Eine Millisekunde reicht bei "out" NICHT: Schnittkanten liegen auf einer
         Bildgrenze (MarkB/MarkE kommen aus der Player-Position), man landet dann
-        auf dem ersten geloeschten Bild - und der 200-ms-Timer
-        VideoCutManager._check_cut_skip() schiebt einen von dort ans Cut-Ende.
+        auf dem ersten geloeschten Bild - also im geschnittenen Bereich, den man
+        gerade nicht sehen soll. Eine ganze Bilddauer trifft dagegen sicher das
+        letzte Bild davor.
         """
         eps = 1e-4
         if kind == "in":
