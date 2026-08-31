@@ -1362,6 +1362,12 @@ class MainWindow(QMainWindow):
         self.marker_timer.start(200)
 
         self.timeline.markerMoved.connect(self._on_timeline_marker_moved)
+
+        # Drossel fuer den Marker-Zug, siehe _on_timeline_marker_moved().
+        self._marker_zug_timer = QTimer(self)
+        self._marker_zug_timer.setSingleShot(True)
+        self._marker_zug_timer.timeout.connect(self._marker_zug_abgelaufen)
+        self._marker_zug_offen = None
         self.video_control.timeHMSSetClicked.connect(self.on_time_hms_set_clicked)
         
         self.gpx_widget.gpx_list.rowClickedInPause.connect(self._on_gpx_list_pause_clicked)
@@ -4854,8 +4860,38 @@ class MainWindow(QMainWindow):
             val = 1.0
         self.step_manager.set_step_multiplier(val)
 
+    # Beim Ziehen kommt zu JEDER Mausbewegung ein Wunsch herein
+    # (VideoTimelineWidget.mouseMoveEvent). Jeden davon anzuspringen hiesse,
+    # die Pipeline hundertfach zu leeren und neu zu dekodieren - und jeder
+    # dieser Spruenge wartet blockierend im GUI-Thread.
+    #
+    # Derselbe Wert wie beim 360-Schwenk, wo dasselbe Problem schon geloest
+    # ist: GesPlayerBackend.BLICK_AUFFRISCHEN_MS.
+    MARKER_ZUG_MS = 60
+
     def _on_timeline_marker_moved(self, new_time_s: float):
+        """Sprung zum gezogenen Marker, hoechstens alle MARKER_ZUG_MS.
+
+        Der zuletzt genannte Wunsch gewinnt, ueberholte werden verworfen, und
+        der letzte geht nie verloren - er wird nachgeholt, sobald die Sperre
+        faellt. Gebaut wie GesPlayerBackend._blick_auffrischen_anstossen().
+
+        Die Marker-LINIE laeuft davon unberuehrt sofort mit der Maus mit; die
+        zeichnet das Timeline-Widget selbst. Gedrosselt wird nur der Sprung
+        im Video.
+        """
+        if self._marker_zug_timer.isActive():
+            self._marker_zug_offen = new_time_s
+            return
+        self._marker_zug_offen = None
         self.video_editor.seek_global(new_time_s)
+        self._marker_zug_timer.start(self.MARKER_ZUG_MS)
+
+    def _marker_zug_abgelaufen(self):
+        if self._marker_zug_offen is not None:
+            ziel, self._marker_zug_offen = self._marker_zug_offen, None
+            self.video_editor.seek_global(ziel)
+            self._marker_zug_timer.start(self.MARKER_ZUG_MS)
         
     def _on_timeline_overlay_remove(self, start_s, end_s):
         self._overlay_manager.remove_overlay_interval(start_s, end_s)    
