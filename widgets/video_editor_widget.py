@@ -224,12 +224,12 @@ class VideoEditorWidget(QWidget):
         # Ende der Playlist => play_ended
         self._backend.set_end_callback(self.play_ended.emit)
 
-        # Du kannst z. B. die Zeitanzeige in einer Timer-Schleife updaten
-        self._time_timer = QTimer(self)
-        self._time_timer.timeout.connect(self._update_time_label)
-        self._time_timer.start(200)  # alle 200ms
-        
-        
+        # Die Zeitanzeige hat keinen eigenen Takt mehr. Sie wird von
+        # MainWindow.update_timeline_marker() aufgefrischt, siehe
+        # zeit_anzeigen(). Zwei Timer nebeneinander fragten die Position
+        # getrennt ab und liefen gegeneinander - Marker und Zeitanzeige
+        # zeigten dann zwei verschiedene Stellen desselben Videos.
+
         self._speed_shortcuts = []
 
         def _sc(seq, cb):
@@ -620,10 +620,6 @@ class VideoEditorWidget(QWidget):
         die Anwendung nach dem Schliessen des Fensters weiter.
         """
         try:
-            self._time_timer.stop()
-        except Exception:
-            pass
-        try:
             self._backend.shutdown()
         except Exception as e:
             print(f"[WARN] shutdown_player: {e}")
@@ -704,15 +700,24 @@ class VideoEditorWidget(QWidget):
     # Event-Handling
     # -----------------------------------------
 
-    def _update_time_label(self):
+    def zeit_anzeigen(self, global_s=None):
+        """Zeitanzeige auffrischen. Wird vom Takt des MainWindow gerufen.
+
+        `global_s` ist die globale Rohsekunde. Sie wird uebergeben und nicht
+        selbst geholt: der Aufrufer hat sie gerade schon ermittelt, und eine
+        zweite Abfrage waere nicht nur Aufwand, sondern koennte auch einen
+        anderen Wert liefern - dann zeigten Marker und Zeitanzeige zwei
+        verschiedene Stellen. Ohne Angabe wird sie doch geholt, damit die
+        Methode auch einzeln aufrufbar bleibt.
+        """
         if not self.playlist or self._backend.count() == 0:
             self.current_time_label.hide()
             return
         else:
             self.current_time_label.show()
             
-        # 1) globale Sekunde
-        global_s = self.get_current_global_time()
+        if global_s is None:
+            global_s = self.get_current_global_time()
 
         # Die Zeichenflaeche braucht dieselbe Zeit: nur Overlays, die gerade
         # im Bild stehen, sollen sich anwaehlen und ziehen lassen.

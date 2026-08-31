@@ -4481,6 +4481,14 @@ class MainWindow(QMainWindow):
         self.timeline.set_marker_position(global_s)
         
         # 4) Zeit im VideoEditor-Label & VideoControl anzeigen
+        #
+        # Das Label hatte bis 6.01 einen eigenen 200-ms-Timer im
+        # VideoEditorWidget. Der fragte die Position ein zweites Mal ab und
+        # lief gegen diesen hier - Marker und Anzeige konnten deshalb bis zu
+        # einem Takt auseinanderliegen. Jetzt bekommt es die Sekunde, die
+        # oben schon ermittelt wurde.
+        self.video_editor.zeit_anzeigen(global_s)
+
         s_rounded = round(display_time)
         hh = s_rounded // 3600
         mm = (s_rounded % 3600) // 60
