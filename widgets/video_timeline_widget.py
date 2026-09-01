@@ -22,7 +22,7 @@
 import math
 
 from PySide6.QtWidgets import QWidget
-from PySide6.QtCore import Qt, QPoint, QRectF, Signal
+from PySide6.QtCore import Qt, QPoint, QPointF, QRectF, Signal
 from PySide6.QtGui import (QPainter, QPen, QBrush, QColor, QPolygon,
                           QLinearGradient, QWheelEvent)
 
@@ -47,6 +47,12 @@ class VideoTimelineWidget(QWidget):
     overlayRemoveRequested = Signal(float, float)
     # Rechtsklick auf einen schwarzen Block: Blende <-> harte Kante
     cutHardToggleRequested = Signal(float, float)
+    #: Zoom, Ausschnitt oder Breite haben sich geaendert - wer Bilder zu den
+    #: sichtbaren Stellen vorhaelt, muss nachladen. Bewusst EIN Signal statt
+    #: einer Meldung an jeder Stelle, die den Zoom oder den Versatz setzt:
+    #: davon gibt es acht, und eine uebersehene waere ein Streifen, der
+    #: gelegentlich nicht nachzieht.
+    ansichtGeaendert = Signal()
     #: Rechtsklick auf einen Schnitt: das Fenster soll das Menue dazu zeigen.
     #: Was darin moeglich ist, weiss nur das MainWindow - ob es eine
     #: Aufzeichnung gibt, ob die GPX-Spur zwischenzeitlich bearbeitet wurde.
@@ -68,6 +74,12 @@ class VideoTimelineWidget(QWidget):
         # ist - bei mehreren Schnitten dicht beieinander ist sonst nicht zu
         # sehen, welcher gemeint ist.
         self._markierter_bereich = None
+
+        # Bildstreifen im Hintergrund. Gefuellt wird er von aussen (MainWindow
+        # kennt die Playlist), hier wird nur gezeichnet.
+        # Je Eintrag: (zeit_s in Gesamtzeit, QImage)
+        self._vorschaubilder = []
+        self._bilder_zeigen = True
         self._dragging_marker = False
         self._dragging_timeline = False
         self._timeline_drag_start_x = 0
@@ -318,8 +330,84 @@ class VideoTimelineWidget(QWidget):
         painter.setClipRect(rect_)
 
         timeline_real_width = w * self._zoom_factor
+
+        # Hat sich der sichtbare Ausschnitt geaendert, Bescheid geben. Der
+        # Empfaenger stoesst davon nur einen Zeitgeber an, es kann also nicht
+        # zu einer Schleife aus Melden und Neuzeichnen kommen.
+        zustand = (round(self._zoom_factor, 4),
+                   round(float(self._horizontal_offset), 1), w)
+        if zustand != getattr(self, "_letzte_ansicht", None):
+            self._letzte_ansicht = zustand
+            self.ansichtGeaendert.emit()
+
+        self._draw_vorschaubilder(painter, w, h, timeline_real_width)
         self._draw_time_ticks(painter, w, h, timeline_real_width)
         self._draw_boundaries_and_markers(painter, w, h, timeline_real_width)
+
+    # ------------------------------------------------------------------
+    # Bildstreifen
+    # ------------------------------------------------------------------
+    def set_vorschaubilder(self, bilder):
+        """bilder: Liste aus (zeit_s in Gesamtzeit, QImage)."""
+        self._vorschaubilder = list(bilder or [])
+        self.update()
+
+    def vorschaubilder_zeigen(self, an: bool):
+        self._bilder_zeigen = bool(an)
+        self.update()
+
+    def _draw_vorschaubilder(self, painter, w, h, timeline_real_width):
+        """Die Bilder als Hintergrund, jeweils an ihrer Zeitstelle.
+
+        Sie werden abgedunkelt gezeichnet. Ohne das waeren die Zeitmarken und
+        die Beschriftung darauf nicht mehr zu lesen, und die schwarzen
+        Schnittbloecke wuerden sich kaum noch abheben.
+
+        Gezeigt wird ROHZEIT, wie die ganze Zeitleiste. Die Schnittbloecke
+        liegen also darueber - man sieht dadurch, welches Material
+        weggeschnitten wird.
+        """
+        if (not self._bilder_zeigen or not self._vorschaubilder
+                or self.total_duration <= 0 or timeline_real_width <= 0):
+            return
+
+        def x_von(zeit_s):
+            return (zeit_s / self.total_duration) * timeline_real_width \
+                - self._horizontal_offset
+
+        bilder = self._vorschaubilder
+        for i, (zeit_s, bild) in enumerate(bilder):
+            if bild is None or bild.isNull():
+                continue
+            x = x_von(zeit_s)
+            # Bis zum naechsten Bild reichen - das ergibt einen lueckenlosen
+            # Streifen. Wuerde jedes Bild nur in seiner eigenen Breite
+            # gezeichnet, klafften dazwischen schwarze Spalten, sobald der
+            # Abstand groesser ist als das Bild breit.
+            if i + 1 < len(bilder):
+                x_ende = x_von(bilder[i + 1][0])
+            else:
+                x_ende = x + bild.width()
+            abschnitt = x_ende - x
+            if abschnitt <= 0 or x + abschnitt < 0 or x > w:
+                continue
+
+            quelle = None
+            if abschnitt < bild.width():
+                # Schmaler als das Bild: mittigen Ausschnitt nehmen statt zu
+                # stauchen - gestauchte Bilder sind im Streifen nicht mehr zu
+                # erkennen.
+                links = int((bild.width() - abschnitt) / 2)
+                quelle = QRectF(links, 0, abschnitt, bild.height())
+
+            ziel = QRectF(x, 0, abschnitt, min(h, bild.height()))
+            if quelle is not None:
+                painter.drawImage(ziel, bild, quelle)
+            else:
+                painter.drawImage(ziel, bild)
+
+        # Gleichmaessig abdunkeln, damit alles Weitere darauf lesbar bleibt.
+        painter.fillRect(0, 0, w, h, QColor(0, 0, 0, 120))
 
     def _draw_time_ticks(self, painter, w, h, timeline_real_width):
         if self.total_duration <= 0 or timeline_real_width <= 0:
@@ -358,6 +446,29 @@ class VideoTimelineWidget(QWidget):
                     y_start = h - sub_tick_height
                     painter.drawLine(x_timeline, y_start, x_timeline, h)
             t += sub_tick_sec
+
+    #: Abstand der Schraffurlinien in einem Schnittblock.
+    SCHRAFFUR_ABSTAND = 9
+
+    def _schraffur(self, painter, x_start, breite, h):
+        """Diagonale Linien ueber einen Schnittblock.
+
+        Das Muster macht den Block auch dort erkennbar, wo das Videobild
+        selbst dunkel ist. Es wird auf den Block begrenzt, damit die Linien
+        nicht in benachbartes Material laufen.
+        """
+        if breite < 3:
+            return
+        painter.save()
+        painter.setClipRect(QRectF(x_start, 0, breite, h))
+        painter.setPen(QPen(QColor(255, 255, 255, 38), 1))
+        # Von links unten nach rechts oben, um h versetzt - so treffen die
+        # Linien den Block unabhaengig von seiner Breite.
+        x = x_start - h
+        while x < x_start + breite + h:
+            painter.drawLine(QPointF(x, h), QPointF(x + h, 0.0))
+            x += self.SCHRAFFUR_ABSTAND
+        painter.restore()
 
     def _cut_bloecke(self, eps: float = 0.001):
         """Die Schnitte so, wie sie im Video wirklich aussehen.
@@ -440,7 +551,10 @@ class VideoTimelineWidget(QWidget):
                 brush_yellow = QBrush(QColor(255,255,0,80))
                 painter.fillRect(left_x, 0, right_x-left_x, h, brush_yellow)
 
-        brush_black = QBrush(QColor(0, 0, 0, 150))
+        # Deutlich deckender als frueher (150): unter dem Block liegt jetzt
+        # das Videobild, und auf dunklem Material war der Schnitt sonst nicht
+        # als solcher zu erkennen.
+        brush_black = QBrush(QColor(0, 0, 0, 215))
         pen_black = QPen(QColor("black"), 1)
         pen_hard = QPen(QColor("#FF8A3D"), 1)
         painter.setPen(pen_black)
@@ -477,14 +591,35 @@ class VideoTimelineWidget(QWidget):
             else:
                 # Blende: der Block laeuft an beiden Raendern weich aus.
                 # Der Verlauf ist rund 6 px breit, unabhaengig vom Zoom.
+                #
+                # Seit dem Bildstreifen laufen die Raender NICHT mehr auf
+                # durchsichtig aus, sondern nur noch auf halbe Deckung: auf
+                # dunklem Material - Schatten, Mauern, Tunnel - war der Block
+                # sonst kaum vom Bild zu unterscheiden. Der Verlauf zeigt
+                # weiterhin, dass hier eine Blende liegt.
                 edge = min(0.35, 6.0 / rect_width)
                 grad = QLinearGradient(x_start, 0.0, x_start + rect_width, 0.0)
-                grad.setColorAt(0.0, QColor(0, 0, 0, 0))
-                grad.setColorAt(edge, QColor(0, 0, 0, 150))
-                grad.setColorAt(1.0 - edge, QColor(0, 0, 0, 150))
-                grad.setColorAt(1.0, QColor(0, 0, 0, 0))
+                grad.setColorAt(0.0, QColor(0, 0, 0, 90))
+                grad.setColorAt(edge, QColor(0, 0, 0, 215))
+                grad.setColorAt(1.0 - edge, QColor(0, 0, 0, 215))
+                grad.setColorAt(1.0, QColor(0, 0, 0, 90))
                 painter.fillRect(QRectF(x_start, 0, rect_width, h),
                                  QBrush(grad))
+
+            # Schraffur und Kanten - erst dadurch ist ein Schnitt auf jedem
+            # Untergrund als Schnitt zu erkennen. Eine weitere Vollfarbe waere
+            # dafuer untauglich: Blau ist fuer Overlays vergeben, Orange fuer
+            # die harte Kante, und jede andere kann im Bild selbst vorkommen.
+            # Ein Muster kann das nicht.
+            self._schraffur(painter, x_start, rect_width, h)
+            if not gruppe_hart:
+                # Bei harter Kante sind die Raender bereits orange markiert -
+                # weisse Linien wuerden sie nur ueberdecken.
+                painter.setPen(QPen(QColor(255, 255, 255, 110), 1))
+                painter.drawLine(QPointF(x_start, 0), QPointF(x_start, h))
+                painter.drawLine(QPointF(x_start + rect_width, 0),
+                                 QPointF(x_start + rect_width, h))
+            painter.setPen(pen_black)
 
         # Zeichnen der Overlay-Intervalle (blau)
         if self.total_duration > 0 and self._overlay_intervals:

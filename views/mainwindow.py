@@ -87,6 +87,7 @@ from config import TMP_KEYFRAME_DIR, MY_GLOBAL_TMP_DIR, is_soft_opengl_enabled
 from core.mp4_keyframes import keyframe_times_from_index
 from core import view360
 from core.fade_cache import FadeJob, FadeRenderer
+from core.thumb_cache import ThumbCache
 from .dialogs import PreviewPrepareDialog, OutputFrameRateDialog
 from core import framerate
 
@@ -955,6 +956,20 @@ class MainWindow(QMainWindow):
         self.action_lock_width.toggled.connect(self._on_lock_width_toggled)
         setup_menu.addAction(self.action_lock_width)
 
+        # Vorschaubilder in der Zeitleiste. Standardmaessig aus: sie werden
+        # aus den Videodateien geholt, und das kostet bei grossem Material
+        # spuerbar Zeit und Plattenzugriffe. Wer sie will, schaltet sie ein.
+        self.action_timeline_thumbs = QAction(
+            "Vorschaubilder in der Timeline", self, checkable=True)
+        self.action_timeline_thumbs.setStatusTip(
+            "Zeigt Einzelbilder des Videos als Streifen in der Timeline. "
+            "Die Bilder werden im Hintergrund aus den Videodateien geholt.")
+        self.action_timeline_thumbs.setChecked(
+            QSettings("KVRouite", "KVRouite").value(
+                self._THUMBS_KEY, False, type=bool))
+        self.action_timeline_thumbs.toggled.connect(self._thumbs_umschalten)
+        setup_menu.addAction(self.action_timeline_thumbs)
+
         action_reset_layout = QAction("Reset Window Layout", self)
         action_reset_layout.setStatusTip(
             "Forget the stored window size, position and splitter position "
@@ -1074,7 +1089,11 @@ class MainWindow(QMainWindow):
         # self.width(); der Umzug ueber die volle Breite macht sie damit von
         # allein feiner aufloesend - aus rund 920 px werden gut 1900.
         self.timeline = VideoTimelineWidget()
-        self.timeline.setMinimumHeight(self._TIMELINE_MIN_H)
+        # Feste Hoehe, nicht nur ein Minimum: seit dem Bildstreifen haengt die
+        # Groesse der Vorschaubilder an der Hoehe der Zeile. Zoege man sie auf
+        # 300 px, muesste fuer jede Aenderung alles neu geholt werden, und die
+        # Bilder waeren riesig. Oben und unten laesst sich weiterhin ziehen.
+        self.timeline.setFixedHeight(self._TIMELINE_START_H)
         self._main_splitter.addWidget(self.timeline)
 
         self._bottom_splitter = QSplitter(Qt.Horizontal)    # Chart | GPX-Tabelle
@@ -1140,6 +1159,21 @@ class MainWindow(QMainWindow):
         self.timeline.overlayRemoveRequested.connect(self._on_timeline_overlay_remove)
         self.timeline.cutHardToggleRequested.connect(self._on_cut_hard_toggle)
         self.timeline.cutMenuRequested.connect(self._on_cut_menu)
+
+        # ---- Bildstreifen in der Zeitleiste --------------------------------
+        # Die Bilder werden im Hintergrund geholt (core/thumb_cache.py). Beim
+        # Zoomen und Schieben aendern sich die Zeitpunkte; nachgeladen wird
+        # aber erst, wenn die Bewegung steht - sonst rappelt die Platte bei
+        # jeder Radbewegung.
+        self._thumbs = ThumbCache(self)
+        self._thumbs.bilderBereit.connect(self._thumbs_anzeigen)
+        self._thumb_timer = QTimer(self)
+        self._thumb_timer.setSingleShot(True)
+        self._thumb_timer.setInterval(400)
+        self._thumb_timer.timeout.connect(self._thumbs_nachladen)
+        self.timeline.ansichtGeaendert.connect(self.thumbs_anstossen)
+        # Gemerkten Zustand herstellen (der Menuepunkt steht schon).
+        self.timeline.vorschaubilder_zeigen(self.thumbs_an())
 
         # 4) Der ehemalige Mini-Chart ist ab 6.02 der "Chart-Flow" und als
         #    vollwertiges Modul waehlbar. Er bleibt bewusst ein eigenes
@@ -3577,6 +3611,191 @@ class MainWindow(QMainWindow):
 
         print("[DEBUG] on_cut_clicked_video => GPX trimmed and UI updated.")
         
+    # ------------------------------------------------------------------
+    # Bildstreifen in der Zeitleiste
+    # ------------------------------------------------------------------
+    #: Ungefaehrer Abstand zweier Vorschaubilder auf dem Schirm. Enger waere
+    #: keine zusaetzliche Information - die Bilder ueberlappten sich nur.
+    _THUMB_ABSTAND_PX = 150
+
+    _THUMBS_KEY = "ui/timeline_thumbs"
+
+    def thumbs_an(self) -> bool:
+        a = getattr(self, "action_timeline_thumbs", None)
+        return bool(a is not None and a.isChecked())
+
+    def _thumbs_umschalten(self, an: bool):
+        """Vorschaubilder ein- oder ausschalten.
+
+        Aus heisst wirklich aus: der Streifen verschwindet und es wird auch
+        nichts mehr geholt. Der Zwischenspeicher wird geleert, damit er nicht
+        ungenutzt Speicher haelt. Die Schraffur der Schnitte bleibt in beiden
+        Faellen - sie hilft auch ohne Bilder, Schnitte zu erkennen.
+        """
+        QSettings("KVRouite", "KVRouite").setValue(self._THUMBS_KEY, bool(an))
+        self.timeline.vorschaubilder_zeigen(an)
+        if an:
+            self.thumbs_anstossen(sofort=True)
+            QTimer.singleShot(0, self.thumbs_grundstock)
+        else:
+            self._thumb_timer.stop()
+            self._thumbs.verwerfen()
+            self.timeline.set_vorschaubilder([])
+
+    #: Kleinster Abstand zweier Bilder in Sekunden. Alle Raster sind
+    #: Vielfache davon, verdoppelt: 2, 4, 8, 16, 32 ... So ist jedes groebere
+    #: Raster eine Teilmenge des feineren.
+    _THUMB_BASIS_S = 2.0
+
+    def _thumb_raster_s(self):
+        """Zeitabstand der Bilder bei der aktuellen Zoomstufe.
+
+        Der springende Punkt ist, dass die Zeitpunkte NICHT an Pixel haengen.
+        Waeren sie es, ergaebe jede noch so kleine Zoomaenderung voellig neue
+        Stellen - nichts im Zwischenspeicher passte je wieder, und beim Zoomen
+        muesste alles neu geholt werden.
+
+        Stattdessen liegen sie auf einem festen Raster, das sich in
+        Verdopplungen aendert. Innerhalb einer Stufe bleiben die Stellen
+        gleich, beim Wechsel ist die Haelfte schon da.
+        """
+        import math
+        dauern = getattr(self, "video_durations", None) or []
+        gesamt = sum(dauern)
+        breite = max(1, self.timeline.width())
+        zoom = max(1.0, getattr(self.timeline, "_zoom_factor", 1.0))
+        if gesamt <= 0:
+            return self._THUMB_BASIS_S
+        sek_je_px = gesamt / (breite * zoom)
+        wunsch_s = self._THUMB_ABSTAND_PX * sek_je_px
+        # ABRUNDEN, nicht aufrunden: die Bilder muessen dichter liegen als sie
+        # breit sind, sonst klaffen zwischen ihnen Luecken. Lieber eines zu
+        # viel und beschneiden als eine schwarze Spalte dazwischen.
+        stufen = max(0, math.floor(math.log2(max(1e-6, wunsch_s / self._THUMB_BASIS_S))))
+        return self._THUMB_BASIS_S * (2 ** stufen)
+
+    def _thumb_stellen(self):
+        """Welche Stellen des Rohmaterials der Streifen gerade braucht.
+
+        Liefert [(gesamtzeit_s, datei, zeit_in_der_datei_s), ...] - nur fuer
+        den sichtbaren Ausschnitt, und immer auf dem Raster von
+        _thumb_raster_s().
+        """
+        dauern = getattr(self, "video_durations", None) or []
+        dateien = getattr(self, "playlist", None) or []
+        gesamt = sum(dauern)
+        if not dateien or len(dauern) != len(dateien) or gesamt <= 0:
+            return []
+
+        breite = max(1, self.timeline.width())
+        zoom = max(1.0, getattr(self.timeline, "_zoom_factor", 1.0))
+        offset = getattr(self.timeline, "_horizontal_offset", 0.0)
+        sek_je_px = gesamt / (breite * zoom)
+
+        raster = self._thumb_raster_s()
+        von_s = max(0.0, offset * sek_je_px)
+        bis_s = min(gesamt, (offset + breite) * sek_je_px)
+        # Eine Rasterstelle vor dem Ausschnitt beginnen: das erste Bild ragt
+        # sonst nicht in den sichtbaren Bereich hinein.
+        k = int(von_s // raster)
+
+        stellen = []
+        while True:
+            t = k * raster
+            k += 1
+            if t > bis_s + raster:
+                break
+            if t < 0 or t > gesamt:
+                continue
+            lauf = 0.0
+            for datei, laenge in zip(dateien, dauern):
+                if t < lauf + laenge or datei is dateien[-1]:
+                    stellen.append((t, datei, max(0.0, t - lauf)))
+                    break
+                lauf += laenge
+            if len(stellen) > 200:      # Notbremse
+                break
+        return stellen
+
+    def _thumbs_nachladen(self):
+        """Fehlende Bilder anfordern und zeichnen, was schon da ist."""
+        if not self.thumbs_an():
+            return
+        stellen = self._thumb_stellen()
+        if not stellen:
+            self.timeline.set_vorschaubilder([])
+            return
+        hoehe = max(24, self.timeline.height())
+        self._thumbs.anfordern([(datei, t_datei) for _, datei, t_datei in stellen],
+                               hoehe)
+        self._thumbs_anzeigen()
+
+    def _thumbs_anzeigen(self):
+        """Was im Zwischenspeicher liegt, an die Zeitleiste geben.
+
+        Fehlt fuer eine Stelle noch das genaue Bild, wird ein benachbartes
+        genommen. Sonst waere der Streifen nach jedem Zoomschritt leer, bis
+        alles nachgeladen ist - und gerade dann braucht man ihn.
+        """
+        if not self.thumbs_an():
+            return
+        raster = self._thumb_raster_s()
+        bilder = []
+        for t_gesamt, datei, t_datei in self._thumb_stellen():
+            bild, _genau = self._thumbs.bild_oder_nachbar(
+                datei, t_datei, toleranz_s=raster)
+            if bild is not None:
+                bilder.append((t_gesamt, bild))
+        self.timeline.set_vorschaubilder(bilder)
+
+    def thumbs_anstossen(self, sofort: bool = False):
+        """Nachladen anstossen - verzoegert, damit Zoomen fluessig bleibt."""
+        if not self.thumbs_an():
+            return
+        if sofort:
+            self._thumb_timer.stop()
+            self._thumbs_nachladen()
+        else:
+            self._thumb_timer.start()
+
+    def thumbs_grundstock(self):
+        """Einmal ein grobes Raster ueber die ganze Laenge holen.
+
+        Ohne das ist der Streifen beim ersten Hineinzoomen leer, bis die
+        neuen Stellen geladen sind - und gerade dann braucht man ihn zum
+        Wiederfinden. Mit dem Grundstock steht immer schon ein benachbartes
+        Bild zur Verfuegung (siehe bild_oder_nachbar), das sofort gezeigt und
+        spaeter durch das genaue ersetzt wird.
+
+        Die Bilder sind zugleich das groebste Raster - beim Herauszoomen
+        werden genau sie gebraucht, es ist also nichts verschenkt.
+        """
+        if not self.thumbs_an():
+            return
+        dauern = getattr(self, "video_durations", None) or []
+        dateien = getattr(self, "playlist", None) or []
+        gesamt = sum(dauern)
+        if not dateien or len(dauern) != len(dateien) or gesamt <= 0:
+            return
+
+        # So grob wie die Zeitleiste bei Zoom 1 zeichnet.
+        raster = self._thumb_raster_s()
+        wuensche = []
+        k = 0
+        while k * raster <= gesamt and len(wuensche) < 120:
+            t = k * raster
+            k += 1
+            lauf = 0.0
+            for datei, laenge in zip(dateien, dauern):
+                if t < lauf + laenge or datei is dateien[-1]:
+                    wuensche.append((datei, max(0.0, t - lauf)))
+                    break
+                lauf += laenge
+        anzahl = self._thumbs.anfordern(wuensche, max(24, self.timeline.height()))
+        if anzahl:
+            print(f"[THUMB] Grundstock: {anzahl} Bilder ueber {gesamt:.0f}s "
+                  f"(Raster {raster:.0f}s)")
+
     def _on_cut_menu(self, start_s, end_s, global_pos):
         """Rechtsklick auf einen Schnitt in der Zeitleiste.
 
@@ -5049,6 +5268,10 @@ class MainWindow(QMainWindow):
             offset += dur
         self.real_total_duration = offset
         self.timeline.set_total_duration(self.real_total_duration)
+        # Bildstreifen fuer das neue Material holen.
+        self._thumbs.verwerfen()
+        self.thumbs_anstossen()
+        QTimer.singleShot(0, self.thumbs_grundstock)
 
         boundaries = []
         ofs = 0.0
@@ -6904,6 +7127,8 @@ class MainWindow(QMainWindow):
             self.timeline.clear_all_cuts()
             self.timeline.clear_overlay_intervals()
             self.timeline.set_total_duration(0.0)
+            self._thumbs.verwerfen()
+            self.timeline.set_vorschaubilder([])
             self.timeline.set_boundaries([])
         except Exception as e:
             print(f"[WARN] NewProject: timeline/cuts reset: {e}")
@@ -7513,6 +7738,9 @@ class MainWindow(QMainWindow):
             if self.video_durations:
                 total_duration = sum(self.video_durations)
                 self.timeline.set_total_duration(total_duration)
+                self._thumbs.verwerfen()
+                self.thumbs_anstossen()
+                QTimer.singleShot(0, self.thumbs_grundstock)
 
                 boundaries = []
                 accum = 0.0
