@@ -274,25 +274,17 @@ from PySide6.QtWebEngineWidgets import QWebEngineView #apparently we need to imp
 
 
 def _qt_message_handler(mode, context, message):
-    """Qt-Meldungen filtern.
+    """Qt-Meldungen auf den echten stderr schreiben.
 
-    Beim Detach der Karte wandert die QWebEngineView in ein zweites
-    Top-Level-Fenster. Jedes Fenster hat seine eigene QRhi, Chromium haengt
-    seine Kompositor-Textur aber an die QWebEnginePage - die Textur des
-    alten Fensters wird also im neuen weiterbenutzt. Qt meldet das bei
-    jedem Bildaufbau, es sind pro Detach schnell hunderte Zeilen.
+    stdout/stderr sind im Betrieb umgelenkt; Qt-Meldungen sollen trotzdem
+    auf der Konsole landen, deshalb geht es hier direkt an REAL_STDERR.
 
-    Gemessen: die Karte wird dabei korrekt dargestellt, es ist eine Warnung
-    und kein Defekt. Weder AA_ShareOpenGLContexts noch das RHI-Backend noch
-    ein Neuaufbau der View aendern etwas daran; nur ein Neuaufbau samt Page
-    haette geholfen, der kostet aber je Detach einen Renderer-Prozess.
-    Deshalb wird die Meldung im Normalbetrieb geschluckt und ist mit -v
-    weiterhin vollstaendig zu sehen. Alle anderen Qt-Meldungen bleiben
-    unangetastet - QT_LOGGING_RULES greift hier nicht, weil Qt die Zeile
-    ohne Logging-Kategorie ausgibt.
+    Bis 6.01 wurde hier zusaetzlich die Meldung "belongs to QRhi"
+    geschluckt. Die trat ausschliesslich beim Abkoppeln der Karte in ein
+    zweites Top-Level-Fenster auf - jedes Fenster hat seine eigene QRhi,
+    Chromium haengt seine Kompositor-Textur aber an die QWebEnginePage.
+    Mit dem Detach ist auch die Meldung entfallen, der Filter also mit.
     """
-    if not DEBUG and "belongs to QRhi" in message:
-        return
     try:
         REAL_STDERR.write(message + "\n")
         REAL_STDERR.flush()
@@ -360,11 +352,15 @@ def main():
         QGuiApplication.setAttribute(Qt.AA_UseSoftwareOpenGL)
 
     # QtWebEngine (Karte) und die Videoausgabe leben im selben Prozess und nutzen
-    # beide OpenGL. Ohne geteilten Kontext verliert die Karte ab Qt 6.11 ihren
-    # Inhalt, sobald sie ueber "Map (detach)" in ein eigenes Fenster wandert -
-    # das Fenster bleibt dann schwarz. Muss VOR QApplication(...) gesetzt
-    # werden, sonst wirkt es nicht. Unter Qt 6.8 aendert es nichts, es ist also
-    # ein Codepfad fuer beide Versionen.
+    # beide OpenGL. Muss VOR QApplication(...) gesetzt werden, sonst wirkt es
+    # nicht. Unter Qt 6.8 aendert es nichts, es ist also ein Codepfad fuer
+    # beide Versionen.
+    #
+    # Der Anlass war das Abkoppeln der Karte in ein eigenes Fenster: ohne
+    # geteilten Kontext blieb dieses Fenster ab Qt 6.11 schwarz. Das Abkoppeln
+    # gibt es seit 6.02 nicht mehr. Das Attribut bleibt trotzdem gesetzt - ob
+    # der geteilte Kontext auch sonst etwas stabilisiert, ist nicht gemessen,
+    # und es kostet nichts.
     QGuiApplication.setAttribute(Qt.AA_ShareOpenGLContexts, True)
 
     app = QApplication(sys.argv)

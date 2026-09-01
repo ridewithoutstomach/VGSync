@@ -356,35 +356,6 @@ class _SafeExportDialog(QDialog):
         self.export_canceled.emit()
         self.reject()
 
-class DetachDialog(QDialog):
-    requestPlus = Signal()
-    requestMinus = Signal()
-    requestReattach = Signal()
-
-    def keyPressEvent(self, event):
-        key = event.key()
-        txt = event.text()
-        if key == Qt.Key_Plus or txt == '+':
-            self.requestPlus.emit()
-            event.accept()
-        elif key == Qt.Key_Minus or txt == '-':
-            self.requestMinus.emit()
-            event.accept()
-        else:
-            super().keyPressEvent(event)
-
-    def changeEvent(self, event):
-        super().changeEvent(event)
-        if event.type() == QEvent.WindowStateChange:
-            if self.windowState() & Qt.WindowMinimized:
-                self.requestReattach.emit()
-
-    def closeEvent(self, event):
-        self.requestReattach.emit()
-        super().closeEvent(event)
-
-
-
 
 class PreviewPrepareDialog(QDialog):
     """

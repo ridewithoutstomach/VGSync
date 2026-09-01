@@ -1011,15 +1011,6 @@ class GPXControlWidget(QWidget):
      
     
         
-    def update_set_gpx2video_state(self, video_edit_on: bool, auto_sync_on: bool):
-        """
-        Schaltet den Menüpunkt "SetGPX2VideoTime" an/aus.
-        - Nur aktiv, wenn video_edit_on == True und auto_sync_on == False
-        """
-        
-        enable_it = (video_edit_on and (not auto_sync_on))
-        self._action_set_gpx2video.setEnabled(enable_it)    
-        
     def set_directions_mode(self, enabled: bool):
         if enabled:
             self._action_closegaps.setText("Close Gaps (Directions)")
@@ -3474,8 +3465,13 @@ class GPXControlWidget(QWidget):
             if final_dur < 0:
                 final_dur = 0
             video_duration_str = self._format_duration_with_ms(final_dur)
+            # Laenge vor den Schnitten. Stand bis 6.01 weiss im Videobild;
+            # die Einblendung dort ist entfallen, gebraucht wird die Zahl
+            # aber weiterhin - deshalb steht sie jetzt hier.
+            video_before_str = self._format_duration_with_ms(total_dur)
         else:
             video_duration_str = "00:00:00.000"
+            video_before_str = "00:00:00.000"
     
         # -- Neuen Dialog bauen
         dlg = QDialog(self)
@@ -3491,6 +3487,7 @@ class GPXControlWidget(QWidget):
             f"<table>"
             f"<tr><td><b>Total Points:</b></td><td>{n_points}</td></tr>"
             f"<tr><td><b>GPX Duration:</b></td><td>{duration_str}</td></tr>"
+            f"<tr><td><b>Video before cuts:</b></td><td>{video_before_str}</td></tr>"
             f"<tr><td><b>Video Duration:</b></td><td>{video_duration_str}</td></tr>"
             f"<tr><td><b>Distance:</b></td><td>{dist_km:.2f} km</td></tr>"
             f"<tr><td><b>Start Elevation:</b></td><td>{ele_start:.1f} m</td></tr>"

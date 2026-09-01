@@ -70,6 +70,9 @@ class VideoSurface(QWidget):
     blick360Gezogen = Signal(float, float)
     #: 360-Zoom mit dem Mausrad: Rastschritte, positiv heisst naeher heran.
     blick360Gezoomt = Signal(float)
+    #: Die Flaeche, auf der das Bild liegt, hat sich geaendert (erstes Bild,
+    #: anderes Seitenverhaeltnis, andere Fenstergroesse).
+    bildbereichGeaendert = Signal()
 
     #: Halbe Kantenlaenge eines Anfassers in Bildschirmpunkten.
     GRIFF = 5
@@ -474,7 +477,13 @@ class VideoSurface(QWidget):
         zw, zh = max(1, int(bw * skala)), max(1, int(bh * skala))
         ziel = QRect((flaeche.width() - zw) // 2, (flaeche.height() - zh) // 2,
                      zw, zh)
-        self._bildbereich = ziel
+        if ziel != self._bildbereich:
+            # Beim ersten Bild und bei jedem Wechsel des Seitenverhaeltnisses
+            # springt der Bildbereich. Wer sich daran ausrichtet - etwa die
+            # Hoehenprofil-Einblendung - muss davon erfahren; ein resizeEvent
+            # gibt es dabei nicht.
+            self._bildbereich = ziel
+            self.bildbereichGeaendert.emit()
         maler.setRenderHint(QPainter.SmoothPixmapTransform, True)
         maler.drawImage(ziel, self._bild)
 

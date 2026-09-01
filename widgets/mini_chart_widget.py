@@ -25,15 +25,27 @@ from PySide6.QtCore import Qt, QRect
 from PySide6.QtGui import QPainter, QPen, QBrush, QColor, QFont
 
 class MiniChartWidget(QWidget):
-    """
-    Zeigt eine Mini-Chart von maximal 30 GPX-Punkten.
-    Hat einen festen Marker bei ca. 70% (x=0.7 * width).
-    'darunter' läuft die Kurve, damit immer der aktuelle GPX-Punkt 
-    an dieser Marker-Linie auftaucht. 
+    """Hoehenprofil im Ausschnitt - seit 6.02 als Modul "Chart-Flow".
 
-    Unten am Marker wird der "Slope" (Steigung) des aktuellen Punkts 
-    als Text dargestellt.
+    Zeigt einen Ausschnitt von wenigen GPX-Punkten um den aktuellen herum.
+    Der Marker steht fest bei 70 % der Breite, die Punkte laufen darunter
+    durch.
+
+    Der Unterschied zum grossen Chart ist nicht der Zoom, sondern die
+    Hoehenachse: hier wird sie nur ueber die SICHTBAREN Punkte skaliert.
+    Deshalb fuellt jede Kuppe das Bild, auch wenn sie ueber die ganze
+    Strecke gesehen nur ein paar Meter hoch ist. Im grossen Chart, dessen
+    Achse ueber den kompletten Track laeuft, waere dieselbe Kuppe eine
+    flache Linie. Genau dafuer gibt es dieses Diagramm.
+
+    Absichtlich nicht enthalten: Geschwindigkeit, Meereshoehen-Linie,
+    "under sea level" - das sind Sachen des grossen Charts.
+
+    Strg+Mausrad stellt ein, wie viele Punkte im Bild sind.
     """
+
+    MIN_PUNKTE = 8
+    MAX_PUNKTE = 400
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -44,10 +56,66 @@ class MiniChartWidget(QWidget):
 
         # Interne Daten
         self._gpx_data = []
-        self._max_points = 30   # Standard: 30 Gpx-Punkte anzeigen
+        self._max_points = 40   # wie viele GPX-Punkte im Bild sind
         self._marker_ratio_x = 0.7  # 70% vom Widget
         self._current_index = 0     # Welcher Punkt ist 'aktuell'?
-    
+
+        # Overlay-Modus: dieselbe Darstellung, aber durchscheinend zum
+        # Einblenden ins Videobild.
+        self._overlay = False
+        # Zweite Ansicht derselben Daten (siehe set_zwilling).
+        self._zwilling = None
+
+    def set_zwilling(self, other):
+        """Zweite Ansicht anmelden, die dieselben Daten bekommen soll.
+
+        Das Overlay im Video zeigt denselben Ausschnitt wie das Modul. Statt
+        die rund 60 vorhandenen Aufrufstellen zu verdoppeln, reicht dieses
+        Widget Daten und Index selbst weiter.
+        """
+        self._zwilling = other
+
+    def set_overlay_modus(self, an: bool):
+        """Durchscheinend zeichnen (fuers Einblenden ins Video)."""
+        self._overlay = bool(an)
+        self.setAutoFillBackground(not self._overlay)
+        self.setStyleSheet("" if self._overlay
+                           else "background-color: #444444 ;")
+        if self._overlay:
+            # Sonst laegen Mausklicks auf dem Overlay statt auf dem Video -
+            # Ziehen im 360-Modus waere damit an dieser Ecke tot.
+            self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.update()
+
+    def wheelEvent(self, event):
+        """Strg+Mausrad: Ausschnitt verbreitern oder verengen.
+
+        Ohne Strg bleibt das Ereignis unangetastet, damit ein Scrollen im
+        umgebenden Fenster weiterhin ankommt.
+        """
+        if not (event.modifiers() & Qt.ControlModifier):
+            super().wheelEvent(event)
+            return
+        delta = event.angleDelta().y()
+        if delta == 0:
+            return
+        schritt = -4 if delta > 0 else 4     # hochdrehen = naeher heran
+        self.set_max_points(self._max_points + schritt)
+        event.accept()
+
+    def set_max_points(self, punkte: int):
+        """Ausschnittbreite in GPX-Punkten setzen (auch fuer den Zwilling).
+
+        Die Einblendung im Video soll denselben Ausschnitt zeigen wie das
+        Modul - sonst waeren es zwei verschiedene Diagramme nebeneinander.
+        """
+        self._max_points = max(self.MIN_PUNKTE,
+                               min(self.MAX_PUNKTE, int(punkte)))
+        self.update()
+        if self._zwilling is not None:
+            self._zwilling.set_max_points(self._max_points)
+
+
     def set_gpx_data(self, data: list):
         """
         data: Liste von Dicts, z.B. [{'lat':..., 'lon':..., 'ele':..., 
@@ -57,6 +125,8 @@ class MiniChartWidget(QWidget):
         """
         self._gpx_data = data or []
         self.update()
+        if self._zwilling is not None:
+            self._zwilling.set_gpx_data(data)
 
     def set_current_index(self, idx: int):
         """Setzt den Index des 'aktuellen' GPX-Punkts."""
@@ -66,6 +136,8 @@ class MiniChartWidget(QWidget):
             idx = len(self._gpx_data) - 1
         self._current_index = idx
         self.update()
+        if self._zwilling is not None:
+            self._zwilling.set_current_index(idx)
 
     def paintEvent(self, event):
         super().paintEvent(event)
@@ -74,9 +146,16 @@ class MiniChartWidget(QWidget):
 
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
-        
-        painter.fillRect(self.rect(), QColor("#333333"))
-        
+
+        if self._overlay:
+            # Durchscheinend ueber dem Videobild - dunkel genug, dass die
+            # gelbe Kurve steht, hell genug, dass man das Bild noch sieht.
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(0, 0, 0, 120))
+            painter.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 6, 6)
+        else:
+            painter.fillRect(self.rect(), QColor("#333333"))
+
         rect_ = self.rect()
         w = rect_.width()
         h = rect_.height()
@@ -122,37 +201,48 @@ class MiniChartWidget(QWidget):
             
         min_ele = min(elevations)
         max_ele = max(elevations)
-        
+
         # Vermeide Division durch Null
         if abs(max_ele - min_ele) < 0.1:
             max_ele = min_ele + 10.0  # 10 Meter Puffer bei flachen Strecken
+
+        # Rand proportional zur Hoehe - als Modul ist das Widget gross, feste
+        # 10 px waeren dort ein Nichts.
+        rand = max(10, int(h * 0.10))
+        nutz_h = max(1, h - 2 * rand)
 
         pts_screen = []
         for i, p in enumerate(relevant_points):
             x_data = i*step + shift_x
             ele = p.get("ele", 0.0)
-            
+
             # Y-Berechnung basierend auf Höhe
             # Höhere Punkte weiter oben, niedrigere weiter unten
             frac = (ele - min_ele) / (max_ele - min_ele)
-            y_pix = h - 10 - (frac * (h - 20))  # 10px Rand oben und unten
-            
+            y_pix = h - rand - (frac * nutz_h)
+
             x_pix = x_data * w
             pts_screen.append((x_pix, y_pix))
 
-        # Zeichne die Höhenlinie
-        pen_line = QPen(QColor("#00cccc"), 2)
+        # Bewusst ohne Hoehenskala: beim Syncen zaehlt allein die Steigung,
+        # die man mit dem Bild vergleicht. Meterangaben lenken davon ab.
+
+        # Zeichne die Höhenlinie - gelb wie im grossen Chart
+        strich = 3 if h > 200 else 2
+        pen_line = QPen(QColor("#ffff00"), strich)
         painter.setPen(pen_line)
         for i in range(len(pts_screen)-1):
             (x1, y1) = pts_screen[i]
             (x2, y2) = pts_screen[i+1]
             painter.drawLine(x1, y1, x2, y2)
 
-        # Zeichne Punkte
+        # Zeichne Punkte - das sind die einzelnen GPX-Punkte, an denen man
+        # sieht, wie dicht die Aufzeichnung ist.
+        r = 3 if h > 200 else 2
         painter.setPen(Qt.NoPen)
         painter.setBrush(QColor("#cccccc"))
         for (xx, yy) in pts_screen:
-            painter.drawEllipse(int(xx)-1, int(yy)-1, 4, 4)
+            painter.drawEllipse(int(xx)-r, int(yy)-r, 2*r, 2*r)
 
         # Zeichne Marker-Linie
         x_marker = int(self._marker_ratio_x * w)
@@ -163,32 +253,44 @@ class MiniChartWidget(QWidget):
         # Zeichne aktuellen Punkt und Steigungswert
         if 0 <= local_idx < len(pts_screen):
             xP, yP = pts_screen[local_idx]
-            painter.setBrush(QColor("#ffff00"))
-            painter.drawEllipse(int(xP)-3, int(yP)-3, 6, 6)
+            # Rot, nicht gelb: die Hoehenlinie ist jetzt gelb, darin waere der
+            # aktuelle Punkt nicht zu finden.
+            rp = r + 3
+            painter.setPen(QPen(QColor("#ffffff"), 1))
+            painter.setBrush(QColor("#ff3030"))
+            painter.drawEllipse(int(xP)-rp, int(yP)-rp, 2*rp, 2*rp)
 
-            # Steigung und Höhe als Text anzeigen
+            # Hoehe und Steigung direkt ueber dem roten Punkt.
+            #
+            # Frueher stand der Text am oberen oder unteren Bildrand. Dort
+            # kreuzt ihn der Marker-Strich, und man muss ausserdem quer durchs
+            # Bild schauen, um den Wert zum Punkt zu finden. Beides faellt weg,
+            # wenn der Text am Punkt klebt - mit dunkler Unterlegung, damit er
+            # auch ueber dem Strich und der Kurve lesbar bleibt.
             slope_val = relevant_points[local_idx].get("gradient", 0.0)
-            ele_val = relevant_points[local_idx].get("ele", 0.0)
-            
-            # Kombinierte Anzeige: Steigung und Höhe
-            #info_str = f"{slope_val:.1f}% / {ele_val:.0f}m"
-            info_str = f"{slope_val:.1f}%"
-            
-            
-            painter.setPen(QColor("#ffffff"))
+            info_str = f"{slope_val:.1f} %"
+
             font_ = QFont()
             font_.setPointSize(10)
+            font_.setBold(True)
             painter.setFont(font_)
+            fm = painter.fontMetrics()
+            text_w = fm.horizontalAdvance(info_str)
+            text_h = fm.height()
 
-            text_w = painter.fontMetrics().horizontalAdvance(info_str)
-            
-            # Dynamische Positionierung basierend auf der Y-Position des aktuellen Punkts
-            # Wenn der Punkt in der oberen Hälfte ist, zeige Text unten, sonst oben
-            if yP < h / 2:
-                # Punkt oben -> Text unten anzeigen
-                text_y = h - 5
-            else:
-                # Punkt unten -> Text oben anzeigen
-                text_y = 15
-                
-            painter.drawText(x_marker - text_w//2, text_y, info_str)
+            # Ueber dem Punkt - und wenn dort kein Platz mehr ist, darunter.
+            text_x = int(xP) - text_w // 2
+            text_y = int(yP) - rp - 8
+            if text_y - text_h < 0:
+                text_y = int(yP) + rp + text_h + 4
+            # Nicht ueber den Rand hinauslaufen lassen.
+            text_x = max(2, min(text_x, w - text_w - 2))
+
+            kasten = QRect(text_x - 4, text_y - text_h + 3,
+                           text_w + 8, text_h + 2)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(0, 0, 0, 190))
+            painter.drawRoundedRect(kasten, 3, 3)
+
+            painter.setPen(QColor("#ffffff"))
+            painter.drawText(text_x, text_y, info_str)

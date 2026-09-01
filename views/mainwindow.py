@@ -106,8 +106,9 @@ from core.gpx_parser import is_gpx_video_shift_set, parse_gpx  # Hier hinzufüge
 from managers.overlay_manager import OverlayManager
 
 # ggf. import_export_manager, safe_manager etc.
-from .dialogs import _IndexingDialog, _SafeExportDialog, DetachDialog
+from .dialogs import _IndexingDialog, _SafeExportDialog
 from widgets.mini_chart_widget import MiniChartWidget
+from widgets.slot_widget import SlotWidget
 from config import is_edit_video_enabled
 from core.gpx_parser import parse_gpx
 from core.gpx_parser import recalc_gpx_data, get_gpx_video_shift, set_gpx_video_shift
@@ -526,15 +527,10 @@ class MainWindow(QMainWindow):
         
         
         
-        self._map_floating_dialog = None
-        self._map_placeholder = None
         
                
         self._gpx_data = []
         
-        # Abkoppel-Dialoge
-        self._video_area_floating_dialog = None
-        self._video_placeholder = None
         self._gpx_slots = {
             1: {
                 "gpx_data": [],
@@ -662,18 +658,31 @@ class MainWindow(QMainWindow):
         
         view_menu = menubar.addMenu("View")
 
-        
-        self.action_toggle_video = QAction("Video (detach)", self)
-        self.action_toggle_video.setStatusTip("Detach/Attach the Video-Editor.")
-        self.action_toggle_video.triggered.connect(self._toggle_video)
+        # Die Kopfzeilen der Fenster kosten je rund 20 px. Ausgeschaltet
+        # bleiben Schwebeknopf und Rechtsklick als Wege zum Umschalten.
+        self.action_slot_kopf = QAction("Fenster-Kopfzeilen", self, checkable=True)
+        self.action_slot_kopf.setStatusTip(
+            "Schmale Leiste je Fenster mit dem Modulnamen ein-/ausblenden.")
+        self.action_slot_kopf.setChecked(
+            QSettings("KVRouite", "KVRouite").value(
+                self._KOPFZEILEN_KEY, False, type=bool))
+        self.action_slot_kopf.toggled.connect(self._kopfzeilen_umschalten)
+        view_menu.addAction(self.action_slot_kopf)
+        view_menu.addSeparator()
 
-        self.action_toggle_map = QAction("Map (detach)", self)
-        self.action_toggle_map.setStatusTip("Detach/Attach the Map.")
-        self.action_toggle_map.triggered.connect(self._toggle_map)
-        view_menu.addAction(self.action_toggle_map)
-        
-        view_menu.addAction(self.action_toggle_video)
-        
+        # Hoehenprofil ins Videobild einblenden (unten links).
+        self.action_hoehen_overlay = QAction(
+            "Höhenprofil im Video", self, checkable=True)
+        self.action_hoehen_overlay.setStatusTip(
+            "Blendet das Höhenprofil unten links ins Videobild ein.")
+        self.action_hoehen_overlay.setChecked(
+            QSettings("KVRouite", "KVRouite").value(
+                self._OVERLAY_KEY, False, type=bool))
+        self.action_hoehen_overlay.toggled.connect(self._hoehen_overlay_umschalten)
+        view_menu.addAction(self.action_hoehen_overlay)
+
+        view_menu.addSeparator()
+
          # 360° Video Toggle (Taste V)
         self.action_toggle_360 = QAction("360° Video", self, checkable=True)
         self.action_toggle_360.setStatusTip(
@@ -1033,25 +1042,74 @@ class MainWindow(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
 
-        main_h_layout = QHBoxLayout(central_widget)  
-        main_h_layout.setContentsMargins(0, 0, 0, 0)
-        main_h_layout.setSpacing(0)
+        # Seit 6.02 liegt die Oberflaeche in drei Zeilen uebereinander statt in
+        # zwei Spalten nebeneinander: oben Video und Karte, in der Mitte die
+        # Timeline ueber die ganze Fensterbreite, unten Chart und GPX-Tabelle.
+        # Deshalb ist das Haupt-Layout senkrecht.
+        main_v_layout = QVBoxLayout(central_widget)
+        main_v_layout.setContentsMargins(0, 0, 0, 0)
+        main_v_layout.setSpacing(0)
+
+        # Das Geruest der drei Zeilen wird ZUERST fertig ineinander gesteckt -
+        # erst danach entsteht irgendein Inhalt. Jedes Widget haengt damit ab
+        # seiner Erzeugung an seinem endgueltigen Platz und wird nie umgehaengt.
+        #
+        # Das ist keine Kosmetik: die Karte ist eine QWebEngineView, die schon
+        # im Konstruktor zu laden beginnt. Haengt man sie - oder einen Splitter
+        # ueber ihr - spaeter um, wird ihr natives Fenster dabei neu erzeugt.
+        # Deshalb bekommen auch die beiden Zeilen-Splitter sofort ihren Platz
+        # im Haupt-Splitter und nicht erst am Ende des Layoutblocks.
+        #
+        # setChildrenCollapsible(False): sonst laesst sich die Timeline mit dem
+        # Griff auf null ziehen und ist danach nicht wiederzufinden.
+        self._main_splitter = QSplitter(Qt.Vertical, central_widget)
+        self._main_splitter.setChildrenCollapsible(False)
+        main_v_layout.addWidget(self._main_splitter)
+
+        self._top_splitter = QSplitter(Qt.Horizontal)       # Video | Karte
+        self._main_splitter.addWidget(self._top_splitter)
+
+        # Die Timeline gehoert zwischen die beiden Zeilen, muss also vor dem
+        # unteren Splitter eingehaengt werden. Sie rechnet durchgehend mit
+        # self.width(); der Umzug ueber die volle Breite macht sie damit von
+        # allein feiner aufloesend - aus rund 920 px werden gut 1900.
+        self.timeline = VideoTimelineWidget()
+        self.timeline.setMinimumHeight(self._TIMELINE_MIN_H)
+        self._main_splitter.addWidget(self.timeline)
+
+        self._bottom_splitter = QSplitter(Qt.Horizontal)    # Chart | GPX-Tabelle
+        self._main_splitter.addWidget(self._bottom_splitter)
+
+        # Die vier Fenster ("Slots"). Sie bleiben immer an ihrem Platz -
+        # gewechselt wird nur, welches Modul darin liegt. Auch sie gehoeren
+        # zum Geruest und stehen deshalb vor jedem Inhalt.
+        self._slots = {}
+        for slot_id, splitter in (("ol", self._top_splitter),
+                                  ("or", self._top_splitter),
+                                  ("ul", self._bottom_splitter),
+                                  ("ur", self._bottom_splitter)):
+            slot = SlotWidget(slot_id, parent=splitter)
+            splitter.addWidget(slot)
+            slot.modulGewuenscht.connect(self._modul_wechseln)
+            self._slots[slot_id] = slot
+
+        # Wohin ein Modul kommt, das gerade nirgends angezeigt wird. Ohne
+        # diesen Halter waere es nach setParent(None) ein eigenes Fenster.
+        self._modul_reserve = QWidget(self)
+        self._modul_reserve.hide()
+        QVBoxLayout(self._modul_reserve).setContentsMargins(0, 0, 0, 0)
 
         #
-        # ============== Linke Spalte (Video + Map) ==============
+        # ============== Oben rechts: Video mit eigener Bedienleiste =============
         #
-        left_column_widget = QWidget()
-        self.left_v_layout = QVBoxLayout(left_column_widget)
-        self.left_v_layout.setContentsMargins(0, 0, 0, 0)
-        self.left_v_layout.setSpacing(0)
-        
-        # Video-Bereich
-        self.video_area_widget = QWidget()
+        # Video-Bereich. Vater ist gleich die Buehne seines Slots - so wird
+        # beim Einsetzen nichts umgehaengt.
+        self.video_area_widget = QWidget(self._slots["or"].buehne())
         video_area_layout = QVBoxLayout(self.video_area_widget)
         video_area_layout.setContentsMargins(0, 0, 0, 0)
         video_area_layout.setSpacing(0)
     
-        # 1)     Video Editor oben (85% der Höhe dieses Blocks)
+        # 1) Videobild - nimmt allen Platz, den die Bedienleiste uebrig laesst
         self.video_editor = VideoEditorWidget()
         if hasattr(self, "action_toggle_360"):
             self.action_toggle_360.setChecked(bool(getattr(self.video_editor, "_is_360_mode", False)))
@@ -1066,66 +1124,62 @@ class MainWindow(QMainWindow):
             
             
         
-        video_area_layout.addWidget(self.video_editor, stretch=85)
-        
-        # 2) Timeline + Control + Blaues Widget (15% der Höhe)
-        timeline_control_widget = QWidget()
-        timeline_control_layout = QHBoxLayout(timeline_control_widget)
-        timeline_control_layout.setContentsMargins(0, 0, 0, 0)
-        timeline_control_layout.setSpacing(0)
-        
-        # Linke Seite (70%): Timeline + Control übereinander
-        left_timeline_control_layout = QVBoxLayout()
-        left_timeline_control_layout.setContentsMargins(0, 0, 0, 0)
-        left_timeline_control_layout.setSpacing(0)
-        
-        self.timeline = VideoTimelineWidget()
+        video_area_layout.addWidget(self.video_editor, stretch=1)
+
+        # 2) Die Bedienleiste gehoert zum Player und sitzt deshalb direkt unter
+        #    dem Bild. Zieht das Video spaeter in einen anderen Slot, wandert
+        #    seine Bedienung mit - sie zeigt sonst ins Leere. stretch=0: die
+        #    Leiste behaelt ihre Wunschhoehe, alles andere bekommt das Bild.
         self.video_control = VideoControlWidget()
+        video_area_layout.addWidget(self.video_control, stretch=0)
+
+        # 3) Die Timeline steht nicht mehr neben dem Video, sondern bekommt
+        #    weiter unten eine eigene Zeile ueber die ganze Fensterbreite.
+        #    Sie rechnet durchgehend mit self.width(), der Umzug allein macht
+        #    sie also feiner aufloesend - aus rund 920 px werden gut 1900.
         self.timeline.overlayRemoveRequested.connect(self._on_timeline_overlay_remove)
         self.timeline.cutHardToggleRequested.connect(self._on_cut_hard_toggle)
 
-        
-        left_timeline_control_layout.addWidget(self.timeline)
-        left_timeline_control_layout.addWidget(self.video_control)
-        
-        timeline_control_layout.addLayout(left_timeline_control_layout, 7)
-        
-        # Rechte Seite (30%): Blaues Platzhalter-Widget
-        self.mini_chart_widget = MiniChartWidget()
-        timeline_control_layout.addWidget(self.mini_chart_widget, 3)
-        
-        # Fertig in den Video-Bereich
-        video_area_layout.addWidget(timeline_control_widget, stretch=15)
-        
-        # Alles in den oberen Teil der linken Spalte
-        self.left_v_layout.addWidget(self.video_area_widget, stretch=1)
-        
-        # Unten: Map (50%)
-        self.map_widget = MapWidget(mainwindow=self, parent=None)
-        self.left_v_layout.addWidget(self.map_widget, stretch=1)
-        
-        # ============== Rechte Spalte (Chart + GPX) ==============
+        # 4) Der ehemalige Mini-Chart ist ab 6.02 der "Chart-Flow" und als
+        #    vollwertiges Modul waehlbar. Er bleibt bewusst ein eigenes
+        #    Diagramm und kein gezoomter grosser Chart: seine Hoehenachse
+        #    skaliert nur ueber die sichtbaren Punkte, deshalb fuellt jede
+        #    Kuppe das Bild. Der grosse Chart skaliert ueber den ganzen
+        #    Track - dort ist dieselbe Kuppe eine flache Linie.
+        #    Nebenbei behalten so alle rund 60 vorhandenen Aufrufstellen
+        #    (set_gpx_data / set_current_index) ihre Wirkung.
+        self.mini_chart_widget = MiniChartWidget(self._modul_reserve)
+
+        # ============== Karte (Start: oben links) ==============
         #
-        right_column_widget = QWidget()
-        self.right_v_layout = QVBoxLayout(right_column_widget)
-        self.right_v_layout.setContentsMargins(0, 0, 0, 0)
-        self.right_v_layout.setSpacing(0)
-        
-        # Oben: Chart (40%) => Stretch 2
-        self.chart = ChartWidget()
-        self.right_v_layout.addWidget(self.chart, stretch=2)
-        
-                
-        
-        # Unten: 60% => gpx_control (10%), gpx_list (50%)
-        self.bottom_right_widget = QWidget()
+        # Vater direkt mitgeben, nicht nachtraeglich umhaengen (siehe oben).
+        self.map_widget = MapWidget(mainwindow=self, parent=self._slots["ol"].buehne())
+
+        # ============== Chart (Start: unten links) ==============
+        #
+        self.chart = ChartWidget(self._slots["ul"].buehne())
+
+        # Der Chart-Flow ist der Mini-Chart von oben - er steht schon bereit.
+        self.chart_flow = self.mini_chart_widget
+        # Die Einblendung im Videobild bekommt Daten und Index vom Modul -
+        # so bleiben die rund 60 vorhandenen Aufrufstellen unveraendert.
+        self.mini_chart_widget.set_zwilling(self.video_editor.hoehen_overlay)
+
+        # ============== GPX-Leiste + Tabelle (Start: unten rechts) ==============
+        #
+        # Buttonleiste und Tabelle bleiben zusammen - die Leiste bearbeitet
+        # ausschliesslich GPX-Daten und gehoert damit zur Tabelle.
+        self.bottom_right_widget = QWidget(self._slots["ur"].buehne())
         self.bottom_right_layout = QVBoxLayout(self.bottom_right_widget)
         self.bottom_right_layout.setContentsMargins(0, 0, 0, 0)
         self.bottom_right_layout.setSpacing(0)
         
         self.gpx_control = GPXControlWidget()
         self.gpx_control.set_mainwindow(self)
-        self.bottom_right_layout.addWidget(self.gpx_control, stretch=1)
+        # Die GPX-Leiste kommt UNTER die Tabelle - genau wie die Player-
+        # Leiste unter das Videobild. Das haelt oben Platz frei, wo sonst
+        # der Schwebeknopf den "..."-Button verdeckt hat.
+        # Eingehaengt wird sie weiter unten, nach der Tabelle.
         
         undo_action.triggered.connect(self.on_global_undo)
         
@@ -1180,25 +1234,55 @@ class MainWindow(QMainWindow):
 
         
         self.bottom_right_layout.addWidget(self.gpx_widget, stretch=5)
-        self.right_v_layout.addWidget(self.bottom_right_widget, stretch=3)
-        
+        self.bottom_right_layout.addWidget(self.gpx_control, stretch=0)
+
         #
-        # ============== QSplitter (horizontal) ==============
+        # ============== Module in die Fenster setzen ==============
         #
-        splitter = QSplitter(Qt.Horizontal, central_widget)
-        splitter.addWidget(left_column_widget)
-        splitter.addWidget(right_column_widget)
-        
-        # Optional: Startverhältnis (z.B. Pixel oder Stretch)
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 1)
-        # Fuer Speichern/Wiederherstellen und "Reset Window Layout".
-        self._main_splitter = splitter
-        
+        # Alles, was sich umschalten laesst, steht hier an einer Stelle. Das
+        # Video ist bewusst NICHT dabei: es bleibt immer in der oberen Zeile
+        # und wechselt nur die Seite (View-Menue). Ein Zeilenwechsel wuerde
+        # sein natives Fenster neu erzeugen und das Bild kosten.
+        self._module = {
+            "map":   ("Map",         self.map_widget),
+            "chart": ("Chart",       self.chart),
+            "flow":  ("Chart-Flow",  self.chart_flow),
+            "gpx":   ("GPX-Tabelle", self.bottom_right_widget),
+        }
+        self._slots["or"].inhalt_setzen("video", self.video_area_widget, "Video")
+        self._slots["ol"].inhalt_setzen("map", self.map_widget, "Map")
+        self._slots["ul"].inhalt_setzen("chart", self.chart, "Chart")
+        self._slots["ur"].inhalt_setzen("gpx", self.bottom_right_widget, "GPX-Tabelle")
+        # Vier Module auf drei waehlbare Fenster - eines ist immer verdeckt.
+        # Zum Start ist das der Chart-Flow.
+        self._auswahllisten_auffrischen()
+        self._kopfzeilen_anwenden(self.action_slot_kopf.isChecked())
+        # Gemerkten Zustand der Video-Einblendung herstellen.
+        self.video_editor.overlayPositionGeaendert.connect(
+            self._overlay_position_gemerkt)
+        _s = QSettings("KVRouite", "KVRouite")
+        _pos = _s.value(self._OVERLAY_POS_KEY, "", type=str)
+        if _pos and ";" in _pos:
+            try:
+                _rx, _ry = (float(t) for t in _pos.split(";", 1))
+                self.video_editor.set_overlay_position(_rx, _ry)
+            except ValueError:
+                pass
+        self.video_editor.hoehen_overlay_zeigen(
+            self.action_hoehen_overlay.isChecked())
+
+        # ============== Aufteilung der fertigen Zeilen ==============
         #
-        # ============== Splitter ins Haupt-Layout ==============
-        #
-        main_h_layout.addWidget(splitter)
+        # Geruest und Inhalte haengen bereits - hier steht nur noch, wie sich
+        # der Platz verteilt.
+        self._top_splitter.setStretchFactor(0, 1)
+        self._top_splitter.setStretchFactor(1, 1)
+        self._bottom_splitter.setStretchFactor(0, 1)
+        self._bottom_splitter.setStretchFactor(1, 1)
+        # Die Timeline behaelt ihre Hoehe, oben und unten teilen sich den Rest.
+        self._main_splitter.setStretchFactor(0, 1)
+        self._main_splitter.setStretchFactor(1, 0)
+        self._main_splitter.setStretchFactor(2, 1)
         
         
         
@@ -1397,6 +1481,9 @@ class MainWindow(QMainWindow):
     
     def _on_gpx_row_selected(self, row_idx: int):
         self.map_widget.set_selected_point(row_idx)
+        # Auch beim Waehlen einer Tabellenzeile soll der Chart-Flow folgen.
+        if getattr(self, "mini_chart_widget", None):
+            self.mini_chart_widget.set_current_index(row_idx)
 
 
 
@@ -2621,7 +2708,14 @@ class MainWindow(QMainWindow):
     # wieder her: Standardgroesse, zentriert, Splitter 50/50.
 
     _GEOMETRY_KEY = "ui/window_geometry"
-    _SPLITTER_KEY = "ui/splitter_state"
+    _SPLITTER_KEY = "ui/splitter_state"          # senkrecht: oben | Timeline | unten
+    _TOP_SPLITTER_KEY = "ui/top_splitter_state"       # Video | Karte
+    _BOTTOM_SPLITTER_KEY = "ui/bottom_splitter_state" # Chart | GPX-Tabelle
+
+    # Hoehe der Timeline-Zeile. Die Timeline hat die Zeile seit 6.02 fuer sich
+    # allein - die Bedienleiste sitzt beim Player, der Mini-Chart ist weg.
+    _TIMELINE_MIN_H = 56
+    _TIMELINE_START_H = 84
 
     def _default_window_size(self):
         """Standardgroesse wie beim allerersten Start: 16:9, 90% des Schirms.
@@ -2655,14 +2749,173 @@ class MainWindow(QMainWindow):
             return False
         return bool(self.restoreGeometry(data))
 
-    def _split_5050(self):
-        """Splitter exakt halbieren.
+    # ------------------------------------------------------------------
+    # Module in den Fenstern tauschen
+    # ------------------------------------------------------------------
+    def _auswahllisten_auffrischen(self):
+        """Jedem umschaltbaren Fenster sagen, was es anbieten darf.
+
+        Das Video-Fenster bekommt keine Liste - dort wechselt man ueber das
+        View-Menue nur die Seite.
+        """
+        eintraege = [(mid, name) for mid, (name, _w) in self._module.items()]
+        for slot_id, slot in self._slots.items():
+            if self._zeile_von_slot(slot_id) == "oben":
+                # Oben steht Video zusaetzlich zur Wahl - dort ist es nur ein
+                # Seitenwechsel. Nach unten kann es nicht, siehe _modul_wechseln.
+                slot.auswahl_setzen([("video", "Video")] + eintraege)
+            else:
+                slot.auswahl_setzen(eintraege)
+
+    def _zeile_von_slot(self, slot_id: str) -> str:
+        return "oben" if slot_id in ("ol", "or") else "unten"
+
+    def _modul_wechseln(self, slot_id: str, modul_id: str):
+        """Modul in ein Fenster holen.
+
+        Liegt es schon in einem anderen Fenster, tauschen die beiden ihre
+        Inhalte. Liegt es in der Reserve, wandert der bisherige Inhalt des
+        Ziels dorthin.
+
+        Das Video ist der Sonderfall: es bleibt immer in der oberen Zeile und
+        wechselt dort nur die Seite. Soll in seinem Fenster etwas anderes
+        stehen, weicht es zuvor auf die andere Seite aus.
+        """
+        ziel = self._slots.get(slot_id)
+        if ziel is None:
+            return
+        if ziel.modul_id() == modul_id:
+            return
+
+        # --- Sonderfall Video ---
+        # Das Video bleibt immer in der oberen Zeile. Ein Wechsel nach unten
+        # wuerde sein natives Fenster neu erzeugen und das Bild kosten.
+        if modul_id == "video":
+            if self._zeile_von_slot(slot_id) == "oben":
+                self._video_seite_wechseln()
+            return
+
+        if ziel.modul_id() == "video":
+            # Hier soll etwas anderes hin, also muss das Video zur Seite
+            # weichen - in das andere obere Fenster. Danach steht in diesem
+            # Fenster dessen bisheriger Inhalt, und der normale Tausch unten
+            # macht den Rest.
+            self._video_seite_wechseln()
+            ziel = self._slots.get(slot_id)
+            if ziel is None or ziel.modul_id() == modul_id:
+                return
+
+        if modul_id not in self._module:
+            return
+
+        name_neu, widget_neu = self._module[modul_id]
+        quelle = next((s for s in self._slots.values()
+                       if s.modul_id() == modul_id), None)
+
+        # Merken, wo was herkam - fuer das Neuladen der Karte weiter unten.
+        zeile_ziel = self._zeile_von_slot(slot_id)
+        zeile_quelle = self._zeile_von_slot(quelle.slot_id) if quelle else None
+
+        alt_id = ziel.modul_id()
+        alt_widget = ziel.inhalt_entnehmen()
+
+        if quelle is not None:
+            quelle.inhalt_entnehmen()
+            if alt_widget is not None and alt_id in self._module:
+                quelle.inhalt_setzen(alt_id, alt_widget, self._module[alt_id][0])
+        elif alt_widget is not None:
+            # Ziel-Inhalt geht in die Reserve und ist damit verdeckt.
+            self._modul_reserve.layout().addWidget(alt_widget)
+            alt_widget.hide()
+
+        ziel.inhalt_setzen(modul_id, widget_neu, name_neu)
+        self._auswahllisten_auffrischen()
+
+        # Die Karte ist eine QWebEngineView. Wechselt sie die Zeile, bekommt
+        # sie einen neuen Vater und damit ein neu erzeugtes natives Fenster -
+        # der Kompositor haengt dann noch am alten und die Seite bleibt weiss.
+        # Ein Neuladen baut sie im neuen Fenster sauber auf. Innerhalb einer
+        # Zeile passiert das nicht, dort ist es nur ein Positionswechsel.
+        betroffen = [(modul_id, zeile_quelle, zeile_ziel)]
+        if quelle is not None and alt_id in self._module:
+            betroffen.append((alt_id, zeile_ziel, zeile_quelle))
+        for mid, von, nach in betroffen:
+            if mid == "map" and von is not None and von != nach:
+                self.map_widget.view.reload()
+                break
+
+    def _video_seite_wechseln(self):
+        """Die beiden oberen Fenster tauschen die Seite.
+
+        Getauscht werden die FENSTER im Splitter, nicht ihre Inhalte. Das ist
+        eine reine Indexaenderung im selben Splitter - kein Vaterwechsel, das
+        Videobild bleibt also stehen. Wuerde man die Inhalte tauschen, bekaeme
+        das Video eine neue native Fenster-ID und das Bild waere weg.
+
+        Damit "ol" weiterhin "links oben" bedeutet, wandern die Bezeichnungen
+        mit.
+        """
+        sp = getattr(self, "_top_splitter", None)
+        links, rechts = self._slots.get("ol"), self._slots.get("or")
+        if sp is None or links is None or rechts is None:
+            return
+
+        groessen = sp.sizes()
+        sp.insertWidget(0, rechts)          # rechtes Fenster nach links
+        sp.setSizes(list(reversed(groessen)))
+
+        self._slots["ol"], self._slots["or"] = rechts, links
+        rechts.slot_id, links.slot_id = "ol", "or"
+        self._auswahllisten_auffrischen()
+
+    # Standardmaessig AUS. Gemessen am fertigen Fenster kostet die Leiste in
+    # jedem der vier Fenster rund 20 px Hoehe, ohne etwas beizutragen, was
+    # Schwebeknopf und Rechtsklick nicht auch koennten. Der Schalter bleibt,
+    # weil die Leiste als einzige den Modulnamen anzeigt.
+    # Eigener Schluessel: der alte hatte den Auslieferungswert "an".
+    _KOPFZEILEN_KEY = "ui/fenster_kopfzeilen"
+    _OVERLAY_KEY = "ui/hoehen_overlay"
+
+    _OVERLAY_POS_KEY = "ui/hoehen_overlay_pos"
+
+    def _overlay_position_gemerkt(self, rx: float, ry: float):
+        """Frei gezogene Stelle der Einblendung merken.
+
+        Gespeichert wird relativ zur Bildgroesse, damit sie bei einer anderen
+        Fenstergroesse an derselben Stelle im Bild sitzt. -1 heisst: keine
+        freie Stelle, es gilt wieder der Standardplatz unten links.
+        """
+        s = QSettings("KVRouite", "KVRouite")
+        if rx < 0 or ry < 0:
+            s.remove(self._OVERLAY_POS_KEY)
+        else:
+            s.setValue(self._OVERLAY_POS_KEY, f"{rx:.5f};{ry:.5f}")
+
+
+    def _hoehen_overlay_umschalten(self, an: bool):
+        """Hoehenprofil im Videobild ein- oder ausblenden."""
+        self.video_editor.hoehen_overlay_zeigen(an)
+        QSettings("KVRouite", "KVRouite").setValue(self._OVERLAY_KEY, bool(an))
+
+
+    def _kopfzeilen_anwenden(self, an: bool):
+        """Nur die Sichtbarkeit setzen - ohne zu speichern."""
+        for slot in self._slots.values():
+            slot.kopf_zeigen(an)
+
+    def _kopfzeilen_umschalten(self, an: bool):
+        """Vom Menue: umschalten und die Wahl merken."""
+        self._kopfzeilen_anwenden(an)
+        QSettings("KVRouite", "KVRouite").setValue(self._KOPFZEILEN_KEY, bool(an))
+
+    @staticmethod
+    def _halve(sp):
+        """Einen waagerechten Splitter exakt halbieren.
 
         Die Griffbreite muss raus, bevor geteilt wird. Sonst ist die Summe der
         beiden Wunschbreiten groesser als der Splitter und Qt kuerzt selbst -
         das Ergebnis ist dann um ein paar Pixel schief.
         """
-        sp = getattr(self, "_main_splitter", None)
         if sp is None:
             return
         avail = sp.width() - sp.handleWidth() * (sp.count() - 1)
@@ -2670,6 +2923,47 @@ class MainWindow(QMainWindow):
             return
         half = avail // 2
         sp.setSizes([half, avail - half])
+
+    def _split_5050(self):
+        """Auslieferungszustand: beide Zeilen halbiert, Timeline auf Starthoehe.
+
+        Senkrecht wird NICHT gleichmaessig geteilt. Die obere Zeile bekommt
+        genau so viel Hoehe, dass ein 16:9-Bild die Breite seines Platzes voll
+        ausfuellt - sonst startet der Player mit schwarzen Balken links und
+        rechts. Gerechnet wird mit der halben Breite der oberen Zeile, daraus
+        16:9, plus die Bedienleiste darunter. Den Rest bekommt die untere Zeile.
+
+        16:9 ist eine Annahme fuer den Startzustand: beim Start ist noch kein
+        Video geladen, das Seitenverhaeltnis also unbekannt.
+        """
+        self._halve(getattr(self, "_top_splitter", None))
+        self._halve(getattr(self, "_bottom_splitter", None))
+
+        sp = getattr(self, "_main_splitter", None)
+        if sp is None:
+            return
+        avail = sp.height() - sp.handleWidth() * (sp.count() - 1)
+        rest = avail - self._TIMELINE_START_H
+        if rest < 2:
+            return
+
+        oben = rest // 2
+        top = getattr(self, "_top_splitter", None)
+        if top is not None and top.width() > 0:
+            platz = (top.width() - top.handleWidth() * (top.count() - 1)) // 2
+            leiste = 0
+            if getattr(self, "video_control", None) is not None:
+                leiste = self.video_control.sizeHint().height()
+            kopf = 0
+            slot_or = self._slots.get("or") if getattr(self, "_slots", None) else None
+            if slot_or is not None and slot_or._kopf.isVisible():
+                kopf = slot_or._kopf.height()
+            gewuenscht = int(platz * 9 / 16) + leiste + kopf
+            # Der unteren Zeile muss genug bleiben, damit Chart und Tabelle
+            # nicht auf einen Streifen zusammenfallen.
+            oben = max(200, min(gewuenscht, rest - 200))
+
+        sp.setSizes([oben, self._TIMELINE_START_H, rest - oben])
 
     def _restore_or_balance_splitter(self):
         """Splitter-Teilung laden - oder, wenn nichts gespeichert ist, halbieren.
@@ -2681,29 +2975,54 @@ class MainWindow(QMainWindow):
 
         Unter die Mindestbreite einer Spalte kommt auch 50/50 nicht - Qt
         korrigiert das dann selbst nach oben.
+
+        Seit 6.02 sind es drei Splitter. Geladen wird nur, wenn fuer alle drei
+        etwas gespeichert ist und auch alle drei sich wiederherstellen lassen -
+        sonst gaebe eine halb geladene Aufteilung ein schiefes Fenster.
         """
         sp = getattr(self, "_main_splitter", None)
-        if sp is None:
+        top = getattr(self, "_top_splitter", None)
+        bottom = getattr(self, "_bottom_splitter", None)
+        if sp is None or top is None or bottom is None:
             return
-        data = QSettings("KVRouite", "KVRouite").value(
-            self._SPLITTER_KEY, None, type=QByteArray)
-        if data is not None and not data.isEmpty() and sp.restoreState(data):
-            return
-        self._split_5050()
+
+        s = QSettings("KVRouite", "KVRouite")
+        paare = (
+            (sp, self._SPLITTER_KEY),
+            (top, self._TOP_SPLITTER_KEY),
+            (bottom, self._BOTTOM_SPLITTER_KEY),
+        )
+        zustaende = []
+        for widget, key in paare:
+            data = s.value(key, None, type=QByteArray)
+            if data is None or data.isEmpty():
+                self._split_5050()
+                return
+            zustaende.append((widget, data))
+
+        for widget, data in zustaende:
+            if not widget.restoreState(data):
+                self._split_5050()
+                return
 
     def _save_window_layout(self):
         s = QSettings("KVRouite", "KVRouite")
         # Im Vollbild/maximiert speichert saveGeometry() zusaetzlich die
         # normale Groesse mit - deshalb reicht der eine Aufruf.
         s.setValue(self._GEOMETRY_KEY, self.saveGeometry())
-        sp = getattr(self, "_main_splitter", None)
-        if sp is not None:
-            s.setValue(self._SPLITTER_KEY, sp.saveState())
+        for attr, key in (("_main_splitter", self._SPLITTER_KEY),
+                          ("_top_splitter", self._TOP_SPLITTER_KEY),
+                          ("_bottom_splitter", self._BOTTOM_SPLITTER_KEY)):
+            sp = getattr(self, attr, None)
+            if sp is not None:
+                s.setValue(key, sp.saveState())
 
     def _on_reset_window_layout(self):
         s = QSettings("KVRouite", "KVRouite")
         s.remove(self._GEOMETRY_KEY)
         s.remove(self._SPLITTER_KEY)
+        s.remove(self._TOP_SPLITTER_KEY)
+        s.remove(self._BOTTOM_SPLITTER_KEY)
 
         if self.isMaximized() or self.isFullScreen():
             self.showNormal()
@@ -2725,6 +3044,11 @@ class MainWindow(QMainWindow):
             # Erst wenn das Fenster seine endgueltige Breite hat, sonst wird
             # die Haelfte von einer Zwischengroesse berechnet.
             QTimer.singleShot(0, self._restore_or_balance_splitter)
+            # Und danach das Hoehenprofil im Video: seine Stelle wird aus der
+            # Bildgroesse gerechnet, die erst nach dem Aufteilen der Splitter
+            # feststeht. Ohne diesen zweiten Durchgang sass es nach dem Start
+            # in der Bildmitte statt unten links.
+            QTimer.singleShot(0, self.video_editor._hoehen_overlay_platzieren)
 
     def closeEvent(self, event):
         try:
@@ -3257,19 +3581,8 @@ class MainWindow(QMainWindow):
             #    "padding: 2px;"
             #)
         
-        if self.gpx_control:
-            self.gpx_control.update_set_gpx2video_state(
-                video_edit_on=self.action_toggle_video.isChecked(),
-                auto_sync_on=checked
-            )
         self._update_set_gpx2video_enabled()    
         
-        #if self.gpx_control:
-        #    self.gpx_control.update_set_gpx2video_state(
-        #        video_edit_on=self.action_toggle_video.isChecked(),
-        #        auto_sync_on=checked
-        #    )
-            #self.gpx_control.setEnabled(not checked)  # <--- HIER: komplett ausgrauen/eingrauen
 
         
     def _on_sync_point_video_time_toggled(self, checked: bool):
@@ -3757,9 +4070,11 @@ class MainWindow(QMainWindow):
         if not self.video_editor.is_playing:
             self.gpx_widget.gpx_list.select_row_in_pause(index)
             self.chart.highlight_gpx_index(index)
+            if self.mini_chart_widget:
+                self.mini_chart_widget.set_current_index(index)
 
-   
-    
+
+
     def _show_copyright_dialog(self):
         from PySide6.QtGui import QPixmap
         from PySide6.QtWidgets import QMessageBox
@@ -3979,129 +4294,6 @@ class MainWindow(QMainWindow):
             temp_dir=temp_dir
         )
     
-    # -----------------------------------------------------------------------
-    # Detach-Funktionen Video
-    # -----------------------------------------------------------------------
-    def _toggle_video(self):
-        if self._video_area_floating_dialog is None:
-            self._detach_video_area_widget()
-            self.action_toggle_video.setText("Video (attach)")
-        else:
-            self._reattach_video_area_widget()
-            self.action_toggle_video.setText("Video (detach)")
-
-    def _reattach_video_area_widget(self):
-        if not self._video_area_floating_dialog:
-            return
-
-        # 1) Referenz loeschen, aber noch NICHT schliessen. close() loest ueber
-        #    closeEvent das Signal requestReattach aus und landet sonst ein
-        #    zweites Mal in dieser Methode.
-        dlg = self._video_area_floating_dialog
-        self._video_area_floating_dialog = None
-    
-        # 2) Platzhalter entfernen
-        if self._video_placeholder is not None:
-            idx = self.left_v_layout.indexOf(self._video_placeholder)
-            if idx >= 0:
-                self.left_v_layout.removeWidget(self._video_placeholder)
-            self._video_placeholder.deleteLater()
-            self._video_placeholder = None
-
-        # 3) Video wieder einfügen (am selben Index)
-        #    Falls du es wieder ganz oben haben willst, kannst du idx=0 nehmen
-        self.left_v_layout.insertWidget(0, self.video_area_widget, 1)
-
-        # 4) Erst jetzt den leeren Dialog schliessen. Die Reihenfolge ist
-        #    wichtig: die Rueckfall-Videosenke rendert in die native
-        #    Fenster-ID von video_frame. Wird der Dialog geschlossen, solange
-        #    das Video noch darin haengt, zerstoert Qt dieses Fenster und legt
-        #    beim Umhaengen ein neues an - die Senke verliert ihre ID, und das
-        #    Bild ist weg.
-        dlg.close()
-
-       
-
-
-    def _detach_video_area_widget(self):
-        if self._video_area_floating_dialog is not None:
-            # Schon abgekoppelt
-            return
-
-        # 1) Platzhalter erstellen (falls du ihn farblich hervorheben willst)
-        #self._video_placeholder = QFrame()
-        #self._video_placeholder.setStyleSheet("background-color: #444;")
-
-        # 2) Index des video_area_widget im left_v_layout suchen
-        idx = self.left_v_layout.indexOf(self.video_area_widget)
-        if idx < 0:
-            # Falls nicht gefunden => wir brechen lieber ab
-            return
-            
-            
-        self.left_v_layout.removeWidget(self.video_area_widget)
-        self._video_placeholder = QFrame()
-        self._video_placeholder.setStyleSheet("background-color: #444;")    
-
-        # 3) An dieser Position den Platzhalter einfügen
-        self.left_v_layout.insertWidget(idx, self._video_placeholder, 1)
-
-        # 4) Das video_area_widget aus dem Layout entfernen
-        #self.left_v_layout.removeWidget(self.video_area_widget)
-
-        # 5) In einem neuen Dialog unterbringen
-        dlg = DetachDialog(self)
-        dlg.setWindowTitle("Video Editor (Detached)")
-        dlg.setWindowFlags(Qt.Window | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint)
-
-        layout = QVBoxLayout(dlg)
-        layout.addWidget(self.video_area_widget)
-
-        # Signale für + / - / Reattach
-        dlg.requestPlus.connect(self._on_detached_plus)
-        dlg.requestMinus.connect(self._on_detached_minus)
-        dlg.requestReattach.connect(self._on_request_reattach_floating)
-
-        self._video_area_floating_dialog = dlg
-        dlg.show()
-
-        # Nach dem Anzeigen neu binden
-        QTimer.singleShot(10, lambda: self._after_show_detached(dlg))
-        
-    
-    
-
-    def _after_show_detached(self, dlg: QDialog):
-        this_screen = dlg.screen()
-        if not this_screen:
-            from PySide6.QtGui import QGuiApplication
-            this_screen = QGuiApplication.primaryScreen()
-        scr_geom = this_screen.availableGeometry()
-
-        new_w = int(scr_geom.width() * 0.7)
-        new_h = int(scr_geom.height() * 0.7)
-        dlg.resize(new_w, new_h)
-
-        frame_geo = dlg.frameGeometry()
-        frame_geo.moveCenter(scr_geom.center())
-        dlg.move(frame_geo.topLeft())
-
-        
-
-    def _on_request_reattach_floating(self):
-        self._reattach_video_area_widget()
-
-    def _on_detached_plus(self):
-        if self.speed_index < len(self.vlc_speeds) - 1:
-            self.speed_index += 1
-        self.current_rate = self.vlc_speeds[self.speed_index]
-        self.video_editor.set_playback_rate(self.current_rate)
-
-    def _on_detached_minus(self):
-        if self.speed_index > 0:
-            self.speed_index -= 1
-        self.current_rate = self.vlc_speeds[self.speed_index]
-        self.video_editor.set_playback_rate(self.current_rate)    
 
     
    
@@ -4549,6 +4741,10 @@ class MainWindow(QMainWindow):
             self.map_widget.show_blue(index, do_center=True)
             #self.map_widget.show_blue(index)
             self.chart.highlight_gpx_index(index)
+            # Der Chart-Flow soll denselben Punkt zeigen, nicht erst beim
+            # Abspielen nachziehen.
+            if self.mini_chart_widget:
+                self.mini_chart_widget.set_current_index(index)
             if self._autoSyncNewPointsWithVideoTime and self.playlist_counter > 0:
                 self.on_map_sync_any()
         else:
@@ -6806,108 +7002,6 @@ class MainWindow(QMainWindow):
     
         QMessageBox.warning(self, "GPX Errors Detected", msg)
         
-    def _toggle_map(self):
-        """Menü-Aktion: 'Map (detach)' oder 'Map (attach)'."""
-        if self._map_floating_dialog is None:
-            self._detach_map_widget()
-            self.action_toggle_map.setText("Map (attach)")
-        else:
-            self._reattach_map_widget()
-            self.action_toggle_map.setText("Map (detach)")
-
-
-    def _detach_map_widget(self):
-        if self._map_floating_dialog is not None:
-            return
-    
-        # Index des map_widget im Layout finden
-        idx = self.left_v_layout.indexOf(self.map_widget)
-        if idx < 0:
-            return
-    
-        # Platzhalter
-        self._map_placeholder = QFrame()
-        self._map_placeholder.setStyleSheet("background-color: #444;")
-    
-        # Platzhalter an die alte Stelle des map_widget
-        self.left_v_layout.insertWidget(idx, self._map_placeholder, 1)
-        self.left_v_layout.removeWidget(self.map_widget)
-    
-        # DetachDialog
-        dlg = DetachDialog(self)
-        dlg.setWindowTitle("Map (Detached)")
-        dlg.setMinimumSize(800, 600)  # <-- WICHTIG: Mindestens 800×600
-    
-        layout = QVBoxLayout(dlg)
-        layout.addWidget(self.map_widget)
-    
-        # Optional: + / - / reattach
-        dlg.requestPlus.connect(self._on_map_plus)
-        dlg.requestMinus.connect(self._on_map_minus)
-        dlg.requestReattach.connect(self._on_request_reattach_map)
-    
-        self._map_floating_dialog = dlg
-        dlg.show()
-    
-        # Zeitverzögertes Resize
-        QTimer.singleShot(50, lambda: self._after_show_map_detached(dlg))
-    
-    
-    def _after_show_map_detached(self, dlg: QDialog):
-        screen = dlg.screen()
-        if not screen:
-           
-            screen = QGuiApplication.primaryScreen()
-    
-        sg = screen.availableGeometry()
-        w = int(sg.width() * 0.5)
-        h = int(sg.height() * 0.5)
-        dlg.resize(w, h)
-    
-        fg = dlg.frameGeometry()
-        fg.moveCenter(sg.center())
-        dlg.move(fg.topLeft())
-    
-    
-    def _reattach_map_widget(self):
-        if not self._map_floating_dialog:
-            return
-    
-        # Referenz loeschen, aber noch NICHT schliessen. close() loest ueber
-        # closeEvent das Signal requestReattach aus und landet sonst ein
-        # zweites Mal in dieser Methode.
-        dlg = self._map_floating_dialog
-        self._map_floating_dialog = None
-    
-        if self._map_placeholder:
-            idx = self.left_v_layout.indexOf(self._map_placeholder)
-            if idx >= 0:
-                self.left_v_layout.removeWidget(self._map_placeholder)
-            self._map_placeholder.deleteLater()
-            self._map_placeholder = None
-    
-        # Map wieder unten einfügen (z.B. am Ende des Layouts)
-        self.left_v_layout.addWidget(self.map_widget, 1)
-
-        # Erst jetzt den leeren Dialog schliessen - dieselbe Reihenfolge wie
-        # beim Video, damit das Widget umgehaengt und nicht neu erzeugt wird.
-        dlg.close()
-    
-    
-    def _on_request_reattach_map(self):
-        """Vom Dialog-Signal aufgerufen."""
-        self._reattach_map_widget()
-    
-    
-    # (Optional) Falls du + / – für Zoom willst:
-    def _on_map_plus(self):
-        # Angenommen, du hast in map_page.html JS-Funktionen "mapZoomIn()"
-        js_code = "mapZoomIn();"
-        self.map_widget.view.page().runJavaScript(js_code)
-    
-    def _on_map_minus(self):
-        js_code = "mapZoomOut();"
-        self.map_widget.view.page().runJavaScript(js_code)
 
     def ordered_insert_new_point(self,lat: float, lon: float, video_time: float) -> int:
         print(f"[DEBUG] ordered_insert_new_point => video_time={video_time}")

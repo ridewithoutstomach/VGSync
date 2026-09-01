@@ -40,13 +40,70 @@ from widgets.video_surface import VideoSurface
 from PySide6.QtWidgets import (
     QWidget, QGridLayout, QFrame, QLabel, QVBoxLayout
 )
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import Qt, QTimer, Signal, QRect
 
 from PySide6.QtGui import QShortcut, QKeySequence
+
+class _OverlayGriff(QWidget):
+    """Kleiner Anfasser, mit dem sich die Hoehenprofil-Einblendung ziehen laesst.
+
+    Es gibt ihn als eigenes Widget, weil das Profil selbst
+    WA_TransparentForMouseEvents traegt - Klicks gehen dort hindurch aufs
+    Video, sonst waere das Ziehen im 360-Modus an dieser Stelle tot. Der
+    Griff ist die einzige Flaeche, die die Maus annimmt.
+    """
+
+    GROESSE = 18
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setFixedSize(self.GROESSE, self.GROESSE)
+        self.setCursor(Qt.SizeAllCursor)
+        self.setToolTip("Höhenprofil verschieben")
+        self._greifpunkt = None
+
+    def paintEvent(self, event):
+        from PySide6.QtGui import QPainter, QColor, QPen
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(0, 0, 0, 150))
+        p.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 3, 3)
+        # Zwei Griffleisten, wie man sie von Anfassern kennt
+        p.setPen(QPen(QColor(220, 220, 220), 1))
+        for dy in (-3, 0, 3):
+            p.drawLine(4, self.height() // 2 + dy,
+                       self.width() - 5, self.height() // 2 + dy)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._greifpunkt = event.position().toPoint()
+            event.accept()
+        else:
+            event.ignore()
+
+    def mouseMoveEvent(self, event):
+        if self._greifpunkt is None:
+            event.ignore()
+            return
+        neu = self.mapToParent(event.position().toPoint() - self._greifpunkt)
+        self.parent().overlay_an_griff_ziehen(neu)
+        event.accept()
+
+    def mouseReleaseEvent(self, event):
+        if self._greifpunkt is not None:
+            self._greifpunkt = None
+            self.parent().overlay_position_merken()
+            event.accept()
+        else:
+            event.ignore()
+
 
 class VideoEditorWidget(QWidget):
      #Signal MUSS als Klassenattribut definiert werden
     videosDropped = Signal(list)  # list[str]
+    # Frei gezogene Stelle, relativ zur Bildgroesse (x, y je 0..1).
+    overlayPositionGeaendert = Signal(float, float)
     
     """
     Video-Player-Widget. Die Wiedergabe selbst macht der GES-Player
@@ -112,6 +169,10 @@ class VideoEditorWidget(QWidget):
         self.video_surface.hide()
         self.video_surface.overlayGeaendert.connect(self.overlayImBildGeaendert)
         self.video_surface.blick360Gezogen.connect(self._auf_blick_zug)
+        # Das Hoehenprofil richtet sich am Bild aus, nicht am Widget - es muss
+        # also nachziehen, wenn das Bild seine Flaeche wechselt.
+        self.video_surface.bildbereichGeaendert.connect(
+            self._hoehen_overlay_platzieren)
         self.video_surface.blick360Gezoomt.connect(self._auf_blick_zoom)
         layout.addWidget(self.video_surface, 0, 0)
         layout.setRowStretch(0, 1)
@@ -166,23 +227,14 @@ class VideoEditorWidget(QWidget):
         vbox_edit.addWidget(self.acut_status_label)
         layout.addWidget(self.edit_status_widget, 0, 0, alignment=Qt.AlignTop | Qt.AlignRight)
 
-        # Unten Links: total_length + cut_time
-        self.right_time_widget = QWidget(self)
-        vbox_right_time = QVBoxLayout(self.right_time_widget)
-        vbox_right_time.setContentsMargins(0,0,0,0)
-        vbox_right_time.setSpacing(0)
-        vbox_right_time.setAlignment(Qt.AlignRight)
-
-        self.total_length_label = QLabel("", self.right_time_widget)
-        self.total_length_label.setStyleSheet("color:white; padding-left:5px;")
-        vbox_right_time.addWidget(self.total_length_label)
-
-        self.cut_time_label = QLabel("", self.right_time_widget)
-        self.cut_time_label.setStyleSheet("color:red; padding-left:5px;")
-        vbox_right_time.addWidget(self.cut_time_label)
-        self.cut_time_label.hide()
-
-        layout.addWidget(self.right_time_widget, 0, 0, alignment=Qt.AlignBottom | Qt.AlignLeft)
+        # Unten links standen bis 6.01 zwei Zeiten im Bild: die Laenge des
+        # Originalvideos und die Laenge nach den Schnitten. Beide sind
+        # entfallen - sie verdeckten das Bild, waren auf hellem Untergrund
+        # kaum zu lesen und stehen jetzt in der GPX-Summary ("Video before
+        # cuts" und "Video Duration"). Die Setter dazu gibt es weiterhin,
+        # sie werden an rund acht Stellen gerufen und halten die Werte.
+        self._laenge_original_s = 0.0
+        self._laenge_nach_schnitt_s = 0.0
 
         # 360°-Modus Anzeige
         self._360_label = QLabel("360°", self)
@@ -192,6 +244,28 @@ class VideoEditorWidget(QWidget):
         )
         self._360_label.hide()
         layout.addWidget(self._360_label, 0, 0, alignment=Qt.AlignTop | Qt.AlignLeft)
+
+        # Hoehenprofil-Einblendung unten links im Bild.
+        #
+        # Bewusst KEIN Layout-Platz: das Widget ist ein freies Kind und wird
+        # in resizeEvent positioniert, liegt also ueber dem Bild, ohne es
+        # kleiner zu machen. Dass das geht, zeigen die Zeitanzeigen - der
+        # Videoframe und die Malflaeche liegen per lower() ganz unten.
+        from widgets.mini_chart_widget import MiniChartWidget
+        self.hoehen_overlay = MiniChartWidget(self)
+        self.hoehen_overlay.set_overlay_modus(True)
+        self.hoehen_overlay.hide()
+
+        # Freie Position, relativ zur Bildgroesse (0..1) - damit sie bei
+        # anderer Fenstergroesse an derselben Stelle im Bild bleibt.
+        # None = noch nie verschoben, dann gilt die Standardecke.
+        self._overlay_pos = None
+
+        # Der Griff zum Verschieben. Nur er faengt die Maus; das Profil selbst
+        # bleibt mausdurchlaessig, damit das Ziehen im 360-Modus dort
+        # weiterhin ankommt. 18x18 Punkte sind der Preis dafuer.
+        self._overlay_griff = _OverlayGriff(self)
+        self._overlay_griff.hide()
 
         # Der Player. Seit 6.0 gibt es nur noch GES; scheitert er, kann die
         # App kein Video zeigen. Der Fehler wird deshalb durchgereicht - der
@@ -297,6 +371,138 @@ class VideoEditorWidget(QWidget):
         super().resizeEvent(e)
         # Overlay immer auf volle Größe
         self._dnd_overlay.setGeometry(self.rect())
+        self._hoehen_overlay_platzieren()
+
+    def _hoehen_overlay_platzieren(self):
+        """Hoehenprofil an seine Stelle setzen.
+
+        Ohne Zutun unten links; hat der Nutzer es am Griff verschoben, an die
+        gemerkte Stelle. Die ist relativ zur Bildgroesse gespeichert, damit
+        sie bei anderer Fenstergroesse dieselbe Stelle im Bild trifft.
+        """
+        ov = getattr(self, "hoehen_overlay", None)
+        if ov is None:
+            return
+
+        # Gerechnet wird im BILD, nicht im Widget: passt das Seitenverhaeltnis
+        # des Videos nicht zum Fenster, bleiben oben/unten oder links/rechts
+        # schwarze Balken. Auf einem Balken waere die Einblendung zwar da,
+        # aber eben nicht im Bild - beim Export sieht man sie ohnehin nicht,
+        # und beim Arbeiten liegt sie im Nichts.
+        bild = self._bildrechteck()
+        rand = 10
+        b = max(180, min(420, int(bild.width() * 0.30)))
+        ho = max(90, min(200, int(bild.height() * 0.26)))
+
+        # Solange das Bild seine endgueltige Groesse nicht hat, waere jede
+        # Rechnung von unten falsch: die Hoehe ist dann kleiner als das Profil,
+        # und die Einblendung klebte am oberen Rand fest. Lieber gar nicht
+        # setzen - showEvent und resizeEvent holen es nach.
+        if bild.height() < ho + 2 * rand or bild.width() < b + 2 * rand:
+            return
+
+        pos = getattr(self, "_overlay_pos", None)
+        if pos is not None:
+            # Frei gezogene Stelle, relativ zum Bild gespeichert.
+            x = bild.x() + int(pos[0] * bild.width())
+            y = bild.y() + int(pos[1] * bild.height())
+        else:
+            x = bild.x() + rand
+            y = bild.y() + bild.height() - ho - rand
+
+        x = max(bild.x(), min(x, bild.x() + bild.width() - b))
+        y = max(bild.y(), min(y, bild.y() + bild.height() - ho))
+        ov.setGeometry(x, y, b, ho)
+        ov.raise_()
+        self._griff_platzieren()
+
+    def _bildrechteck(self):
+        """Flaeche, auf der das Videobild tatsaechlich liegt.
+
+        Die Zeichenflaeche kennt sie, sobald ein Bild da ist. Ohne Video
+        (oder solange die Rueckfall-Fenstersenke zeichnet) gilt das ganze
+        Widget - dann gibt es auch keine Balken, an denen etwas vorbeiginge.
+        """
+        flaeche = getattr(self, "video_surface", None)
+        if flaeche is not None and not flaeche.isHidden():
+            r = flaeche.bildbereich()
+            if not r.isEmpty():
+                # Von den Koordinaten der Zeichenflaeche in die eigenen.
+                return QRect(flaeche.x() + r.x(), flaeche.y() + r.y(),
+                             r.width(), r.height())
+        return self.rect()
+
+    def _griff_platzieren(self):
+        """Griff in die linke obere Ecke der Einblendung setzen."""
+        griff = getattr(self, "_overlay_griff", None)
+        ov = getattr(self, "hoehen_overlay", None)
+        if griff is None or ov is None:
+            return
+        if ov.isHidden():
+            griff.hide()
+            return
+        griff.move(ov.x() + 3, ov.y() + 3)
+        griff.show()
+        griff.raise_()
+
+    def overlay_an_griff_ziehen(self, neue_griff_pos):
+        """Wird vom Griff beim Ziehen gerufen.
+
+        Begrenzt auf das Bild, nicht auf das Widget - das Profil soll sich
+        nicht auf einen schwarzen Balken schieben lassen.
+        """
+        ov = getattr(self, "hoehen_overlay", None)
+        if ov is None:
+            return
+        bild = self._bildrechteck()
+        x = max(bild.x(), min(neue_griff_pos.x() - 3,
+                              bild.x() + bild.width() - ov.width()))
+        y = max(bild.y(), min(neue_griff_pos.y() - 3,
+                              bild.y() + bild.height() - ov.height()))
+        ov.move(x, y)
+        self._griff_platzieren()
+
+    def overlay_position_merken(self):
+        """Nach dem Ziehen die Stelle relativ zum Bild festhalten."""
+        ov = getattr(self, "hoehen_overlay", None)
+        if ov is None:
+            return
+        bild = self._bildrechteck()
+        if bild.width() < 1 or bild.height() < 1:
+            return
+        self._overlay_pos = ((ov.x() - bild.x()) / bild.width(),
+                             (ov.y() - bild.y()) / bild.height())
+        self.overlayPositionGeaendert.emit(float(self._overlay_pos[0]),
+                                           float(self._overlay_pos[1]))
+
+    def set_overlay_position(self, rx: float, ry: float):
+        """Gemerkte freie Stelle wiederherstellen (relative Werte 0..1)."""
+        if rx < 0 or ry < 0:
+            self._overlay_pos = None
+        else:
+            self._overlay_pos = (float(rx), float(ry))
+        self._hoehen_overlay_platzieren()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # Erst hier steht die endgueltige Groesse fest.
+        QTimer.singleShot(0, self._hoehen_overlay_platzieren)
+
+    def hoehen_overlay_zeigen(self, an: bool):
+        """Einblendung an- oder ausschalten."""
+        ov = getattr(self, "hoehen_overlay", None)
+        if ov is None:
+            return
+        if an:
+            ov.show()
+            ov.raise_()
+            self._hoehen_overlay_platzieren()
+            # Beim ersten Einschalten kann die endgueltige Groesse noch
+            # fehlen; dann holt es der naechste Durchlauf nach.
+            QTimer.singleShot(0, self._hoehen_overlay_platzieren)
+        else:
+            ov.hide()
+            self._overlay_griff.hide()
 
     def dragEnterEvent(self, e):
         ok = any(self._is_video(p) for p in self._extract_paths(e.mimeData()))
@@ -436,26 +642,19 @@ class VideoEditorWidget(QWidget):
         self.speed_label.show()
         QTimer.singleShot(2000, self.speed_label.hide)
 
+    # Die drei Setter zeigen seit 6.02 nichts mehr im Bild an (siehe oben),
+    # halten die Werte aber weiterhin - sie kommen aus dem Schnitt und aus
+    # dem Laden eines Projekts.
     def set_total_length(self, total_s: float):
         # z. B. Summe aller Videos
-        txt = self.format_seconds_simple(total_s)
-        self.total_length_label.setText(txt)
+        self._laenge_original_s = float(total_s)
 
     def set_old_time(self, old_s: float):
-        """
-        Falls dein Code hierhin ruft (historische Funktion).
-        Man kann z. B. `old_s` = summe aller Video-Längen *vor* dem Cut?
-        """
-        txt = self.format_seconds_simple(old_s)
-        self.total_length_label.setText(txt)
+        """Laenge vor dem Schnitt (historischer Name)."""
+        self._laenge_original_s = float(old_s)
 
     def set_cut_time(self, cut_s: float):
-        if cut_s > 0:
-            self.cut_time_label.setText(self.format_seconds_simple(cut_s))
-            self.cut_time_label.show()
-        else:
-            self.cut_time_label.setText("")
-            self.cut_time_label.hide()
+        self._laenge_nach_schnitt_s = float(cut_s)
 
     def format_seconds_simple(self, secs: float) -> str:
         """z. B. 74.2 => '00:01:14' (ohne ms)"""
