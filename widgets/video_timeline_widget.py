@@ -63,6 +63,11 @@ class VideoTimelineWidget(QWidget):
         # Schluessel der Schnitte, die ohne Blende ausgefuehrt werden.
         # Wird vom VideoCutManager gesetzt, siehe set_hard_cut_keys().
         self._hard_cut_keys = set()
+        # Bereich, auf den gerade rechtsgeklickt wurde: (start_s, ende_s).
+        # Er wird hervorgehoben, solange das Menue oder die Rueckfrage offen
+        # ist - bei mehreren Schnitten dicht beieinander ist sonst nicht zu
+        # sehen, welcher gemeint ist.
+        self._markierter_bereich = None
         self._dragging_marker = False
         self._dragging_timeline = False
         self._timeline_drag_start_x = 0
@@ -506,8 +511,37 @@ class VideoTimelineWidget(QWidget):
                 if rect_w < 2:
                     rect_w = 2
                 painter.drawRect(x_start, 0, rect_w, h)
+
+        # Der angeklickte Bereich, solange sein Menue offen ist. Zuletzt
+        # gezeichnet, damit er ueber Schnitt und Overlay liegt.
+        if self._markierter_bereich and self.total_duration > 0:
+            m_start, m_end = self._markierter_bereich
+            x_start = (max(0.0, m_start) / self.total_duration
+                       ) * timeline_real_width - self._horizontal_offset
+            x_end = (min(self.total_duration, m_end) / self.total_duration
+                     ) * timeline_real_width - self._horizontal_offset
+            breite = max(2.0, x_end - x_start)
+            # Leicht aufhellen, damit der Bereich auch auf dem schwarzen
+            # Schnittblock zu erkennen ist, dazu ein gestrichelter Rahmen.
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(QColor(255, 255, 255, 45)))
+            painter.drawRect(QRectF(x_start, 0, breite, h))
+            stift = QPen(QColor(255, 255, 255, 230), 2, Qt.DashLine)
+            painter.setPen(stift)
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRect(QRectF(x_start + 1, 1, breite - 2, h - 2))
                 
                     
+
+    def _markieren(self, start_s, end_s=None):
+        """Bereich hervorheben (oder mit None die Hervorhebung loeschen)."""
+        self._markierter_bereich = None if start_s is None else (start_s, end_s)
+        self.update()
+        # Sofort neu zeichnen: der Aufrufer oeffnet gleich ein Menue oder eine
+        # Rueckfrage und blockiert dabei. Ohne das Durchreichen der Ereignisse
+        # erschiene die Markierung erst, wenn alles schon vorbei ist.
+        from PySide6.QtWidgets import QApplication
+        QApplication.processEvents()
 
     def contextMenuEvent(self, event):
         from PySide6.QtWidgets import QMessageBox
@@ -531,14 +565,21 @@ class VideoTimelineWidget(QWidget):
         for (start_s, end_s) in self._overlay_intervals:
             if start_s <= time_clicked <= end_s:
                 found_any = True
-                
-                reply = QMessageBox.question(
-                    None,
-                    "Remove Overlay?",
-                    f"Remove Overlay from {start_s:.1f}s to {end_s:.1f}s?",
-                    QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.No
-                )
+
+                # Erst hervorheben, dann fragen: die Rueckfrage startet ihre
+                # eigene Ereignisschleife, das Neuzeichnen kommt also noch
+                # rechtzeitig an.
+                self._markieren(start_s, end_s)
+                try:
+                    reply = QMessageBox.question(
+                        None,
+                        "Remove Overlay?",
+                        f"Remove Overlay from {start_s:.1f}s to {end_s:.1f}s?",
+                        QMessageBox.Yes | QMessageBox.No,
+                        QMessageBox.No
+                    )
+                finally:
+                    self._markieren(None)
                 if reply == QMessageBox.Yes:
                     self.overlayRemoveRequested.emit(start_s, end_s)
                 break
@@ -553,7 +594,14 @@ class VideoTimelineWidget(QWidget):
             for (start_s, end_s) in self._cut_intervals:
                 if start_s <= time_clicked <= end_s:
                     found_any = True
-                    self.cutMenuRequested.emit(start_s, end_s, event.globalPos())
+                    # Das Menue laeuft in einer eigenen Ereignisschleife, der
+                    # markierte Bereich wird also waehrenddessen gezeichnet.
+                    self._markieren(start_s, end_s)
+                    try:
+                        self.cutMenuRequested.emit(start_s, end_s,
+                                                   event.globalPos())
+                    finally:
+                        self._markieren(None)
                     break
 
         if not found_any:
