@@ -1139,6 +1139,7 @@ class MainWindow(QMainWindow):
         #    sie also feiner aufloesend - aus rund 920 px werden gut 1900.
         self.timeline.overlayRemoveRequested.connect(self._on_timeline_overlay_remove)
         self.timeline.cutHardToggleRequested.connect(self._on_cut_hard_toggle)
+        self.timeline.cutMenuRequested.connect(self._on_cut_menu)
 
         # 4) Der ehemalige Mini-Chart ist ab 6.02 der "Chart-Flow" und als
         #    vollwertiges Modul waehlbar. Er bleibt bewusst ein eigenes
@@ -3448,6 +3449,7 @@ class MainWindow(QMainWindow):
             # Build new GPX: keep everything before desired_start_dt (incl. interpolated start),
             # skip region [desired_start_dt .. desired_end_dt], then append remainder with times shifted by delta_to_remove.
             new_gpx = []
+            new_start_pt = None      # der an der Naht erzeugte Punkt, falls es einen gibt
             n = len(gpx_data)
             i = 0
             
@@ -3473,8 +3475,17 @@ class MainWindow(QMainWindow):
                 i += 1
             
             # skip all points up to and including desired_end_dt
+            #
+            # Ab 6.02 werden diese Punkte nicht mehr nur uebersprungen, sondern
+            # mit ihren ORIGINALZEITEN aufgezeichnet - sie sind alles, was zum
+            # Zuruecknehmen des Schnitts noetig ist. Ebenso der an der Naht neu
+            # erzeugte Punkt (er muss dabei wieder verschwinden) und weiter
+            # unten die von der Ordnungspruefung verworfenen.
+            entfernte_punkte = []
             while i < n and gpx_data[i].get("time") <= desired_end_dt:
+                entfernte_punkte.append(copy.deepcopy(gpx_data[i]))
                 i += 1
+            interpolierter_punkt = copy.deepcopy(new_start_pt) if new_start_pt else None
             
             # now append remaining points shifted backward by delta_to_remove
             for j in range(i, n):
@@ -3486,6 +3497,7 @@ class MainWindow(QMainWindow):
             
             # Edge-case: if the point immediately after the removed region started before desired_start_dt
             # we may end up with the last point being duplicated or out-of-order; enforce ordering & sanity:
+            verworfene_punkte = []
             if len(new_gpx) >= 2:
                 # ensure strictly increasing times (small eps tolerance)
                 cleaned = [new_gpx[0]]
@@ -3496,8 +3508,13 @@ class MainWindow(QMainWindow):
                         if new_gpx[k]["time"] > cleaned[-1]["time"]:
                             cleaned.append(new_gpx[k])
                         else:
-                            # skip point that would violate ordering
-                            pass
+                            # Hier wurde bisher stillschweigend etwas
+                            # weggelassen. Fuers Zuruecknehmen ist gerade das
+                            # gefaehrlich: der Punkt waere unwiederbringlich
+                            # weg. Deshalb wird er mit aufgezeichnet - mit der
+                            # bereits verschobenen Zeit, so wie er an dieser
+                            # Stelle gestanden haette.
+                            verworfene_punkte.append(copy.deepcopy(new_gpx[k]))
                 new_gpx = cleaned
             
             if len(new_gpx) < 2:
@@ -3522,12 +3539,190 @@ class MainWindow(QMainWindow):
             
             route_geojson = self._build_route_geojson_from_gpx(new_gpx)
             self.map_widget.loadRoute(route_geojson, do_fit=False)
-        
+
+            # Aufzeichnung ablegen: alles, was noetig waere, um genau diesen
+            # Schnitt wieder zurueckzunehmen. Der Schluessel ist die ROHZEIT
+            # des Schnitts, die sich nicht mehr aendert.
+            self.cut_manager.aufzeichnung_merken(
+                start_global, end_global,
+                entfernt=entfernte_punkte,
+                verworfen=verworfene_punkte,
+                interpoliert=interpolierter_punkt,
+                dauer_s=delta_to_remove,
+                beginn_dt=desired_start_dt,
+            )
+            # Bilanz: die alte Spur muss sich vollstaendig aus dem ergeben,
+            # was jetzt da ist, plus dem Aufgezeichneten. Geht sie nicht auf,
+            # fehlt der Aufzeichnung etwas - und dann waere ein Zuruecknehmen
+            # von vornherein falsch. Die Zahl steht im Log, damit das nicht
+            # erst beim Zuruecknehmen auffaellt.
+            naht = 1 if interpolierter_punkt else 0
+            bilanz = len(new_gpx) - naht + len(entfernte_punkte) + len(verworfene_punkte)
+            print(f"[CUT-REC] Schnitt {start_global:.3f}-{end_global:.3f}: "
+                  f"{len(entfernte_punkte)} entfernt, "
+                  f"{len(verworfene_punkte)} von der Ordnungspruefung verworfen, "
+                  f"Nahtpunkt {'erzeugt' if naht else 'keiner'}, "
+                  f"Spur {len(gpx_data)} -> {len(new_gpx)}")
+            print(f"[CUT-REC] Bilanz: {len(new_gpx)} - {naht} + {len(entfernte_punkte)}"
+                  f" + {len(verworfene_punkte)} = {bilanz}, alt = {len(gpx_data)}"
+                  f"  -> {'OK' if bilanz == len(gpx_data) else 'FEHLT ETWAS'}")
+            self._ruecknahme_probe(start_global, end_global, new_gpx, gpx_data)
+
+        # Zustand der Spur nach dieser eigenen Aktion festhalten. Weicht der
+        # Abdruck spaeter ab, hat jemand anders die Spur bearbeitet.
+        self.cut_manager.fingerabdruck_merken(self._gpx_data)
+
         # Clear any red-marked range in GPX list (we've applied the change)
         self.gpx_widget.gpx_list.clear_marked_range()
-        
+
         print("[DEBUG] on_cut_clicked_video => GPX trimmed and UI updated.")
         
+    def _on_cut_menu(self, start_s, end_s, global_pos):
+        """Rechtsklick auf einen Schnitt in der Zeitleiste.
+
+        Bis 6.01 schaltete der Klick sofort zwischen Blende und harter Kante.
+        Jetzt gibt es ein Menue, weil das Zuruecknehmen dazugekommen ist.
+        """
+        from PySide6.QtWidgets import QMenu
+
+        menue = QMenu(self)
+        titel = menue.addAction(f"Schnitt {self._sek_kurz(start_s)} – {self._sek_kurz(end_s)}")
+        titel.setEnabled(False)
+        menue.addSeparator()
+
+        hart = self.cut_manager.is_hard_cut(start_s, end_s)
+        a_blende = menue.addAction("Mit Blende" if not hart else "Auf Blende umstellen")
+        a_blende.setCheckable(True)
+        a_blende.setChecked(not hart)
+        a_hart = menue.addAction("Harte Kante")
+        a_hart.setCheckable(True)
+        a_hart.setChecked(hart)
+        menue.addSeparator()
+
+        moeglich, grund, warnung = self.cut_manager.ruecknahme_moeglich(
+            start_s, end_s, self._gpx_data)
+        a_weg = menue.addAction("Schnitt zurücknehmen"
+                                + (" …" if warnung else ""))
+        a_weg.setEnabled(moeglich)
+        a_weg.setToolTip(grund or warnung)
+
+        gewaehlt = menue.exec(global_pos)
+        if gewaehlt is None:
+            return
+        if gewaehlt in (a_blende, a_hart):
+            if (gewaehlt is a_hart) != hart:
+                self._on_cut_hard_toggle(start_s, end_s)
+        elif gewaehlt is a_weg:
+            self._schnitt_zuruecknehmen(start_s, end_s)
+
+    @staticmethod
+    def _sek_kurz(s: float) -> str:
+        s = max(0.0, float(s))
+        return f"{int(s // 60):02d}:{int(s % 60):02d}"
+
+    def _schnitt_zuruecknehmen(self, start_s, end_s):
+        """Einen Schnitt rueckgaengig machen - Video und GPX-Spur.
+
+        Reihenfolge: erst die Spur zurueckrechnen, dann den Schnitt aus der
+        Video-Seite nehmen. Schlaegt das Zurueckrechnen fehl, bleibt alles
+        wie es war.
+        """
+        from core.gpx_parser import recalc_gpx_data
+
+        moeglich, grund, warnung = self.cut_manager.ruecknahme_moeglich(
+            start_s, end_s, self._gpx_data)
+        if not moeglich:
+            QMessageBox.information(self, "Zurücknehmen nicht möglich", grund)
+            return
+
+        if warnung:
+            antwort = QMessageBox.warning(
+                self, "Spur wurde zwischenzeitlich bearbeitet", warnung,
+                QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
+            if antwort != QMessageBox.Yes:
+                return
+
+        vorher_n = len(self._gpx_data or [])
+        neue_spur = self.cut_manager.spur_ohne_schnitt(
+            start_s, end_s, self._gpx_data)
+        if not neue_spur or len(neue_spur) < 2:
+            QMessageBox.warning(self, "Zurücknehmen fehlgeschlagen",
+                                "Die GPX-Spur ließ sich nicht zurückrechnen. "
+                                "Es wurde nichts verändert.")
+            return
+
+        # Beides zusammen ist EIN Schritt fuer Strg+Z.
+        self.register_gpx_undo_snapshot()
+        self.register_video_undo_snapshot(True)
+
+        if not self.cut_manager.schnitt_entfernen(start_s, end_s):
+            print("[CUT-UNDO] Schnitt war nicht mehr vorhanden, Abbruch")
+            return
+
+        recalc_gpx_data(neue_spur)
+        self.gpx_widget.set_gpx_data(neue_spur)
+        self._gpx_data = neue_spur
+        self._update_gpx_overview()
+        self.chart.set_gpx_data(neue_spur)
+        if self.mini_chart_widget:
+            self.mini_chart_widget.set_gpx_data(neue_spur)
+        self.map_widget.loadRoute(
+            self._build_route_geojson_from_gpx(neue_spur), do_fit=False)
+
+        # Eigene Aktion: den Zustand der Spur neu festhalten, sonst waeren
+        # alle uebrigen Schnitte danach faelschlich gesperrt.
+        self.cut_manager.fingerabdruck_merken(self._gpx_data)
+
+        self._refresh_preview_timeline()
+        self.timeline.update()
+        print(f"[CUT-UNDO] Schnitt {start_s:.3f}-{end_s:.3f} zurueckgenommen, "
+              f"Spur {vorher_n} -> {len(neue_spur)}")
+
+    def _ruecknahme_probe(self, start_s, end_s, spur_jetzt, spur_vorher):
+        """Selbsttest: wuerde die Ruecknahme dieses Schnitts exakt zurueckfuehren?
+
+        Rechnet die Ruecknahme nur durch und vergleicht sie Punkt fuer Punkt
+        mit dem Zustand vor dem Schnitt. Es wird nichts veraendert - die Probe
+        laeuft auf Kopien und dient allein dazu, im Betrieb an echten Daten zu
+        belegen, dass die Aufzeichnung traegt, bevor irgendjemand sie benutzt.
+
+        Etappe 2 von 6.02. Faellt spaeter weg oder wandert hinter einen
+        Schalter, sobald die Ruecknahme wirklich angeboten wird.
+        """
+        try:
+            probe = self.cut_manager.spur_ohne_schnitt(start_s, end_s, spur_jetzt)
+        except Exception as e:
+            print(f"[CUT-PROBE] Ruecknahme warf eine Ausnahme: {e!r}")
+            return
+
+        if probe is None:
+            print("[CUT-PROBE] keine Aufzeichnung vorhanden")
+            return
+
+        if len(probe) != len(spur_vorher):
+            print(f"[CUT-PROBE] ANZAHL WEICHT AB: zurueckgerechnet {len(probe)}, "
+                  f"vorher {len(spur_vorher)}")
+            return
+
+        # Die Metriken rechnet recalc_gpx_data() aus den Grundwerten neu, sie
+        # werden deshalb nicht verglichen - nur Lage, Hoehe und Zeit.
+        abw = 0
+        erste = None
+        for i, (a, b) in enumerate(zip(probe, spur_vorher)):
+            if (round(float(a.get("lat", 0.0)), 9) != round(float(b.get("lat", 0.0)), 9)
+                    or round(float(a.get("lon", 0.0)), 9) != round(float(b.get("lon", 0.0)), 9)
+                    or round(float(a.get("ele", 0.0)), 4) != round(float(b.get("ele", 0.0)), 4)
+                    or a.get("time") != b.get("time")):
+                abw += 1
+                if erste is None:
+                    erste = (i, a.get("time"), b.get("time"))
+
+        if abw == 0:
+            print(f"[CUT-PROBE] Ruecknahme fuehrt exakt zurueck: {len(probe)} Punkte identisch")
+        else:
+            print(f"[CUT-PROBE] {abw} von {len(probe)} Punkten weichen ab; "
+                  f"erster bei Index {erste[0]}: zurueck={erste[1]} vorher={erste[2]}")
+
     def _on_auto_sync_video_toggled(self, checked: bool):
         """
         Wird aufgerufen, wenn der Menüpunkt "AutoSyncVideo" an-/abgehakt wird.
@@ -7049,6 +7244,11 @@ class MainWindow(QMainWindow):
             undo_fn = self._undo_stack.pop()
             undo_fn()  # Die gespeicherte Undo-Funktion ausführen
             self._update_gpx_overview()
+            # Strg+Z ist eine eigene Aktion: der Zustand danach ist einer, den
+            # wir selbst hergestellt haben. Ohne das Nachziehen waeren
+            # anschliessend alle Schnitte gesperrt, weil der Fingerabdruck noch
+            # vom Zustand davor stammt.
+            self.cut_manager.fingerabdruck_merken(self._gpx_data)
 
         else:
             QMessageBox.warning(self,"Undo ignored","Undo stack is empty.")    
@@ -7077,9 +7277,14 @@ class MainWindow(QMainWindow):
         # Die Markierungen 'harte Kante' gehoeren zum selben Zustand wie die
         # Schnitte selbst und muessen mit zurueckgeholt werden.
         hard_snapshot = set(self.cut_manager._hard_cuts)
+        # Ebenso, was die Schnitte aus der GPX-Spur genommen haben. Ohne das
+        # haette ein Schnitt nach Strg+Z entweder keine Aufzeichnung mehr oder
+        # die eines spaeter an derselben Stelle gesetzten.
+        punkte_snapshot = copy.deepcopy(self.cut_manager._cut_points)
 
         def undo():
             self.cut_manager._cut_intervals = copy.deepcopy(snapshot)
+            self.cut_manager._cut_points = copy.deepcopy(punkte_snapshot)
             self.timeline.clear_all_cuts()
             for (start, end) in snapshot:
                 self.timeline.add_cut_interval(start, end)

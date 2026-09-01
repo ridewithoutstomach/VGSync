@@ -47,6 +47,10 @@ class VideoTimelineWidget(QWidget):
     overlayRemoveRequested = Signal(float, float)
     # Rechtsklick auf einen schwarzen Block: Blende <-> harte Kante
     cutHardToggleRequested = Signal(float, float)
+    #: Rechtsklick auf einen Schnitt: das Fenster soll das Menue dazu zeigen.
+    #: Was darin moeglich ist, weiss nur das MainWindow - ob es eine
+    #: Aufzeichnung gibt, ob die GPX-Spur zwischenzeitlich bearbeitet wurde.
+    cutMenuRequested = Signal(float, float, object)
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -511,11 +515,17 @@ class VideoTimelineWidget(QWidget):
                     self.overlayRemoveRequested.emit(start_s, end_s)
                 break
         # 3) Sonst pruefen, ob der Klick in einem Schnitt liegt
+        #
+        # Bis 6.01 schaltete der Rechtsklick sofort zwischen Blende und harter
+        # Kante um. Seit dem Zuruecknehmen von Schnitten gibt es dort mehr als
+        # eine Moeglichkeit, deshalb ein Menue. Zusammengestellt wird es im
+        # MainWindow - nur dort ist bekannt, ob sich der Schnitt zuruecknehmen
+        # laesst.
         if not found_any:
             for (start_s, end_s) in self._cut_intervals:
                 if start_s <= time_clicked <= end_s:
                     found_any = True
-                    self.cutHardToggleRequested.emit(start_s, end_s)
+                    self.cutMenuRequested.emit(start_s, end_s, event.globalPos())
                     break
 
         if not found_any:

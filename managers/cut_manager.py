@@ -37,6 +37,35 @@ class VideoCutManager(QObject):
         # _cut_intervals selbst unveraendert bleibt.
         self._hard_cuts = set()
         self.video_durations = []
+
+        # ---- Ruecknahme von Schnitten (ab 6.02, Etappe 1: nur aufzeichnen) --
+        #
+        # Was ein Schnitt aus der GPX-Spur entfernt hat, wird hier abgelegt -
+        # nach demselben Muster wie _hard_cuts: ein Dict neben der
+        # Schnittliste, mit dem gerundeten (start, end)-Schluessel. So bleibt
+        # _cut_intervals eine reine Liste von Zeitpaaren; sie wird an rund
+        # 18 Stellen im Programm entpackt und darf sich nicht aendern.
+        #
+        # Der Schluessel ist stabil, weil Schnitte in ROHZEIT gespeichert
+        # werden: Faellt ein frueherer Schnitt weg, verschiebt sich nur, wo
+        # ein spaeterer im fertigen Video landet - nicht sein Schluessel.
+        #
+        # Je Schnitt wird abgelegt:
+        #   "entfernt"      die herausgeschnittenen Punkte mit Originalzeiten
+        #   "verworfen"     Punkte, die die Ordnungspruefung zusaetzlich
+        #                   weggelassen hat (sonst waeren sie unwiederbringlich)
+        #   "interpoliert"  der an der Naht neu erzeugte Punkt, falls es einen
+        #                   gab - beim Zurueckholen muss er wieder weg
+        #   "dauer_s"       um wie viel alles danach nach vorn gerueckt ist
+        #   "fingerabdruck" Zustand der Spur direkt nach diesem Schnitt
+        self._cut_points = {}
+
+        # Fingerabdruck der GPX-Spur nach der letzten EIGENEN Aktion. Weicht
+        # er ab, hat jemand anders die Spur bearbeitet - dann ist Zuruecknehmen
+        # nicht mehr sicher. Ein Zaehler waere hier falsch: er muesste in jeder
+        # Bearbeitungsfunktion gepflegt werden, und eine uebersehene Stelle
+        # ergaebe eine falsche Zusage. Der Fingerabdruck kann nichts uebersehen.
+        self._gpx_fingerabdruck = None
         
         
     def set_video_durations(self, durations_list):
@@ -146,6 +175,271 @@ class VideoCutManager(QObject):
     @staticmethod
     def _cut_key(start_s, end_s):
         return (round(float(start_s), 3), round(float(end_s), 3))
+
+    # ------------------------------------------------------------------
+    # Ruecknahme von Schnitten: Aufzeichnung und Fingerabdruck
+    # ------------------------------------------------------------------
+    # Zwei getrennte Abdruecke, weil nicht jede Aenderung gleich schwer wiegt:
+    #
+    #   ZEITEN  entscheiden ueber die Struktur. Die Ruecknahme arbeitet
+    #           ausschliesslich mit Zeitvergleichen - stimmen die nicht mehr,
+    #           landen die Punkte an der falschen Stelle. Harte Sperre.
+    #
+    #   WERTE   (Lage, Hoehe) aendern nichts an der Struktur. Die Punkte
+    #           kommen richtig zurueck, tragen aber den Stand von damals -
+    #           nach einer Hoehenaenderung oder Glaettung entsteht so eine
+    #           Stufe im Profil. Das sieht man im Chart, deshalb genuegt eine
+    #           Warnung statt einer Sperre.
+    #
+    # Gemessen: _apply_smoothing() rechnet nur ueber ele und die Distanzen,
+    # es fasst time nicht an. Zeiten schreiben chT, Close Gaps, Resample und
+    # einige weitere - genau die Faelle, die gesperrt gehoeren.
+    @staticmethod
+    def zeit_fingerabdruck(gpx_data) -> str:
+        """Abdruck ueber die Zeitfolge (und damit die Anzahl der Punkte)."""
+        import hashlib
+        h = hashlib.blake2b(digest_size=16)
+        for pt in (gpx_data or []):
+            t = pt.get("time")
+            h.update((t.isoformat() if hasattr(t, "isoformat") else str(t)
+                      ).encode("utf-8"))
+            h.update(b"|")
+        return h.hexdigest()
+
+    @staticmethod
+    def wert_fingerabdruck(gpx_data) -> str:
+        """Abdruck ueber Lage und Hoehe.
+
+        delta_m, speed_kmh und gradient bleiben aussen vor - die rechnet
+        recalc_gpx_data() aus diesen Werten, sie wuerden nichts zusaetzlich
+        erkennen, aber jeden Abdruck teurer machen.
+        """
+        import hashlib
+        h = hashlib.blake2b(digest_size=16)
+        for pt in (gpx_data or []):
+            h.update(repr((
+                round(float(pt.get("lat", 0.0)), 9),
+                round(float(pt.get("lon", 0.0)), 9),
+                round(float(pt.get("ele", 0.0)), 4),
+            )).encode("utf-8"))
+        return h.hexdigest()
+
+    def fingerabdruck_merken(self, gpx_data):
+        """Nach einer eigenen Aktion den Zustand der Spur festhalten."""
+        self._gpx_fingerabdruck = (self.zeit_fingerabdruck(gpx_data),
+                                   self.wert_fingerabdruck(gpx_data))
+        return self._gpx_fingerabdruck
+
+    def zeiten_unveraendert(self, gpx_data) -> bool:
+        if not self._gpx_fingerabdruck:
+            return False
+        return self.zeit_fingerabdruck(gpx_data) == self._gpx_fingerabdruck[0]
+
+    def werte_unveraendert(self, gpx_data) -> bool:
+        if not self._gpx_fingerabdruck:
+            return False
+        return self.wert_fingerabdruck(gpx_data) == self._gpx_fingerabdruck[1]
+
+    def spur_unveraendert(self, gpx_data) -> bool:
+        """True, wenn seit unserer letzten Aktion nichts veraendert wurde."""
+        return (self.zeiten_unveraendert(gpx_data)
+                and self.werte_unveraendert(gpx_data))
+
+    def aufzeichnung_merken(self, start_s, end_s, entfernt, verworfen,
+                            interpoliert, dauer_s, beginn_dt=None):
+        """Was ein Schnitt aus der GPX-Spur genommen hat, beim Schnitt ablegen.
+
+        beginn_dt ist der Schnittanfang in GPX-Zeit und muss mitgegeben
+        werden. Er laesst sich NICHT aus dem ersten entfernten Punkt
+        ableiten: faellt der Schnittanfang genau auf einen vorhandenen
+        Punkt - etwa auf die Naht eines angrenzenden Schnitts -, bleibt
+        dieser Punkt stehen und der erste entfernte liegt spaeter. Beim
+        Zuruecknehmen wuerde dann zu wenig zurueckgeschoben.
+        """
+        self._cut_points[self._cut_key(start_s, end_s)] = {
+            "entfernt": entfernt or [],
+            "verworfen": verworfen or [],
+            "interpoliert": interpoliert,
+            "dauer_s": float(dauer_s or 0.0),
+            "beginn_dt": beginn_dt,
+        }
+
+    def aufzeichnung(self, start_s, end_s):
+        """Aufzeichnung eines Schnitts, oder None."""
+        return self._cut_points.get(self._cut_key(start_s, end_s))
+
+    def hat_aufzeichnung(self, start_s, end_s) -> bool:
+        return self._cut_key(start_s, end_s) in self._cut_points
+
+    def prune_cut_points(self):
+        """Aufzeichnungen wegwerfen, zu denen es keinen Schnitt mehr gibt.
+
+        Dieselbe Ueberlegung wie bei prune_hard_cuts(): sonst erbte ein
+        spaeter an derselben Stelle gesetzter Schnitt die alte Aufzeichnung.
+        """
+        alive = {self._cut_key(a, b) for (a, b) in self._cut_intervals}
+        for key in [k for k in self._cut_points if k not in alive]:
+            del self._cut_points[key]
+
+    def spur_ohne_schnitt(self, start_s, end_s, gpx_data):
+        """Die GPX-Spur so, wie sie ohne diesen Schnitt aussaehe.
+
+        Kehrt genau das um, was on_cut_clicked_video() im Middle-Cut-Zweig
+        getan hat, und in derselben Reihenfolge rueckwaerts:
+
+          1. der an der Naht erzeugte Punkt faellt weg - es gab ihn vorher nicht
+          2. die entfernten Punkte kommen mit ihren Originalzeiten zurueck
+          3. alles dahinter rueckt um die Schnittdauer wieder nach hinten
+          4. die von der Ordnungspruefung verworfenen Punkte kommen dazu
+
+        Aendert nichts an der uebergebenen Liste; gibt eine neue zurueck.
+        Rueckgabe None, wenn es keine Aufzeichnung gibt.
+        """
+        import copy
+        from datetime import timedelta
+
+        aufz = self.aufzeichnung(start_s, end_s)
+        if aufz is None:
+            return None
+
+        entfernt = aufz.get("entfernt") or []
+        verworfen = aufz.get("verworfen") or []
+        naht = aufz.get("interpoliert")
+        dauer = float(aufz.get("dauer_s") or 0.0)
+        if not entfernt:
+            return None
+
+        # Der aufgezeichnete Schnittanfang. Der Rueckfall auf den Nahtpunkt
+        # bzw. den ersten entfernten Punkt gilt nur fuer Aufzeichnungen ohne
+        # dieses Feld - er trifft nicht jeden Fall, siehe aufzeichnung_merken().
+        beginn = aufz.get("beginn_dt")
+        if beginn is None:
+            beginn = naht.get("time") if naht else entfernt[0].get("time")
+        if beginn is None:
+            return None
+
+        neu = []
+        for pt in (gpx_data or []):
+            t = pt.get("time")
+            if t is None:
+                neu.append(copy.deepcopy(pt))
+                continue
+            if t < beginn:
+                # vor dem Schnitt - unveraendert
+                neu.append(copy.deepcopy(pt))
+            elif t == beginn:
+                # Genau auf dem Schnittanfang. Zwei Faelle:
+                #   mit Naht  - das ist der erzeugte Punkt, er faellt weg
+                #   ohne Naht - ein vorhandener Punkt lag exakt dort und wurde
+                #               beim Schneiden behalten; er blieb ungeschoben
+                #               und bleibt es auch jetzt
+                if naht is not None:
+                    continue
+                neu.append(copy.deepcopy(pt))
+            else:
+                # dahinter - um die Schnittdauer zurueckschieben
+                p = copy.deepcopy(pt)
+                p["time"] = t + timedelta(seconds=dauer)
+                neu.append(p)
+
+        # Das Herausgeschnittene wieder hinein, dazu die verworfenen Punkte.
+        # Deren Zeit war schon nach vorn geschoben, als sie verworfen wurden -
+        # sie brauchen dieselbe Rueckrechnung wie der Rest dahinter.
+        zurueck = [copy.deepcopy(p) for p in entfernt]
+        for p in verworfen:
+            q = copy.deepcopy(p)
+            t = q.get("time")
+            if t is not None:
+                q["time"] = t + timedelta(seconds=dauer)
+            zurueck.append(q)
+        neu.extend(zurueck)
+
+        neu.sort(key=lambda p: (p.get("time") is None, p.get("time")))
+        return neu
+
+    def ruecknahme_moeglich(self, start_s, end_s, gpx_data):
+        """Darf dieser Schnitt zurueckgenommen werden?
+
+        Rueckgabe (moeglich, grund, warnung):
+          moeglich  False heisst gesperrt, grund erklaert es
+          warnung   leer, oder ein Hinweis, den der Nutzer vorher
+                    bestaetigen soll - das Zuruecknehmen bleibt erlaubt
+
+        Bei den Sperren gilt: im Zweifel gesperrt. Eine falsche Zusage waere
+        schlimmer als eine fehlende Moeglichkeit, weil der Fehler stumm
+        bliebe - die Spur kaeme leicht falsch zurueck und faellt erst auf,
+        wenn Video und Spur auseinanderlaufen.
+        """
+        if not self.hat_aufzeichnung(start_s, end_s):
+            return False, ("Für diesen Schnitt ist nicht aufgezeichnet, was er "
+                           "aus der GPX-Spur entfernt hat. Er stammt aus einem "
+                           "Projekt, das vor dieser Funktion gespeichert "
+                           "wurde."), ""
+        if self.wird_ueberdeckt(start_s, end_s):
+            return False, ("Dieser Schnitt liegt innerhalb eines späteren, "
+                           "größeren Schnitts. Die Punkte kämen in einen "
+                           "Bereich zurück, den das Video ohnehin nicht "
+                           "zeigt."), ""
+        if not gpx_data:
+            return True, "", ""
+
+        # Zeiten: Struktur. Ohne sie stimmt gar nichts mehr.
+        if not self.zeiten_unveraendert(gpx_data):
+            return False, ("Die Zeiten der GPX-Spur wurden seit diesem Schnitt "
+                           "verändert (etwa durch chT, Close Gaps oder "
+                           "Resample). Ein Zurücknehmen würde die Punkte an "
+                           "der falschen Stelle einsetzen."), ""
+
+        # Werte: kommen richtig zurueck, aber mit dem Stand von damals.
+        if not self.werte_unveraendert(gpx_data):
+            return True, "", ("Seit diesem Schnitt wurden Höhen oder Positionen "
+                              "geändert – etwa durch Glätten oder eine "
+                              "Höhenkorrektur.\n\n"
+                              "Die zurückkehrenden Punkte tragen noch den Stand "
+                              "von damals. Im Höhenprofil kann dadurch an dieser "
+                              "Stelle eine Stufe entstehen.\n\n"
+                              "Bitte den Bereich anschließend im Chart prüfen "
+                              "und die Änderung gegebenenfalls erneut anwenden.")
+        return True, "", ""
+
+    def wird_ueberdeckt(self, start_s, end_s, eps: float = 0.001) -> bool:
+        """Deckt ein anderer Schnitt diesen vollstaendig ab?
+
+        Solange das Setzen ueberlappender Schnitte moeglich ist, kann das
+        vorkommen - im Video ist der innere Schnitt dann bedeutungslos, seine
+        Punkte wuerden beim Zuruecknehmen in einen Bereich zurueckkehren, der
+        gar nicht gezeigt wird.
+        """
+        for (a, b) in self._cut_intervals:
+            if (a, b) == (start_s, end_s):
+                continue
+            if a <= start_s + eps and b >= end_s - eps:
+                return True
+        return False
+
+    def schnitt_entfernen(self, start_s, end_s):
+        """Den Schnitt selbst aus der Video-Seite nehmen.
+
+        Die GPX-Spur bleibt unberuehrt - dafuer ist spur_ohne_schnitt() da.
+        Rueckgabe True, wenn ein Schnitt entfernt wurde.
+        """
+        key = self._cut_key(start_s, end_s)
+        treffer = [iv for iv in self._cut_intervals
+                   if self._cut_key(iv[0], iv[1]) == key]
+        if not treffer:
+            return False
+        for iv in treffer:
+            self._cut_intervals.remove(iv)
+        self._cut_points.pop(key, None)
+
+        self.prune_hard_cuts()
+        self.timeline.clear_all_cuts()
+        for (a, b) in self._cut_intervals:
+            self.timeline.add_cut_interval(a, b)
+        self._sync_timeline_hard_cuts()
+        self._emit_cuts_changed()
+        self.video_editor.set_cut_intervals(self._cut_intervals)
+        return True
 
     def is_hard_cut(self, start_s, end_s) -> bool:
         return self._cut_key(start_s, end_s) in self._hard_cuts
