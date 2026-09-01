@@ -173,6 +173,8 @@ class VideoEditorWidget(QWidget):
         # also nachziehen, wenn das Bild seine Flaeche wechselt.
         self.video_surface.bildbereichGeaendert.connect(
             self._hoehen_overlay_platzieren)
+        self.video_surface.bildbereichGeaendert.connect(
+            self._einblendungen_platzieren)
         self.video_surface.blick360Gezoomt.connect(self._auf_blick_zoom)
         layout.addWidget(self.video_surface, 0, 0)
         layout.setRowStretch(0, 1)
@@ -182,14 +184,22 @@ class VideoEditorWidget(QWidget):
         
         # Oben Rechts: Speed-Label
         self.speed_label = QLabel("", self)
-        self.speed_label.setStyleSheet("color:white; background-color:rgba(0,0,0,120); padding:2px;")
+        # Derselbe Stil wie die beiden Hinweise darueber - gleiche Groesse,
+        # gleicher Kasten, nur eine andere Schriftfarbe.
+        self.speed_label.setStyleSheet(self.HINWEIS_STIL % "white")
         self.speed_label.hide()
-        layout.addWidget(self.speed_label, 0, 0, alignment=Qt.AlignTop | Qt.AlignRight)
+        # Nicht ins Raster: die Einblendungen werden in
+        # _einblendungen_platzieren() am BILD ausgerichtet, nicht am Rand
+        # des Widgets. Sonst haengen sie im schwarzen Balken, sobald das
+        # Seitenverhaeltnis des Videos nicht zum Fenster passt.
 
         # Oben Rechts: Aktuelle Zeit
         self.current_time_widget = QWidget(self)
         vbox_time = QVBoxLayout(self.current_time_widget)
-        vbox_time.setContentsMargins(0,20,0,0)
+        # Kein oberer Rand mehr: die 20 px dienten nur der Staffelung im
+        # Raster. Platziert wird jetzt selbst, siehe
+        # _einblendungen_platzieren().
+        vbox_time.setContentsMargins(0, 0, 0, 0)
         vbox_time.setSpacing(0)
         vbox_time.setAlignment(Qt.AlignTop | Qt.AlignRight)
 
@@ -201,31 +211,18 @@ class VideoEditorWidget(QWidget):
         )
         self._last_time_html = None
         vbox_time.addWidget(self.current_time_label)
-        layout.addWidget(self.current_time_widget, 0, 0, alignment=Qt.AlignTop | Qt.AlignRight)
+        # (freies Kind, siehe _einblendungen_platzieren)
 
-        # Extra: Edit-Status
-        self.edit_status_widget = QWidget(self)
-        # War 65 - dort passte "Copymode" nicht hinein, der Text wurde
-        # abgeschnitten (daher frueher das verstuemmelte "Edit:Cop"). 120
-        # reicht dafuer und bleibt deutlich schmaler als die Zeitanzeige
-        # darueber, die rund 195 Punkte breit ist.
-        self.edit_status_widget.setMaximumWidth(120)
-
-        vbox_edit = QVBoxLayout(self.edit_status_widget)
-        vbox_edit.setContentsMargins(0, 50, 0, 0)
-        vbox_edit.setSpacing(0)
-        # Rechtsbuendig, damit jede Beschriftung nur so breit wird wie ihr
-        # Text - sonst zoege der dunkle Kasten ueber die ganze Breite.
-        vbox_edit.setAlignment(Qt.AlignTop | Qt.AlignRight)
-
-        self.edit_status_label = QLabel("", self.edit_status_widget)
-        self.acut_status_label = QLabel("", self.edit_status_widget)
-        # Unveraendert bei 65: bisher begrenzte der Behaelter diese
-        # Beschriftung, und an ihr soll sich nichts aendern.
-        self.acut_status_label.setMaximumWidth(65)
-        vbox_edit.addWidget(self.edit_status_label)
-        vbox_edit.addWidget(self.acut_status_label)
-        layout.addWidget(self.edit_status_widget, 0, 0, alignment=Qt.AlignTop | Qt.AlignRight)
+        # Extra: Edit-Status. Direkte Kinder des Video-Widgets, ohne Behaelter
+        # dazwischen: sie werden in _einblendungen_platzieren() einzeln auf
+        # feste Zeilen gesetzt, und dafuer muessen ihre Koordinaten sich auf
+        # das Videobild beziehen, nicht auf einen Behaelter.
+        self.edit_status_label = QLabel("", self)
+        self.acut_status_label = QLabel("", self)
+        for _feld in (self.edit_status_label, self.acut_status_label):
+            _feld.setFixedSize(self.HINWEIS_BREITE, self.HINWEIS_ZEILE)
+            _feld.setAlignment(Qt.AlignCenter)
+            _feld.hide()
 
         # Unten links standen bis 6.01 zwei Zeiten im Bild: die Laenge des
         # Originalvideos und die Laenge nach den Schnitten. Beide sind
@@ -243,7 +240,7 @@ class VideoEditorWidget(QWidget):
             "padding:4px; font-weight:bold; font-size:14px;"
         )
         self._360_label.hide()
-        layout.addWidget(self._360_label, 0, 0, alignment=Qt.AlignTop | Qt.AlignLeft)
+        # (freies Kind, siehe _einblendungen_platzieren)
 
         # Hoehenprofil-Einblendung unten links im Bild.
         #
@@ -372,6 +369,7 @@ class VideoEditorWidget(QWidget):
         # Overlay immer auf volle Größe
         self._dnd_overlay.setGeometry(self.rect())
         self._hoehen_overlay_platzieren()
+        self._einblendungen_platzieren()
 
     def _hoehen_overlay_platzieren(self):
         """Hoehenprofil an seine Stelle setzen.
@@ -432,6 +430,91 @@ class VideoEditorWidget(QWidget):
                              r.width(), r.height())
         return self.rect()
 
+    #: Einheitlicher Stil der Hinweisfelder oben rechts. Nur die Schriftfarbe
+    #: unterscheidet sie. Vorher hatte "Copymode" 11 px und "V&G:On" 14 px -
+    #: die Felder waren dadurch unterschiedlich hoch und breit, und jedes
+    #: Erscheinen verschob die anderen.
+    HINWEIS_STIL = ("background-color: rgba(0,0,0,140); color: %s; "
+                    "font-size: 12px; font-weight: bold; padding: 2px 6px;")
+    #: Zeilenhoehe der Hinweise. Fest, damit nichts wandert, wenn ein Feld
+    #: erscheint oder verschwindet.
+    HINWEIS_ZEILE = 21
+    #: Alle Hinweisfelder sind gleich breit - der laengste Text gibt sie vor.
+    HINWEIS_BREITE = 92
+
+    def hinweis_setzen(self, welcher: str, text: str, farbe: str = None):
+        """Text eines Hinweisfeldes setzen und die Einblendungen nachziehen.
+
+        welcher: "edit" fuer Copymode/Encode, "acut" fuer V&G.
+
+        Ohne das Nachziehen bliebe die Luecke stehen, wenn ein Hinweis
+        verschwindet.
+        """
+        feld = {"edit": getattr(self, "edit_status_label", None),
+                "acut": getattr(self, "acut_status_label", None)}.get(welcher)
+        if feld is None:
+            return
+        if farbe:
+            feld.setStyleSheet(self.HINWEIS_STIL % farbe)
+        feld.setText(text or "")
+        feld.setVisible(bool(text))
+        feld.setFixedSize(self.HINWEIS_BREITE, self.HINWEIS_ZEILE)
+        feld.setAlignment(Qt.AlignCenter)
+        self._einblendungen_platzieren()
+
+    def _einblendungen_platzieren(self):
+        """Alle Einblendungen am BILD ausrichten, nicht am Widgetrand.
+
+        Bis 6.01 lagen sie im Raster mit AlignTop/AlignRight und klebten
+        damit am Rand des Widgets. Passt das Seitenverhaeltnis des Videos
+        nicht zum Fenster, sitzen sie dort im schwarzen Balken - sichtbar,
+        aber nicht im Bild, und beim Blick auf das Video stoerend.
+
+        Aufteilung:
+            oben rechts   Tempo, darunter Copymode / V&G
+            unten rechts  die laufende Zeit
+            oben links    die 360-Marke
+            unten links   das Hoehenprofil (eigene Methode, frei ziehbar)
+        """
+        bild = self._bildrechteck()
+        rand = 8
+        rechts = bild.x() + bild.width()
+        unten = bild.y() + bild.height()
+
+        # Feste Zeilen, nicht gestapelt: jedes Feld hat seinen Platz, auch
+        # wenn die darueber gerade nichts anzeigen. Vorher rutschte alles
+        # nach oben, sobald ein Hinweis verschwand - beim Umschalten des
+        # Tempos sprang die halbe Anzeige.
+        #   Zeile 0  Copymode / Encode
+        #   Zeile 1  V&G
+        #   Zeile 2  Tempo
+        x_rechts = max(bild.x(), rechts - self.HINWEIS_BREITE - rand)
+        for zeile, widget in enumerate((
+                getattr(self, "edit_status_label", None),
+                getattr(self, "acut_status_label", None),
+                getattr(self, "speed_label", None))):
+            if widget is None:
+                continue
+            widget.setFixedSize(self.HINWEIS_BREITE, self.HINWEIS_ZEILE)
+            widget.setAlignment(Qt.AlignCenter)
+            widget.move(x_rechts, bild.y() + rand + zeile * (self.HINWEIS_ZEILE + 3))
+            widget.raise_()
+
+        # Die laufende Zeit nach unten rechts: oben draengeln sich schon die
+        # Hinweise, und unten steht sie dem Blick auf die Strasse nicht im Weg.
+        zeit = getattr(self, "current_time_widget", None)
+        if zeit is not None:
+            zeit.adjustSize()
+            zeit.move(max(bild.x(), rechts - zeit.width() - rand),
+                      max(bild.y(), unten - zeit.height() - rand))
+            zeit.raise_()
+
+        marke = getattr(self, "_360_label", None)
+        if marke is not None:
+            marke.adjustSize()
+            marke.move(bild.x() + rand, bild.y() + rand)
+            marke.raise_()
+
     def _griff_platzieren(self):
         """Griff in die linke obere Ecke der Einblendung setzen."""
         griff = getattr(self, "_overlay_griff", None)
@@ -487,6 +570,7 @@ class VideoEditorWidget(QWidget):
         super().showEvent(event)
         # Erst hier steht die endgueltige Groesse fest.
         QTimer.singleShot(0, self._hoehen_overlay_platzieren)
+        QTimer.singleShot(0, self._einblendungen_platzieren)
 
     def hoehen_overlay_zeigen(self, an: bool):
         """Einblendung an- oder ausschalten."""
@@ -640,6 +724,7 @@ class VideoEditorWidget(QWidget):
     def _show_speed_label(self, txt: str):
         self.speed_label.setText(txt)
         self.speed_label.show()
+        self._einblendungen_platzieren()
         QTimer.singleShot(2000, self.speed_label.hide)
 
     # Die drei Setter zeigen seit 6.02 nichts mehr im Bild an (siehe oben),
@@ -698,6 +783,12 @@ class VideoEditorWidget(QWidget):
         if getattr(self, "_last_time_html", None) != text_html:
             self.current_time_label.setText(text_html)
             self._last_time_html = text_html
+            # Seit die Einblendungen nicht mehr im Raster liegen, passt sich
+            # ihre Groesse nicht mehr von selbst an den Text an. Ohne das
+            # blieb die Zeitanzeige nach dem Laden 0 Punkte gross und damit
+            # unsichtbar, bis irgendetwas anderes eine Neuplatzierung
+            # ausloeste. Der Aufruf haengt am Textwechsel, nicht am Bildtakt.
+            self._einblendungen_platzieren()
 
     def play_pause(self):
         if self.is_playing:
@@ -918,10 +1009,16 @@ class VideoEditorWidget(QWidget):
         Methode auch einzeln aufrufbar bleibt.
         """
         if not self.playlist or self._backend.count() == 0:
-            self.current_time_label.hide()
+            if not self.current_time_label.isHidden():
+                self.current_time_label.hide()
+                self._einblendungen_platzieren()
             return
-        else:
+        elif self.current_time_label.isHidden():
+            # Beim Einblenden muss die Groesse neu bestimmt werden -
+            # ein verstecktes Feld laesst seinen Behaelter auf null
+            # zusammenfallen.
             self.current_time_label.show()
+            self._einblendungen_platzieren()
             
         if global_s is None:
             global_s = self.get_current_global_time()
@@ -944,6 +1041,12 @@ class VideoEditorWidget(QWidget):
         if getattr(self, "_last_time_html", None) != text_html:
             self.current_time_label.setText(text_html)
             self._last_time_html = text_html
+            # Seit die Einblendungen nicht mehr im Raster liegen, passt sich
+            # ihre Groesse nicht mehr von selbst an den Text an. Ohne das
+            # blieb die Zeitanzeige nach dem Laden 0 Punkte gross und damit
+            # unsichtbar, bis irgendetwas anderes eine Neuplatzierung
+            # ausloeste. Der Aufruf haengt am Textwechsel, nicht am Bildtakt.
+            self._einblendungen_platzieren()
 
     def stop(self):
         """

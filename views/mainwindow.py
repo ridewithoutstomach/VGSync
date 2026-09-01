@@ -2063,24 +2063,17 @@ class MainWindow(QMainWindow):
             self.action_auto_sync_video.setChecked(False)
             self._on_auto_sync_video_toggled(False)
         if new_mode == "off":
-            self.video_editor.edit_status_label.setText("")
-            self.video_editor.edit_status_label.setStyleSheet("")
+            self.video_editor.hinweis_setzen("edit", "")
             self.video_control.set_editing_mode(False, False)
             print("[DEBUG] => OFF")
             self.encoder_setup_action.setEnabled(False)
             self.video_control.show_ovl_button(False)
             self.overlay_setup_action.setEnabled(False)
         elif new_mode == "copy":
-            # Nur der Sonderfall meldet sich. Klein und orange, damit es die
-            # Zeitanzeige darueber nicht ueberbietet.
-            self.video_editor.edit_status_label.setText("Copymode")
-            self.video_editor.edit_status_label.setStyleSheet(
-                "background-color: rgba(0,0,0,120); "
-                "color: orange; "
-                "font-size: 11px; "
-                "font-weight: bold;"
-                "padding: 2px;"
-            )
+            # Nur der Sonderfall meldet sich. Groesse und Kasten kommen aus
+            # dem Video-Widget, hier steht nur noch die Farbe - sonst waeren
+            # die Hinweisfelder wieder unterschiedlich gross.
+            self.video_editor.hinweis_setzen("edit", "Copymode", "orange")
             cut_on= not self.gpx_widget.gpx_list._gpx_data or is_gpx_video_shift_set()
             self.video_control.set_editing_mode(True,cut_on)
             print("[DEBUG] => COPY")
@@ -2091,8 +2084,7 @@ class MainWindow(QMainWindow):
             # Encode ist der Normalfall - dafuer braucht es keine Beschriftung
             # ueber dem Bild. Auch der Stil muss weg, sonst bliebe vom
             # dunklen Kasten ein kleiner Rest stehen.
-            self.video_editor.edit_status_label.setText("")
-            self.video_editor.edit_status_label.setStyleSheet("")
+            self.video_editor.hinweis_setzen("edit", "")
 
             cut_on= not self.gpx_widget.gpx_list._gpx_data or is_gpx_video_shift_set()
             self.video_control.set_editing_mode(True,cut_on)
@@ -3976,16 +3968,9 @@ class MainWindow(QMainWindow):
         self.video_control._update_autocut_icon()
         
         if checked:
-            self.video_editor.acut_status_label.setText("V&G:On")
-            self.video_editor.acut_status_label.setStyleSheet(
-                "background-color: rgba(0,0,0,120); "
-                "color: red; "
-                "font-size: 14px; "
-                "font-weight: bold;"
-                "padding: 2px;"
-            )
+            self.video_editor.hinweis_setzen("acut", "V&G:On", "#ff5555")
         else:
-            self.video_editor.acut_status_label.setText("")
+            self.video_editor.hinweis_setzen("acut", "")
             #self.video_editor.acut_status_label.setText("V&G:Off")
             #self.video_editor.acut_status_label.setStyleSheet(
             #    "background-color: rgba(0,0,0,120); "
