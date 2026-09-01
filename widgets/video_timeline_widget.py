@@ -354,6 +354,34 @@ class VideoTimelineWidget(QWidget):
                     painter.drawLine(x_timeline, y_start, x_timeline, h)
             t += sub_tick_sec
 
+    def _cut_bloecke(self, eps: float = 0.001):
+        """Die Schnitte so, wie sie im Video wirklich aussehen.
+
+        Aneinandergrenzende oder ueberlappende Schnitte sind dort EIN Loch -
+        zwischen ihnen liegt kein Bild. Gezeichnet wurde bisher aber jeder
+        einzeln, mit einem an beiden Raendern auslaufenden Verlauf. An der
+        Stossstelle trafen dadurch zwei helle Kanten aufeinander und sahen
+        aus wie ein kurzes Stueck Video.
+
+        Zusammengefasst wird nur fuers Zeichnen. self._cut_intervals bleibt
+        unangetastet, damit der Rechtsklick weiterhin den einzelnen Schnitt
+        trifft.
+
+        Liefert (start, ende, hart) - hart, wenn irgendein Schnitt der
+        Gruppe eine harte Kante ist; im Video ist die Gruppe ja ein Uebergang.
+        """
+        gueltig = sorted((min(a, b), max(a, b)) for (a, b) in self._cut_intervals
+                         if b > a)
+        bloecke = []
+        for (a, b) in gueltig:
+            hart = self._cut_key(a, b) in self._hard_cut_keys
+            if bloecke and a <= bloecke[-1][1] + eps:
+                vorher = bloecke[-1]
+                bloecke[-1] = (vorher[0], max(vorher[1], b), vorher[2] or hart)
+            else:
+                bloecke.append((a, b, hart))
+        return bloecke
+
     def _draw_boundaries_and_markers(self, painter, w, h, timeline_real_width):
         from PySide6.QtGui import QPen, QBrush, QPolygon
         pen_blue = QPen(QColor("blue"), 3)
@@ -411,7 +439,7 @@ class VideoTimelineWidget(QWidget):
         pen_black = QPen(QColor("black"), 1)
         pen_hard = QPen(QColor("#FF8A3D"), 1)
         painter.setPen(pen_black)
-        for (start_s, end_s) in self._cut_intervals:
+        for (start_s, end_s, gruppe_hart) in self._cut_bloecke():
             if start_s < 0 or end_s <= 0 or self.total_duration <= 0:
                 continue
             start_ratio = max(0.0, start_s/self.total_duration)
@@ -426,7 +454,7 @@ class VideoTimelineWidget(QWidget):
             if rect_width < 1:
                 rect_width = 1
 
-            if self._cut_key(start_s, end_s) in self._hard_cut_keys:
+            if gruppe_hart:
                 # Harte Kante: Block bleibt schwarz, die Schnittkanten werden
                 # orange markiert. Bei sehr schmalen Bloecken wuerden zwei
                 # Linien ineinanderlaufen, deshalb dort nur eine.

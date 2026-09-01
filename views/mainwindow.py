@@ -5413,7 +5413,15 @@ class MainWindow(QMainWindow):
                   "=> uebersprungen")
             return
         try:
-            cuts = self.cut_manager.get_cut_intervals()
+            # ZUSAMMENGEFASSTE Schnitte, nicht die einzelnen.
+            #
+            # Grenzen zwei Schnitte aneinander oder ueberlappen sie, ist das im
+            # Video EIN Loch. Aus den Einzelschnitten wurden bisher zwei
+            # Blenden gebaut, und die innere blendete auf Material, das der
+            # Nachbarschnitt bereits entfernt hat - im Bild ein kurzes
+            # Standbild an der Stossstelle. Der Export war davon nie
+            # betroffen: _compute_keep_intervals() fasst selbst zusammen.
+            cuts = self.cut_manager.get_merged_cut_intervals()
         except Exception as e:
             print(f"[WARN] preview-cuts: Schnitte nicht lesbar: {e}")
             return
@@ -5430,7 +5438,10 @@ class MainWindow(QMainWindow):
                 fade = 0
             elif total_dur > 0 and abs(cend - total_dur) < 0.1:  # Endschnitt
                 fade = 0
-            elif self.cut_manager.is_hard_cut(cstart, cend):
+            elif self.cut_manager.hat_harte_kante(cstart, cend):
+                # hat_harte_kante statt is_hard_cut: cstart/cend koennen ein
+                # zusammengefasster Bereich aus mehreren Schnitten sein, dessen
+                # Schluessel es in _hard_cuts gar nicht gibt.
                 fade = 0
             preview.append((cstart, cend, fade))
 
@@ -5710,7 +5721,12 @@ class MainWindow(QMainWindow):
         if not self._fade_jobs or not self.video_editor.supports_preview_cuts():
             return
         try:
-            cuts = self.cut_manager.get_cut_intervals()
+            # Dieselbe Grundlage wie in _refresh_preview_timeline: die
+            # ZUSAMMENGEFASSTEN Schnitte. Sonst wird hier unter den Schluesseln
+            # der Einzelschnitte gesucht, waehrend die Auftraege unter denen
+            # der zusammengefassten liegen - die fertige Blende wird dann nicht
+            # gefunden und die Vorschau ohne sie neu gesetzt.
+            cuts = self.cut_manager.get_merged_cut_intervals()
         except Exception:
             return
         total_dur = getattr(self, "real_total_duration", 0.0) or 0.0
@@ -5726,7 +5742,7 @@ class MainWindow(QMainWindow):
                 fade = 0
             elif total_dur > 0 and abs(cend - total_dur) < 0.1:
                 fade = 0
-            elif self.cut_manager.is_hard_cut(cstart, cend):
+            elif self.cut_manager.hat_harte_kante(cstart, cend):
                 fade = 0
             job = self._fade_jobs.get((cstart, cend))
             pfad = self._fade_renderer.ready_path(job) if job is not None else None

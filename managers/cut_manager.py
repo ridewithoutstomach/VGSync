@@ -452,6 +452,20 @@ class VideoCutManager(QObject):
             self._hard_cuts.discard(key)
         self._sync_timeline_hard_cuts()
 
+    def hat_harte_kante(self, start_s, end_s, eps: float = 0.001) -> bool:
+        """Ist irgendein Schnitt in diesem Bereich eine harte Kante?
+
+        Fuer zusammengefasste Bereiche: grenzen mehrere Schnitte aneinander,
+        sind sie im Video ein einziger Uebergang. Der ist entweder hart oder
+        hat eine Blende - eine innere Kante gibt es nicht. Reicht eine
+        Markierung, gilt der ganze Uebergang als hart.
+        """
+        for (a, b) in self._cut_intervals:
+            if a >= start_s - eps and b <= end_s + eps:
+                if self._cut_key(a, b) in self._hard_cuts:
+                    return True
+        return False
+
     def toggle_hard_cut(self, start_s, end_s) -> bool:
         """Schaltet um und liefert den neuen Zustand (True = harte Kante)."""
         new_state = not self.is_hard_cut(start_s, end_s)
