@@ -8,6 +8,126 @@ Versions up to and including 5.0 are documented in the GitHub releases only.
 
 ---
 
+## 6.02 - 2026-09-01
+
+The window was rebuilt. Until 6.01 the layout was fixed: video and map on the
+left, chart and GPX table on the right, and the timeline squeezed in beside the
+video. It is now three rows, and what sits in each of the four windows is up to
+the user.
+
+### Changed
+
+**The timeline runs across the full width**
+
+It used to live in the left column and was therefore tied to the width of the
+video - about 920 of 1900 pixels. On a 35 minute video that is 2.3 seconds per
+pixel. Across the full width it is 1.1. The widget itself needed no change at
+all: it computes everything from `self.width()`, so moving it was enough.
+
+**Four windows, contents of your choosing**
+
+The layout is now a grid: two windows on top, the timeline across the middle,
+two windows below. Each window holds one module - map, chart, chart flow or GPX
+table - and you switch it with the small handle that appears while the mouse is
+over the window, or by right-clicking it. Picking a module that currently sits
+somewhere else swaps the two windows.
+
+Four modules share three switchable windows, so one is always out of sight; at
+startup that is the chart flow.
+
+The video is the exception. It stays in the top row and only changes sides,
+because it renders into a native window handle (`winId()`): moving it to another
+row re-creates that window and the picture is gone. Swapping sides is a change
+of index within the same splitter and costs nothing. The map has the same
+problem for a different reason - it is a `QWebEngineView` - and reloads itself
+after a row change.
+
+**Every module carries its own controls**
+
+The player buttons sit under the video, the GPX button bar under the table. Both
+used to sit elsewhere, and a module that changes place would have left its
+controls behind. It also keeps the top edge of each window free, which is where
+the switch handle appears.
+
+**The mini chart became a module of its own: "Chart Flow"**
+
+It was a strip beside the timeline and is now a full window. It is not a zoomed
+version of the big chart, and cannot be: the big chart scales its elevation axis
+across the whole track, so a five metre crest is a flat line. The flow scales
+only over the points currently visible, which is why a crest fills the frame -
+exactly what you need in order to see whether the video is going over the hilltop
+at the moment the profile says it is.
+
+The marker stays at 70% of the width and the points travel underneath. Ctrl and
+the mouse wheel set how many GPX points are in view (8 to 400, 40 by default).
+
+It also follows along while the video is paused. Clicking a point in the chart,
+in the map or a row in the table moves it - previously it only tracked during
+playback.
+
+**Elevation figures are gone from the flow**
+
+Only the gradient is shown at the current point. That is the value you compare
+against the picture; metres above sea level say nothing about what you are
+looking at.
+
+### Added
+
+**Elevation profile inside the video picture**
+
+*View - Höhenprofil im Video*. The flow can be shown over the video, bottom left,
+dark and translucent. Drag it anywhere in the picture by the small handle in its
+top left corner; the position is remembered between sessions.
+
+It is positioned against the picture, not against the window: if the aspect
+ratio of the video does not match the window there are black bars, and the
+profile stays inside the image rather than sitting on a bar. Only the handle
+accepts the mouse - the profile itself lets clicks through, so dragging the view
+in 360 mode still works underneath it.
+
+**"Video before cuts" in the GPX summary**
+
+The length of the original video, next to the length after cuts.
+
+### Removed
+
+**Detach for video and map**
+
+*Video (detach)* and *Map (detach)* are gone, along with `DetachDialog`. Both
+moved a widget into a second top-level window, and both needed hand-written care
+to survive it - the video renders into a native window handle, the map is a
+Chromium view whose compositor texture belongs to the old window. The comment in
+the old reattach code says as much: close the dialog in the wrong order and the
+picture is gone.
+
+With windows whose contents can be swapped, the feature has lost its purpose on
+a single screen. 313 lines went with it.
+
+A message filter in `KVRouite.py` that swallowed "belongs to QRhi" warnings is
+gone too - those only ever appeared when the map was detached.
+`AA_ShareOpenGLContexts` stays: its original reason is gone, but whether it
+steadies anything else has not been measured, and it costs nothing.
+
+**The two running times in the video picture**
+
+The length of the original and the length after cuts were drawn over the bottom
+left of the picture, in white and red on whatever happened to be there - on
+bright asphalt they were barely readable. Both are in the GPX summary now, as
+"Video before cuts" and "Video Duration".
+
+**The mini chart beside the timeline**
+
+Replaced by the Chart Flow module, see above.
+
+### Fixed
+
+**GPX button bar sat above the table**
+
+It now sits below it, matching the player. Beside being consistent, it keeps the
+top edge free for the window switch.
+
+---
+
 ## 6.01 – 2026-08-31
 
 Nothing was added and nothing moved. This release is about the application
