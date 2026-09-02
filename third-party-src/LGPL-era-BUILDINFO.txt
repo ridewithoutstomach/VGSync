@@ -1,0 +1,99 @@
+FFmpeg and mpv built for KVRouite (then named VGSync) before April 2025
+=======================================================================
+
+Versions up to 3.25 (2025-03-16) shipped FFmpeg and libmpv as shared
+libraries that were compiled by the author himself, in an MSYS2 / mingw64
+environment on Windows, in an LGPL configuration. From version 3.27
+(2025-04-04) on, this was replaced by third-party GPL builds; see
+ffmpeg-7.1-BUILDINFO.txt for those.
+
+This file records what could be established about the earlier builds.
+
+
+FFmpeg - exact, verified
+------------------------
+
+Version string in the binaries:  FFmpeg version N-118448-g43be8d0728
+Upstream commit:                 43be8d07281caca2e88bfd8ee2333633e1fb1a13
+                                 (2025-02-08, FFmpeg master)
+Compiled on:                     2025-02-09 18:17:11 UTC
+                                 (PE timestamp of avcodec-61.dll)
+Source in this archive:          ffmpeg-source_43be8d0728_LGPL.zip
+
+Configure line, as recorded inside the binaries themselves:
+
+  ./configure \
+    --prefix=/mingw64 \
+    --disable-static \
+    --enable-shared \
+    --disable-gpl \
+    --disable-nonfree \
+    --enable-libvpx \
+    --enable-libopus \
+    --enable-libvorbis \
+    --enable-libwebp \
+    --enable-gnutls \
+    --enable-runtime-cpudetect
+
+Because of --disable-gpl and --disable-nonfree, these libraries are covered
+by the GNU Lesser General Public License, version 2.1 or later.
+
+Shipped as: avcodec-61.dll, avdevice-61.dll, avfilter-10.dll,
+avformat-61.dll, avutil-59.dll, swresample-5.dll, swscale-8.dll, together
+with their own dependencies from the same mingw64 environment. The same
+FFmpeg build was also used as the FFmpeg underneath libmpv.
+
+
+mpv / libmpv - partly reconstructed, stated honestly
+----------------------------------------------------
+
+libmpv was built by the author from mpv's own source with this command,
+which is preserved verbatim in the project's history:
+
+  meson setup build \
+    --prefix=/mingw64 \
+    --buildtype=release \
+    -Dgpl=false \
+    -Dlibmpv=true \
+    -Dcplayer=false \
+    -Dlua=disabled \
+    -Dlibarchive=disabled \
+    -Dmanpage-build=disabled
+
+Because of -Dgpl=false, this build is covered by the GNU Lesser General
+Public License, version 2.1 or later.
+
+The exact mpv source revision can no longer be determined. The resulting
+libmpv-2.dll was never kept in version control, and no copy of a build from
+that period has survived. What is certain:
+
+  - it was built after 2025-02-09 (the FFmpeg it links was compiled then)
+  - it was built before 2025-03-14 (the date it is first documented in the
+    project's history)
+  - the current mpv release throughout that window was 0.39.0, published
+    2024-09-23; the next release, 0.40.0, did not appear until 2025-03-25
+
+Because it cannot be determined whether the build was made from the release
+tarball or from a git checkout of master, BOTH candidates are provided:
+
+  mpv-source_0.39.0_LGPL-era.zip
+      release 0.39.0 (2024-09-23) - the release that was current at the time
+
+  mpv-source_master-2025-02-08_LGPL-era.zip
+      master at commit e4b64fba9c5c6ca97189f32c056d05c2b47cebd6 (2025-02-08),
+      the last commit before the FFmpeg it links was compiled
+
+One of these two is the source of the build you received. Neither has been
+modified in any way.
+
+If you received one of these builds and neither archive matches the version
+string reported by your copy, please write to bernd@kvrouite.com and say which
+version you have. Every effort will be made to supply source that matches it.
+
+
+Note on the offer
+-----------------
+
+These builds have not been distributed since April 2025 and are not offered
+for download any more. This source is kept available for the people who
+received them at the time.

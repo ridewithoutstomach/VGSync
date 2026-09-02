@@ -61,3 +61,14 @@ config.js
 
 # interne Notizen, nicht ausliefern
 IDEE_concat_inpoint_outpoint.md
+
+# Lizenz-Vorgang Kinomap und interne Buchfuehrung - NICHT veroeffentlichen.
+# Enthaelt Korrespondenz, Beweiskette und Bewertungen Dritter.
+evidence_kinomap/
+Kinomap_Email.md
+Kinomap_Reply.md
+Kinomap_Reply_DE.md
+GPL_Compliance_Notice_Kinomap.md
+CORRESPONDING_SOURCE_PLAN.md
+AUFBEWAHRUNG_FRISTEN.md
+
