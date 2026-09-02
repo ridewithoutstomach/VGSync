@@ -118,16 +118,29 @@ def hooks_verzeichnis_anlegen():
     if os.path.isdir(ordner):
         shutil.rmtree(ordner)
     os.makedirs(ordner)
+    mit_override = 0
     for modul in GI_MODULE:
+        # Die Python-Schicht ueber der Introspection MUSS mit. Ohne sie ist
+        # zum Beispiel Gst.init(None) nicht erlaubt - das erste Buendel brach
+        # daran ab mit "Argument 1 does not allow None as a value". Der
+        # eingebaute Hook haette den Override eingesammelt; wenn wir ihn
+        # stilllegen, muessen wir das selbst tun.
+        kurz = modul.split(".")[-1]
+        override = "gi.overrides." + kurz
+        hat_override = importlib.util.find_spec(override) is not None
+        if hat_override:
+            mit_override += 1
         pfad = os.path.join(ordner, "hook-%s.py" % modul)
         with open(pfad, "w", encoding="utf-8") as f:
             f.write("# Erzeugt von build_macos.py - siehe dort die Begruendung.\n")
-            f.write("# Legt den eingebauten Hook fuer %s still.\n" % modul)
-            f.write("hiddenimports = []\n")
+            f.write("# Legt die Bibliothekssuche des eingebauten Hooks fuer\n")
+            f.write("# %s still, nimmt den Override aber mit.\n" % modul)
+            f.write("hiddenimports = %r\n" % ([override] if hat_override else []))
             f.write("datas = []\n")
             f.write("binaries = []\n")
             f.write("excludedimports = []\n")
-    print("[INFO] %d eigene gi-Hooks in %s" % (len(GI_MODULE), ordner))
+    print("[INFO] %d eigene gi-Hooks in %s (%d mit Override)"
+          % (len(GI_MODULE), ordner, mit_override))
     return ordner
 
 
