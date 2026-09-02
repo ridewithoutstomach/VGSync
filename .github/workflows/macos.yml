@@ -16,13 +16,14 @@ jobs:
   test:
     name: ${{ matrix.os }} (Python ${{ matrix.python }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30    # haengt nie laenger als eine halbe Stunde
     strategy:
       fail-fast: false     # ein defektes Ziel stoppt das andere nicht
       matrix:
         include:
-          - os: macos-14   # Apple Silicon (arm64)
+          - os: macos-15         # Apple Silicon (arm64)
             python: "3.12"
-          - os: macos-13   # Intel (x86_64)
+          - os: macos-15-intel   # Intel (x86_64)
             python: "3.12"
 
     steps:
@@ -62,6 +63,28 @@ jobs:
               print("  ok:", modul)
           print("Alle Module importiert, Python", sys.version.split()[0])
           PY
+
+      - name: Startversuch - Anwendung wirklich starten
+        env:
+          QT_QPA_PLATFORM: offscreen    # Qt zeichnet in den Speicher, kein Bildschirm noetig
+        run: |
+          set +e
+          python KVRouite.py > start.log 2>&1 &
+          PID=$!
+          sleep 25
+          if kill -0 $PID 2>/dev/null; then
+            echo "ERGEBNIS: Anwendung laeuft nach 25 Sekunden noch - Start erfolgreich."
+            kill $PID 2>/dev/null
+            RC=0
+          else
+            wait $PID; CODE=$?
+            echo "ERGEBNIS: Anwendung hat sich vorzeitig beendet, Rueckgabewert $CODE"
+            RC=1
+          fi
+          echo "----- Ausgabe der Anwendung -----"
+          cat start.log
+          echo "---------------------------------"
+          exit $RC
 
       - name: GStreamer-Plugins auflisten (zur Information)
         if: always()
