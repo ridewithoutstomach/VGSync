@@ -6788,7 +6788,7 @@ class MainWindow(QMainWindow):
 
         with open(out_file, "w", encoding="utf-8") as f:
             f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
-            f.write('<gpx version="1.1" creator="MyApp" ')
+            f.write(f'<gpx version="1.1" creator="KVRouite v{APP_VERSION}" ')
             f.write('xmlns="http://www.topografix.com/GPX/1/1" ')
             f.write('xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" ')
             f.write('xsi:schemaLocation="http://www.topografix.com/GPX/1/1 ')
