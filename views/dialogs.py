@@ -512,7 +512,8 @@ class OutputFrameRateDialog(QDialog):
         layout.addLayout(zeile)
 
         fuss = QLabel("You can change this later under Config → Encoder Setup.")
-        fuss.setStyleSheet("color: gray;")
+        from core import theme
+        fuss.setStyleSheet("color: %s;" % theme.farben()["text_grau"])
         layout.addWidget(fuss)
 
         knoepfe = QHBoxLayout()

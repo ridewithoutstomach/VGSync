@@ -31,6 +31,7 @@ from PySide6.QtGui import QIcon
 from PySide6.QtCore import QSize
 
 from core.gpx_parser import is_gpx_video_shift_set
+from core import theme
 
 class VideoControlWidget(QWidget):
     play_pause_clicked       = Signal()
@@ -61,15 +62,16 @@ class VideoControlWidget(QWidget):
         layout.setSpacing(5)
 
         self.play_pause_button = QPushButton()
+        self._laeuft = False
         self.play_pause_button.setIcon(
-            self.style().standardIcon(QStyle.SP_MediaPlay)
+            theme.standardsymbol(self, QStyle.SP_MediaPlay)
         )
         self.play_pause_button.clicked.connect(self.play_pause_clicked.emit)
         layout.addWidget(self.play_pause_button)
         
         icon_size = self.style().pixelMetric(QStyle.PM_ToolBarIconSize)
         self.stop_button = QPushButton()
-        self.stop_button.setIcon(QIcon("icon/go_to_start_icon_padded.png"))
+        self.stop_button.setIcon(theme.icon("icon/go_to_start_icon_padded.png"))
         self.stop_button.setIconSize(QSize(icon_size, icon_size))
         play_size = self.play_pause_button.sizeHint()
         self.stop_button.setMaximumSize(play_size)    
@@ -79,7 +81,7 @@ class VideoControlWidget(QWidget):
         layout.addWidget(self.stop_button)
 
         self.goto_end = QPushButton()
-        self.goto_end.setIcon(QIcon("icon/go_to_end.png"))
+        self.goto_end.setIcon(theme.icon("icon/go_to_end.png"))
         self.goto_end.setIconSize(QSize(icon_size, icon_size))
         self.goto_end.setMaximumSize(play_size)    
         
@@ -116,13 +118,13 @@ class VideoControlWidget(QWidget):
 
         self.backward_button = QPushButton()
         self.backward_button.setToolTip("Step backwards: Step x Multiplier")
-        self.backward_button.setIcon(self.style().standardIcon(QStyle.SP_MediaSeekBackward))
+        self.backward_button.setIcon(theme.standardsymbol(self, QStyle.SP_MediaSeekBackward))
         self.backward_button.clicked.connect(self.backward_clicked.emit)
         layout.addWidget(self.backward_button)
 
         self.forward_button = QPushButton()
         self.forward_button.setToolTip("Step forwards: Step x Multiplier")
-        self.forward_button.setIcon(self.style().standardIcon(QStyle.SP_MediaSeekForward))
+        self.forward_button.setIcon(theme.standardsymbol(self, QStyle.SP_MediaSeekForward))
         self.forward_button.clicked.connect(self.forward_clicked.emit)
         layout.addWidget(self.forward_button)
 
@@ -183,7 +185,7 @@ class VideoControlWidget(QWidget):
         
                 
         self.cut_begin_button = QPushButton()
-        self.cut_begin_button.setIcon(QIcon("icon/cut_begin.png")) 
+        self.cut_begin_button.setIcon(theme.icon("icon/cut_begin.png")) 
         self.cut_begin_button.setIconSize(QSize(20, 20))
         self.cut_begin_button.setToolTip("Cut the Begin of the Video and the GPX")
         self.cut_begin_button.clicked.connect(self.set_beginClicked.emit)
@@ -191,7 +193,7 @@ class VideoControlWidget(QWidget):
         
         
         self.cut_end_button = QPushButton()
-        self.cut_end_button.setIcon(QIcon("icon/cut_end.png")) 
+        self.cut_end_button.setIcon(theme.icon("icon/cut_end.png")) 
         self.cut_end_button.setIconSize(QSize(20, 20))
         self.cut_end_button.setToolTip("Cut the End of the Video and the GPX")
         
@@ -199,7 +201,7 @@ class VideoControlWidget(QWidget):
         layout.addWidget(self.cut_end_button)
 
         self.set_sync_button = QPushButton()
-        self.set_sync_button.setIcon(QIcon("icon/vg_sync_ring.png")) 
+        self.set_sync_button.setIcon(theme.icon("icon/vg_sync_ring.png")) 
         self.set_sync_button.setIconSize(QSize(20, 20))
         self.set_sync_button.setToolTip("Set current video frame synchronized with selected GPX Point")
         self.set_sync_button.clicked.connect(self.setSyncClicked.emit)
@@ -234,8 +236,10 @@ class VideoControlWidget(QWidget):
 
         # Icons laden
         
-        self.icon_autocut_on = QIcon("icon/vg_icon_on2.png")
-        self.icon_autocut_off = QIcon("icon/vg_icon_off.png")
+        # Diese beiden sind farbig (rot/gruen) - theme.icon() laesst sie in
+        # Ruhe, sie stehen hier nur der Einheitlichkeit halber.
+        self.icon_autocut_on = theme.icon("icon/vg_icon_on2.png")
+        self.icon_autocut_off = theme.icon("icon/vg_icon_off.png")
         # Default setzen
         self._update_autocut_icon()
         self.autocut_button.setVisible(False)  # nur bei Copy- oder Encode-Mode
@@ -324,14 +328,11 @@ class VideoControlWidget(QWidget):
         self.markEClicked.emit()    
 
     def update_play_pause_icon(self, is_playing):
-        if is_playing:
-            self.play_pause_button.setIcon(
-                self.style().standardIcon(QStyle.SP_MediaPause)
-            )
-        else:
-            self.play_pause_button.setIcon(
-                self.style().standardIcon(QStyle.SP_MediaPlay)
-            )
+        # Der Zustand wird gemerkt, damit nach einem Wechsel der Farbgebung
+        # wieder das richtige Zeichen gesetzt werden kann.
+        self._laeuft = bool(is_playing)
+        self.play_pause_button.setIcon(theme.standardsymbol(
+            self, QStyle.SP_MediaPause if self._laeuft else QStyle.SP_MediaPlay))
 
     def set_step_values(self, values):
         """Legt fest, welche Schrittweiten der Knopf durchschaltet.
@@ -470,6 +471,28 @@ class VideoControlWidget(QWidget):
 
         self.overlayClicked.emit()
         
+    def theme_aktualisieren(self):
+        """Symbole neu holen, wenn die Farbgebung gewechselt hat.
+
+        Die einfarbigen Zeichnungen werden von core/theme.icon() umgekehrt -
+        das Ergebnis haengt an der Farbgebung und muss nach dem Umschalten
+        neu gesetzt werden.
+        """
+        self.stop_button.setIcon(theme.icon("icon/go_to_start_icon_padded.png"))
+        self.goto_end.setIcon(theme.icon("icon/go_to_end.png"))
+        self.cut_begin_button.setIcon(theme.icon("icon/cut_begin.png"))
+        self.cut_end_button.setIcon(theme.icon("icon/cut_end.png"))
+        self.set_sync_button.setIcon(theme.icon("icon/vg_sync_ring.png"))
+        self.play_pause_button.setIcon(theme.standardsymbol(
+            self, QStyle.SP_MediaPause if self._laeuft else QStyle.SP_MediaPlay))
+        self.backward_button.setIcon(
+            theme.standardsymbol(self, QStyle.SP_MediaSeekBackward))
+        self.forward_button.setIcon(
+            theme.standardsymbol(self, QStyle.SP_MediaSeekForward))
+        self.icon_autocut_on = theme.icon("icon/vg_icon_on2.png")
+        self.icon_autocut_off = theme.icon("icon/vg_icon_off.png")
+        self._update_autocut_icon()
+
     def _find_mainwindow(self):
         p = self.parent()
         while p:

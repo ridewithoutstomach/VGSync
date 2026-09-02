@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
     QHeaderView, QAbstractItemView, QStyledItemDelegate, QStyle,
     QAbstractScrollArea
 )    
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QBrush
 
 from core.gpx_parser import get_gpx_video_shift, is_gpx_video_shift_set, set_gpx_video_shift
 
@@ -102,18 +102,13 @@ class GPXListWidget(QWidget):
        
         self.table.setItemDelegateForColumn(8, MarkColumnDelegate(self.table))
 
-        # B) StyleSheet: Selektierte Zeile blau (auch wenn kein Fokus).
-        self.table.setStyleSheet("""
-            QTableView::item:selected {
-                background-color: #3874f2;  /* Blau */
-                color: white;               /* Weißer Text */
-            }
-            /* optional: bei NoFocus bleibt es sichtbar */
-            QTableView {
-                selection-background-color: #3874f2;
-            }
-        """)
+        # B) Selektierte Zeile bleibt farbig, auch ohne Fokus. Die Farbe
+        # kommt aus core/theme.py - hell ist es dasselbe Blau wie bisher.
+        self.table.setStyleSheet(self._tabellen_stil())
         self.table.setFocusPolicy(Qt.StrongFocus)
+
+        # Ende des Tabellenaufbaus
+
        
         # Intern
         self._gpx_data = []            # interner Speicher der GPX-Punkte
@@ -123,6 +118,9 @@ class GPXListWidget(QWidget):
         self._markE_idx = None
         
         self._marked_rows = set()
+        # Schriftfarben, die der gelbe Balken ueberdeckt - je Zeile gemerkt,
+        # damit sie danach wieder gelten.
+        self._schrift_vorher = {}
         
         
         self._gpx_times = []
@@ -160,6 +158,58 @@ class GPXListWidget(QWidget):
     # markB markE und Deselect
     # ---------------------------------------------------
    
+    # ------------------------------------------------------------------
+    # Farben
+    # ------------------------------------------------------------------
+    def _tabellen_stil(self) -> str:
+        """Die ausgewaehlte Zeile bleibt farbig, auch ohne Fokus.
+
+        Im dunklen Betrieb kommen Gitterlinien und Kopfzeilen dazu: ihre Farbe
+        leitet Qt sonst aus Palettenrollen ab, die die dunkle Tafel nicht
+        setzt - die Linien verschwanden dann und die Tabelle stand als
+        schwarzer Block da. Im hellen Betrieb bleibt es bei dem einen Satz von
+        frueher, damit dort nichts anders aussieht als bisher.
+        """
+        from core import theme
+        f = theme.farben()
+        stil = ("QTableView::item:selected { background-color: %s; color: %s; }"
+                "QTableView { selection-background-color: %s; }"
+                % (f["akzent"], f["akzent_text"], f["akzent"]))
+        if theme.ist_dunkel():
+            stil += (
+                "QTableView { gridline-color: %(gitter)s; }"
+                "QHeaderView::section { background-color: %(kopf)s; color: %(text)s;"
+                " border: 0px; border-right: 1px solid %(gitter)s;"
+                " border-bottom: 1px solid %(gitter)s; padding: 2px 4px; }"
+                "QTableCornerButton::section { background-color: %(kopf)s;"
+                " border: 0px; border-right: 1px solid %(gitter)s;"
+                " border-bottom: 1px solid %(gitter)s; }"
+                % {"gitter": f["gitter"], "kopf": f["kopfzeile"], "text": f["text"]})
+        return stil
+
+    def theme_aktualisieren(self):
+        """Wird von core/theme.anwenden() gerufen, wenn umgeschaltet wurde."""
+        from core import theme
+        self.table.setStyleSheet(self._tabellen_stil())
+
+        # Schon gefaerbte Zeilen nachziehen: die zurueckgenommene Schrift der
+        # Punkte vor dem Sync-Punkt haengt an der Farbgebung. Erkannt wird sie
+        # daran, dass sie einer der beiden Tafelwerte ist - andere Faerbungen
+        # (rote Marken, gelbe Zeile) bleiben unberuehrt.
+        gedimmt = {theme.DUNKEL["text_gedimmt"].lower(),
+                   theme.HELL["text_gedimmt"].lower(),
+                   "#808080"}
+        neu = self.gedimmte_schrift()
+        for zeile in range(self.table.rowCount()):
+            for spalte in range(self.table.columnCount()):
+                if spalte == 8:
+                    continue
+                item = self.table.item(zeile, spalte)
+                if item is None:
+                    continue
+                if item.foreground().color().name().lower() in gedimmt:
+                    item.setForeground(neu)
+
     def set_markB_row(self, new_b: int):
         if not (0 <= new_b < self.table.rowCount()):
             return
@@ -367,7 +417,18 @@ class GPXListWidget(QWidget):
         """
         Färbt Spalten 0..7 von `row` in `color`,
         ohne Spalte 8 (Mark) zu verändern.
+
+        Die Schriftfarbe wird mitgesetzt, und zwar aus der Helligkeit des
+        Hintergrunds gerechnet: auf dem gelben Balken der aktuellen Zeile stand
+        im Dunkelmodus sonst die helle Palettenschrift - gelb auf gelb.
         """
+        farbe = QColor(color)
+        # Helligkeit nach ITU-R BT.601, wie sie auch Qt fuer Kontraste nimmt.
+        helligkeit = (farbe.red() * 299 + farbe.green() * 587
+                      + farbe.blue() * 114) / 1000.0
+        schrift = QColor("#000000") if helligkeit > 140 else QColor("#ffffff")
+
+        gemerkt = []
         col_count = self.table.columnCount()  # meist 9
         for col in range(col_count):
             if col == 8:
@@ -376,7 +437,45 @@ class GPXListWidget(QWidget):
             if not item:
                 item = QTableWidgetItem("")
                 self.table.setItem(row, col, item)
-            item.setBackground(color)
+            # Die bisherige Schrift merken: Punkte vor dem Sync-Punkt stehen
+            # zurueckgenommen da, und das soll nach dem Balken wieder gelten.
+            # Ueber data(ForegroundRole), nicht ueber foreground(): letzteres
+            # liefert fuer ein Feld OHNE eigene Farbe einen schwarzen Pinsel,
+            # und den wuerden wir danach faelschlich zurueckschreiben.
+            gemerkt.append((col, item.data(Qt.ForegroundRole)))
+            item.setBackground(farbe)
+            item.setForeground(schrift)
+        self._schrift_vorher[row] = gemerkt
+
+    def _zeile_klar(self, row: int):
+        """Die Faerbung des Balkens zuruecknehmen.
+
+        Frueher wurde hier Qt.white gesetzt - richtig, solange die Tabelle
+        weiss war. Im dunklen Betrieb blieb dadurch ein heller Streifen hinter
+        dem Balken stehen. Jetzt wird der Hintergrund GELOESCHT (leerer
+        QBrush), dann zeichnet die Tabelle wieder ihren eigenen, egal welcher
+        das gerade ist.
+        """
+        if row is None or not (0 <= row < self.table.rowCount()):
+            return
+        gemerkt = dict(self._schrift_vorher.pop(row, []))
+        for col in range(self.table.columnCount()):
+            if col == 8:
+                continue
+            item = self.table.item(row, col)
+            if item is None:
+                continue
+            # setBackground(QBrush()) bzw. setForeground(QBrush()) taugen hier
+            # NICHT: ein leerer QBrush malt zwar keinen Hintergrund, traegt
+            # als Farbe aber Schwarz - der Text wurde dadurch schwarz auf
+            # dunklem Grund. Die Rolle muss ganz weg, dann steht das Feld
+            # wieder da wie ein frisches.
+            item.setData(Qt.BackgroundRole, None)
+            vorher = gemerkt.get(col)
+            if vorher is not None:
+                item.setForeground(vorher)
+            else:
+                item.setData(Qt.ForegroundRole, None)
     
     def _set_row_foreground(self, row: int, color):
         col_count = self.table.columnCount()
@@ -384,6 +483,16 @@ class GPXListWidget(QWidget):
             if col != 8:
                 item = self.table.item(row, col)
                 item.setForeground(color)
+
+    def gedimmte_schrift(self) -> QColor:
+        """Farbe fuer Punkte vor dem Sync-Punkt.
+
+        Frueher fest Qt.gray. Auf dunklem Grund war das nicht mehr zu lesen,
+        deshalb kommt der Wert jetzt aus core/theme.py und wird dort je nach
+        Farbgebung heller oder dunkler gewaehlt.
+        """
+        from core import theme
+        return QColor(theme.farben()["text_gedimmt"])
         
 
     # ---------------------------------------------------
@@ -414,7 +523,7 @@ class GPXListWidget(QWidget):
 
         # Alte gelbe Zeile (Spalten 0..7) ggf. weiß
         if self._last_video_row is not None:
-            self._mark_row_bg_except_markcol(self._last_video_row, Qt.white)
+            self._zeile_klar(self._last_video_row)
 
         if not self._gpx_times:
             return
@@ -479,13 +588,13 @@ class GPXListWidget(QWidget):
                     # Wir wollen aber evtl. 0..7 trotzdem auf weiß, 
                     # damit nicht 2 Zeilen gelb sind.
                     # => Wir nehmen die Hilfsmethode => except Mark:
-                    self._mark_row_bg_except_markcol(self._last_video_row, Qt.white)
+                    self._zeile_klar(self._last_video_row)
                 else:
                     # alter Punkt außerhalb B..E => normal auf weiß
-                    self._mark_row_bg_except_markcol(self._last_video_row, Qt.white)
+                    self._zeile_klar(self._last_video_row)
             else:
                 # kein B..E => normal
-                self._mark_row_bg_except_markcol(self._last_video_row, Qt.white)
+                self._zeile_klar(self._last_video_row)
 
         # 2) Neue Zeile 0..7 => gelb
         self._mark_row_bg_except_markcol(new_idx, Qt.yellow)
@@ -564,7 +673,7 @@ class GPXListWidget(QWidget):
         # Falls es eine alte gelbe Zeile gibt
         if self._last_video_row is not None and self._last_video_row != row_idx:
             # => 0..7 auf weiß
-            self._mark_row_bg_except_markcol(self._last_video_row, Qt.white)
+            self._zeile_klar(self._last_video_row)
 
         # Neue Zeile 0..7 => gelb
         self._mark_row_bg_except_markcol(row_idx, Qt.yellow)
@@ -765,7 +874,7 @@ class GPXListWidget(QWidget):
                 self._set_cell(row_idx, 7, f"{grd_val:.1f}")
                 self._set_cell(row_idx, 8, "")
                 if rel_s < 0:
-                    self._set_row_foreground(row_idx, Qt.gray)
+                    self._set_row_foreground(row_idx, self.gedimmte_schrift())
         finally:
             # End of bulk update: restore widget state
             self._end_table_update()

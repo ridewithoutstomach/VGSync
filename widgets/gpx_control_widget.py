@@ -41,6 +41,7 @@ from PySide6.QtGui import QIcon
 
 from datetime import timedelta
 from core.gpx_parser import recalc_gpx_data, get_gpx_video_shift, set_gpx_video_shift
+from core import theme
 
 MAX_LOGO_H = 48
 
@@ -140,14 +141,20 @@ class GPXControlWidget(QWidget):
         self._buttons_layout.addWidget(self.deselect_button)
 
         # 4) Delete
-        self.cut_button = QPushButton("✂️", self)
+        # U+FE0E haengt hinten dran: das ist die Bitte um die TEXT-Darstellung.
+        # Ohne sie zeichnet Windows die Schere als farbiges Emoji, das die
+        # Textfarbe nicht annimmt - auf dunklem Grund blieb sie rot.
+        self.cut_button = QPushButton("✂︎", self)
         self.cut_button.setToolTip("Cut a marked Area and shift next points time")
         self.cut_button.setMinimumWidth(20)
         
         self.cut_button.clicked.connect(self.cutClicked.emit)
         self._buttons_layout.addWidget(self.cut_button)
         
-        self.minus_button = QPushButton("➖", self)
+        # Geviertstrich statt U+2796: das dortige Zeichen ist ein Emoji und
+        # bleibt auch mit U+FE0E blau - gemessen. Der Strich nimmt die
+        # Textfarbe an und ist aehnlich kraeftig.
+        self.minus_button = QPushButton("—", self)
         self.minus_button.setToolTip("Remove a marked Area without time shift")
         self.minus_button.setMinimumWidth(20)
         
@@ -280,7 +287,7 @@ class GPXControlWidget(QWidget):
 
         target_icon_path = _find_target_icon()
         if target_icon_path and os.path.exists(target_icon_path):
-            self.slot_sync_button.setIcon(QIcon(target_icon_path))
+            self.slot_sync_button.setIcon(theme.icon(target_icon_path))
         else:
             self.slot_sync_button.setText("Target")  # Fallback
 

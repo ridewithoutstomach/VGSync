@@ -52,19 +52,20 @@ class SlotWidget(QWidget):
         self._kopf = QWidget(self)
         self._kopf.setFixedHeight(KOPF_HOEHE)
         self._kopf.setCursor(Qt.PointingHandCursor)
-        self._kopf.setStyleSheet(
-            "background-color: #3a3a3a; border-bottom: 1px solid #555;")
+        # Farben kommen aus core/theme.py, damit die Kopfzeile im hellen
+        # Betrieb nicht als dunkler Balken stehen bleibt.
+        self._kopf.setStyleSheet(self._kopf_stil())
         kopf_lay = QHBoxLayout(self._kopf)
         kopf_lay.setContentsMargins(6, 0, 4, 0)
         kopf_lay.setSpacing(4)
 
         self._titel = QLabel(titel, self._kopf)
-        self._titel.setStyleSheet("color: #ddd; font-size: 11px; border: none;")
+        self._titel.setStyleSheet(self._beschriftung_stil())
         kopf_lay.addWidget(self._titel)
         kopf_lay.addStretch(1)
 
         self._pfeil = QLabel("▾", self._kopf)          # kleines Dreieck
-        self._pfeil.setStyleSheet("color: #ddd; font-size: 11px; border: none;")
+        self._pfeil.setStyleSheet(self._beschriftung_stil())
         kopf_lay.addWidget(self._pfeil)
 
         # Klick auf die ganze Leiste, nicht nur auf den Pfeil.
@@ -87,14 +88,47 @@ class SlotWidget(QWidget):
         self._knopf.setToolTip("Switch module")
         self._knopf.setCursor(Qt.PointingHandCursor)
         self._knopf.setFixedSize(QSize(34, 18))
-        self._knopf.setStyleSheet(
-            "QToolButton { background: rgba(30,30,30,190); color: #eee;"
-            " border: 1px solid #777; border-radius: 3px; font-size: 11px; }"
-            "QToolButton:hover { background: rgba(60,60,60,230); }")
+        self._knopf.setStyleSheet(self._knopf_stil())
         self._knopf.clicked.connect(self._menue_zeigen)
         self._knopf.hide()
 
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+    # ------------------------------------------------------------------
+    # Farben
+    # ------------------------------------------------------------------
+    def _kopf_stil(self) -> str:
+        f = self._farben()
+        return ("background-color: %s; border-bottom: 1px solid %s;"
+                % (f["kopf"], f["kopf_linie"]))
+
+    def _beschriftung_stil(self) -> str:
+        return ("color: %s; font-size: 11px; border: none;"
+                % self._farben()["kopf_text"])
+
+    def _knopf_stil(self) -> str:
+        from core import theme
+        # Der Schwebeknopf liegt UEBER dem Inhalt, deshalb halbdurchsichtig:
+        # er soll das Bild darunter nicht ausloeschen.
+        if theme.ist_dunkel():
+            return ("QToolButton { background: rgba(30,30,30,190); color: #eee;"
+                    " border: 1px solid #777; border-radius: 3px; font-size: 11px; }"
+                    "QToolButton:hover { background: rgba(60,60,60,230); }")
+        return ("QToolButton { background: rgba(250,250,250,215); color: #222;"
+                " border: 1px solid #999; border-radius: 3px; font-size: 11px; }"
+                "QToolButton:hover { background: rgba(225,225,225,240); }")
+
+    @staticmethod
+    def _farben():
+        from core import theme
+        return theme.farben()
+
+    def theme_aktualisieren(self):
+        """Wird von core/theme.anwenden() gerufen, wenn umgeschaltet wurde."""
+        self._kopf.setStyleSheet(self._kopf_stil())
+        self._titel.setStyleSheet(self._beschriftung_stil())
+        self._pfeil.setStyleSheet(self._beschriftung_stil())
+        self._knopf.setStyleSheet(self._knopf_stil())
 
     # ------------------------------------------------------------------
     # Inhalt

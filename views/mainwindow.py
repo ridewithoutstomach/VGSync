@@ -519,7 +519,8 @@ class MainWindow(QMainWindow):
         
         
         
-        self.setWindowTitle(f"KVRouite v{APP_VERSION} - the Easy Video and GPX-Sync Tool")
+        self._projekt_datei = None      # Pfad des geladenen Projekts, oder None
+        self._titel_setzen()
             
         
         self._sync_prompt_answer = None   # None = unknown / not asked yet, True/False = user's first answer
@@ -969,6 +970,26 @@ class MainWindow(QMainWindow):
                 self._THUMBS_KEY, False, type=bool))
         self.action_timeline_thumbs.toggled.connect(self._thumbs_umschalten)
         setup_menu.addAction(self.action_timeline_thumbs)
+
+        # Farbgebung: hell, dunkel oder wie das System es haelt (core/theme.py).
+        from core import theme
+        # "Theme" und nicht "Appearance": so heisst es in Shotcut und Blender, und
+        # "Style" waere doppeldeutig - Qt nennt seine Zeichensaetze fuer
+        # Bedienelemente ebenfalls Style (windows11, Fusion).
+        appearance_menu = setup_menu.addMenu("Theme")
+        self._theme_gruppe = QActionGroup(self)
+        self._theme_gruppe.setExclusive(True)
+        gewaehlt = theme.gespeicherter_modus()
+        for schluessel, beschriftung, tipp in (
+                ("light", "Light", "The colours the program has always had."),
+                ("dark", "Dark", "Dark frame around the picture, chart and timeline.")):
+            eintrag = QAction(beschriftung, self, checkable=True)
+            eintrag.setStatusTip(tipp)
+            eintrag.setChecked(schluessel == gewaehlt)
+            eintrag.triggered.connect(
+                lambda _geklickt=False, s=schluessel: self._theme_waehlen(s))
+            self._theme_gruppe.addAction(eintrag)
+            appearance_menu.addAction(eintrag)
 
         action_reset_layout = QAction("Reset Window Layout", self)
         action_reset_layout.setStatusTip(
@@ -3082,6 +3103,11 @@ class MainWindow(QMainWindow):
 
     def showEvent(self, event):
         super().showEvent(event)
+        # Die Fensterleiste gehoert Windows, nicht Qt - sie muss beim ersten
+        # Anzeigen eigens eingefaerbt werden, sonst steht ein weisser Balken
+        # ueber einem dunklen Fenster.
+        from core import theme
+        theme.titelleiste_anpassen(self)
         if not getattr(self, "_layout_restored", False):
             self._layout_restored = True
             # Erst wenn das Fenster seine endgueltige Breite hat, sonst wird
@@ -4845,6 +4871,17 @@ class MainWindow(QMainWindow):
             hinweis.exec()
     
                 
+    def _theme_waehlen(self, modus: str):
+        """Farbgebung umschalten und merken.
+
+        Die gemalten Flaechen - Zeitleiste, Chart, Videobild - bleiben davon
+        unberuehrt: sie zeichnen mit eigenen Farben und fragen keine Palette.
+        Schnittmarken sehen danach also aus wie vorher.
+        """
+        from core import theme
+        theme.modus_merken(modus)
+        theme.anwenden(QApplication.instance(), modus)
+
     def enableVideoGpxSync(self,enable = True):
         #self.video_control.set_editing_mode(enable)
         self._on_auto_sync_video_toggled(enable and self._edit_mode != "off")
@@ -7098,6 +7135,10 @@ class MainWindow(QMainWindow):
         if reply != QMessageBox.Yes:
             return
 
+        # Der Titel traegt den Namen des Projekts - ohne Projekt gehoert er weg.
+        self._projekt_datei = None
+        self._titel_setzen()
+
         # --- 1) Video hart stoppen & leeren ---
         try:
             self.video_editor.stop_and_clear()
@@ -7616,6 +7657,7 @@ class MainWindow(QMainWindow):
                 json.dump(project_data, f, indent=2, default=str)
             QMessageBox.information(self, "Project Saved", f"Project saved to:\n{filename}")
             self.save_recent_file(filename)
+            self._titel_setzen(filename)
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to save project:\n{e}")
 
@@ -7662,6 +7704,22 @@ class MainWindow(QMainWindow):
                 f"Failed to load project file:\n{str(e)}"
             )
     
+    def _titel_setzen(self, projekt: str = None):
+        """Fenstertitel aufbauen - mit dem Namen des geladenen Projekts.
+
+        Ohne Projekt steht dort wie bisher nur Name und Fassung. Ist eines
+        geladen, kommt sein Dateiname davor: das ist die Stelle, an der man
+        bei mehreren offenen Fenstern zuerst hinsieht.
+        """
+        if projekt is not None:
+            self._projekt_datei = projekt
+        grund = f"KVRouite v{APP_VERSION} - the Easy Video and GPX-Sync Tool"
+        if self._projekt_datei:
+            name = os.path.basename(self._projekt_datei)
+            self.setWindowTitle(f"{name} - {grund}")
+        else:
+            self.setWindowTitle(grund)
+
     def process_open_project(self, filename: str):
         # Das Laden dauert bei grossen Quelldateien zehn Sekunden und mehr -
         # ohne Rueckmeldung sieht die App dabei aus, als waere sie abgestuerzt.
@@ -7845,6 +7903,7 @@ class MainWindow(QMainWindow):
 
             self.timeline.update()
             self._rebuild_playlist_menu()
+            self._titel_setzen(filename)
 
             #QMessageBox.information(self, "Project Loaded", f"Project loaded from:\n{filename}")
 

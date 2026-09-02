@@ -364,6 +364,11 @@ def main():
     QGuiApplication.setAttribute(Qt.AA_ShareOpenGLContexts, True)
 
     app = QApplication(sys.argv)
+
+    # Farbgebung setzen, bevor das erste Fenster entsteht. Bis 6.02 gab es
+    # weder Stil noch Palette - die Oberflaeche nahm, was Windows lieferte.
+    from core import theme
+    theme.anwenden(app)
     
     
     current_os = platform.system()

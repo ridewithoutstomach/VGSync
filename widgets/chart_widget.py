@@ -729,7 +729,11 @@ class ChartWidget(QWidget):
             return
 
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.setPen(QPen(QColor(255, 255, 255), 2))
+        # Duenner und halbdurchsichtig: mit 2 px reinweiss stand die Marke wie
+        # ein Balken im Bild, besonders am linken Rand, wo sie bei Position 0
+        # sitzt. Sie bleibt ueber der gelben und der cyanen Kurve sichtbar,
+        # verdeckt sie aber nicht mehr.
+        painter.setPen(QPen(QColor(255, 255, 255, 170), 1))
         painter.drawLine(m_x, 0, m_x, h)
 
         pt_ = self._gpx_data[idx]
