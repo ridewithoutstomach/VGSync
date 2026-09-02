@@ -1301,12 +1301,12 @@ class MainWindow(QMainWindow):
             "map":   ("Map",         self.map_widget),
             "chart": ("Chart",       self.chart),
             "flow":  ("Chart-Flow",  self.chart_flow),
-            "gpx":   ("GPX-Tabelle", self.bottom_right_widget),
+            "gpx":   ("GPX Table", self.bottom_right_widget),
         }
         self._slots["or"].inhalt_setzen("video", self.video_area_widget, "Video")
         self._slots["ol"].inhalt_setzen("map", self.map_widget, "Map")
         self._slots["ul"].inhalt_setzen("chart", self.chart, "Chart")
-        self._slots["ur"].inhalt_setzen("gpx", self.bottom_right_widget, "GPX-Tabelle")
+        self._slots["ur"].inhalt_setzen("gpx", self.bottom_right_widget, "GPX Table")
         # Vier Module auf drei waehlbare Fenster - eines ist immer verdeckt.
         # Zum Start ist das der Chart-Flow.
         self._auswahllisten_auffrischen()

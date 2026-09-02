@@ -27,8 +27,8 @@ all: it computes everything from `self.width()`, so moving it was enough.
 **Four windows, contents of your choosing**
 
 The layout is now a grid: two windows on top, the timeline across the middle,
-two windows below. Each window holds one module - map, chart, chart flow or GPX
-table - and you switch it with the small handle that appears while the mouse is
+two windows below. Each window holds one module - Map, Chart, Chart-Flow or GPX
+Table - and you switch it with the small handle that appears while the mouse is
 over the window, or by right-clicking it. Picking a module that currently sits
 somewhere else swaps the two windows.
 
@@ -49,7 +49,7 @@ used to sit elsewhere, and a module that changes place would have left its
 controls behind. It also keeps the top edge of each window free, which is where
 the switch handle appears.
 
-**The mini chart became a module of its own: "Chart Flow"**
+**The mini chart became a module of its own: "Chart-Flow"**
 
 It was a strip beside the timeline and is now a full window. It is not a zoomed
 version of the big chart, and cannot be: the big chart scales its elevation axis
@@ -147,7 +147,7 @@ the same font as before, because Segoe UI and Consolas still come first.
 
 **Elevation profile inside the video picture**
 
-*View - Höhenprofil im Video*. The flow can be shown over the video, bottom left,
+*View - Elevation Profile in Video*. The flow can be shown over the video, bottom left,
 dark and translucent. Drag it anywhere in the picture by the small handle in its
 top left corner; the position is remembered between sessions.
 
@@ -260,7 +260,7 @@ bright asphalt they were barely readable. Both are in the GPX summary now, as
 
 **The mini chart beside the timeline**
 
-Replaced by the Chart Flow module, see above.
+Replaced by the Chart-Flow module, see above.
 
 ### Fixed
 

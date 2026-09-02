@@ -155,117 +155,27 @@ actually ended up in it.
 
 ### 🍎 macOS
 
-macOS support is **new**. There are two ways in: download the ready-made
-application bundle, or install Python and run from source. The bundle is the
-short way and needs nothing else on your Mac.
+macOS support is **new**. Either take the ready-made bundle from the
+[Releases page](https://github.com/ridewithoutstomach/KVRouite/releases), or
+install Python and run from source as described below.
 
-What is verified, automatically, on macOS 15 (Sequoia), on Apple Silicon and on
-Intel: the bundle builds, finds its own files, loads its icons, reads and
-writes GPX, and **cuts and encodes a video** with its own bundled GStreamer.
-That last one is measured, not assumed - an 8 second clip, a cut from 3 to 5
-seconds, and the result is checked for length, codec and frame size. You can
-run the same check yourself, see *Does it work? Ask it* below.
+#### The ready-made bundle
 
-What is **not** verified: nobody has operated KVRouite by hand on a Mac. The
-automated runs are headless, so the map, Copy-Mode and every mouse interaction
-are untested. If you run KVRouite on a Mac, please tell us how it went (see
-*Feedback wanted* at the end of this section).
+Two assets, one per architecture: `_macOS_arm64.zip` for Apple Silicon,
+`_macOS_x86_64.zip` for Intel. Apple menu > *About This Mac* tells you which one
+you need. Unzip it and move `KVRouite.app` to your Applications folder -
+everything it needs is inside, GStreamer included.
 
-#### The ready-made application bundle
+**The first start needs one extra step.** The bundle is not signed: signing
+requires a paid Apple developer membership, renewed yearly, which makes no sense
+for software given away for free. So macOS refuses a plain double-click once.
 
-Download from the [Releases page](https://github.com/ridewithoutstomach/KVRouite/releases).
-There are two files, and you need the one that matches your Mac:
+- macOS 14 and older: right-click the app, choose **Open**, confirm.
+- macOS 15 and newer: double-click, let it be refused, then open
+  **System Settings > Privacy & Security** and click **Open Anyway**.
+- Or in Terminal: `xattr -dr com.apple.quarantine /Applications/KVRouite.app`
 
-| File | For |
-|---|---|
-| `KVRouite_6.02_macOS_arm64.zip` | Apple Silicon - M1, M2, M3, M4 |
-| `KVRouite_6.02_macOS_x86_64.zip` | Intel |
-
-Not sure which you have? Apple menu > *About This Mac*. It says either
-*Chip: Apple M...* or *Processor: Intel...*. The architecture in the file name
-is not a guess - the build reads it back out of the finished binary and refuses
-to publish a bundle whose name does not match its contents.
-
-Everything is inside `KVRouite.app`: Python, Qt, and the whole GStreamer engine
-that plays, cuts and renders. Nothing has to be installed first. That is what
-the download size is about - roughly 350 MB, and noticeably more once unpacked.
-
-Optional, and a good habit with a large download - check that it arrived
-intact:
-
-```bash
-shasum -a 256 -c KVRouite_6.02_macOS_arm64.zip.sha256
-```
-
-#### Starting it the first time: read this, or it will look broken
-
-Unzip, move `KVRouite.app` to your *Applications* folder, and then **do not
-double-click it yet**. The first start needs one extra step:
-
-1. Right-click (or Control-click) `KVRouite.app` and choose **Open**.
-2. Confirm the warning.
-
-On **macOS 15 (Sequoia) and newer** Apple removed that shortcut for apps like
-this one, and right-click > Open no longer offers a way through. There you do
-this instead:
-
-1. Double-click `KVRouite.app` once. macOS refuses and shows a warning.
-2. Open **System Settings > Privacy & Security** and scroll down. A line has
-   appeared about KVRouite being blocked. Click **Open Anyway**.
-3. Confirm.
-
-If you would rather do it in one line, Terminal removes the quarantine flag
-that macOS attaches to every downloaded file:
-
-```bash
-xattr -dr com.apple.quarantine /Applications/KVRouite.app
-```
-
-Either way, this is a **one-time** step. Afterwards KVRouite starts by
-double-click like any other application.
-
-#### Why macOS distrusts it, and why that will not change
-
-Gatekeeper does not object to what the application does. It objects to the fact
-that nobody paid Apple to vouch for it. For macOS to accept an application
-without complaint it has to be *signed* and *notarised*, and both require a
-certificate that only comes with membership in the Apple Developer Program -
-currently 99 US dollars a year, every year, for as long as the software is
-offered.
-
-KVRouite is free software, given away for nothing under the GPL. Paying Apple a
-yearly fee for the privilege of giving something away is not a trade this
-project is going to make. So the bundle is unsigned, macOS calls it
-unverifiable, and you click through the warning once.
-
-That warning says nothing about the software. It says the developer has not
-bought a subscription. The source code is in this repository, the build script
-is `build_macos.py`, the build runs in public on GitHub Actions, and the
-checksums above let you confirm that what you downloaded is what came out of
-that build. That is rather more than a signature would tell you.
-
-#### Does it work? Ask it
-
-The bundle can test itself. It is the same check the automated build runs:
-
-```bash
-/Applications/KVRouite.app/Contents/MacOS/KVRouite --selftest
-```
-
-It creates a test video and a test GPX, finds its own files, loads the icons in
-both themes, cuts the video and encodes it, then measures the result. It prints
-what it did and ends with either `Alles geprueft und in Ordnung` or the exact
-line that failed. If you report a problem, this output is the single most
-useful thing you can attach.
-
-The same switch works on Windows and Linux.
-
----
-
-#### Running from source instead
-
-Everything below is for running KVRouite from the Python sources. You do not
-need any of it if you use the bundle.
+After that it starts by double-click like anything else.
 
 #### Requirements
 
@@ -317,14 +227,11 @@ brew install ffmpeg
 Please open an issue at
 <https://github.com/ridewithoutstomach/KVRouite/issues> and tell us:
 
-- your macOS version and whether the Mac is Apple Silicon or Intel
-- whether you used the ready-made bundle or ran from source
+- your macOS version, whether the Mac is Apple Silicon or Intel, and whether you
+  used the bundle or ran from source
 - whether the window opens and looks right
-- whether a video opens and plays
-- whether cutting and export work
+- whether a video opens, plays, cuts and exports
 - any messages the Terminal printed - please paste the text
-- the output of `--selftest` (see above) if you have a bundle. It is the
-  quickest way to tell a broken download from a real defect.
 
 ---
 
@@ -379,7 +286,7 @@ Windows Executable
 If you prefer not to install Python or manage dependencies manually,
 you can use the pre-built Windows binary:
 
-1. Download the ZIP file (e.g., "KVRouite_6.02_Win_x64.zip") from the GitHub Releases page.
+1. Download the asset whose name ends in "_Win_x64.zip" from the GitHub Releases page.
 2. Extract the ZIP file into any folder.
 3. Double-click "KVRouite.exe" to run the application.
 
@@ -388,23 +295,10 @@ you can use the pre-built Windows binary:
 macOS Application Bundle
 ------------------------
 
-Same idea, for the Mac. Two files, one per architecture - take the one that
-matches yours:
-
-    KVRouite_6.02_macOS_arm64.zip     Apple Silicon (M1 to M4)
-    KVRouite_6.02_macOS_x86_64.zip    Intel
-
-1. Download from the GitHub Releases page and unzip.
-2. Move "KVRouite.app" to your Applications folder.
-3. **The first start needs one extra step**, because the bundle is not signed
-   by Apple: right-click the app and choose *Open*, and on macOS 15 or newer
-   go to *System Settings > Privacy & Security* and click *Open Anyway*.
-   One time only.
-
-Step 3 is not optional and a plain double-click will simply be refused, so
-please read [the macOS section](#-macos) before you decide something is broken.
-It also explains why the bundle is unsigned: signing requires a paid Apple
-Developer membership, renewed yearly, and KVRouite is given away for free.
+Take the asset ending in "_macOS_arm64.zip" (Apple Silicon) or
+"_macOS_x86_64.zip" (Intel), unzip it and move "KVRouite.app" to your
+Applications folder. The first start needs one extra step because the bundle is
+not signed - see [the macOS section](#-macos).
 
 -------------------------------------------------------------------------------
 
@@ -420,7 +314,7 @@ the runtime ones:
 
 The resulting executable will be located at:
 
-    dist/KVRouite_6.02/KVRouite.exe
+    dist/KVRouite_<version>/KVRouite.exe
 
 -------------------------------------------------------------------------------
 
@@ -438,15 +332,11 @@ no GStreamer runtime, no license texts, or an ffmpeg or mpv binary that slipped
 in (neither may be shipped - see the licensing sections below). The result,
 named after the architecture it was built for:
 
-    dist/KVRouite_6.02_macOS_arm64/KVRouite_6.02_macOS_arm64.zip
+    dist/KVRouite_<version>_macOS_<arch>/KVRouite_<version>_macOS_<arch>.zip
 
 A separate requirements file exists because the Windows one carries pefile and
 pywin32-ctypes, which have no purpose on a Mac. The PyInstaller version is
 pinned to the same one both platforms use.
-
-Test the result before handing it to anyone:
-
-    dist/KVRouite_6.02_macOS_arm64/KVRouite.app/Contents/MacOS/KVRouite --selftest
 
 -------------------------------------------------------------------------------
 
