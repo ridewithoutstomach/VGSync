@@ -79,7 +79,7 @@ def copy_mode_fehlgrund() -> str:
     fehlt = fehlende_ffmpeg_werkzeuge()
     if not fehlt:
         return ""
-    return " und ".join(fehlt) + " nicht im PATH"
+    return " and ".join(fehlt) + " not in PATH"
 
 
 def find_ffmpeg_folder() -> str:
@@ -216,11 +216,11 @@ def ensure_ffmpeg_mac(parent_widget) -> bool:
         QMessageBox.information(
             parent_widget,
             "FFmpeg Required (macOS)",
-            "Bitte wähle den Ordner, in dem ffmpeg liegt.\n\n"
-            "Beispiel:\n"
+            "Please choose the folder that contains ffmpeg.\n\n"
+            "Example:\n"
             "  /usr/local/bin\n"
             "  /opt/homebrew/bin\n\n"
-            "Ohne FFmpeg sind Video-Cutting und -Export nicht möglich."
+            "Without FFmpeg, video cutting and export are not possible."
         )
         chosen = QFileDialog.getExistingDirectory(parent_widget, "Select FFmpeg Folder (macOS)")
         if not chosen:
@@ -229,7 +229,7 @@ def ensure_ffmpeg_mac(parent_widget) -> bool:
             QMessageBox.critical(
                 parent_widget,
                 "FFmpeg Missing (macOS)",
-                f"Keine gültige ffmpeg-Executable in:\n{chosen}"
+                f"No valid ffmpeg executable in:\n{chosen}"
             )
             return False
 

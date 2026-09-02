@@ -1628,7 +1628,7 @@ class GPXControlWidget(QWidget):
         
         gpx_data = mw.gpx_widget.gpx_list._gpx_data
         if not gpx_data:
-            QMessageBox.warning(self, "No GPX", "Keine GPX-Daten vorhanden zum Smoothen!")
+            QMessageBox.warning(self, "No GPX", "No GPX data available for smoothing!")
             return
 
         # 1) Dialog
@@ -3211,7 +3211,7 @@ class GPXControlWidget(QWidget):
         # 2) Key prüfen
         if not mw._mapbox_key:
             QMessageBox.warning(self, "Mapbox Key missing",
-                "Directions=True, aber kein mapbox_key gesetzt.\nFalle zurück auf lokale Interpolation.")
+                "Directions=True, but no mapbox_key is set.\nFalling back to local interpolation.")
             self._close_gaps_local_interpolation(b_idx, e_idx, dt)
             return
 
@@ -3227,13 +3227,13 @@ class GPXControlWidget(QWidget):
             data = json.loads(body)
         except Exception as ex:
             QMessageBox.critical(self, "Mapbox Error",
-                f"Could not fetch route from Mapbox:\n{ex}\n\nFalle zurück auf lokale Interpolation.")
+                f"Could not fetch route from Mapbox:\n{ex}\n\nFalling back to local interpolation.")
             self._close_gaps_local_interpolation(b_idx, e_idx, dt)
             return
 
         if "routes" not in data or not data["routes"]:
             QMessageBox.warning(self, "No Route",
-                "Mapbox lieferte keine 'routes' zurück.\nFalle zurück auf lokal.")
+                "Mapbox returned no 'routes'.\nFalling back to local interpolation.")
             self._close_gaps_local_interpolation(b_idx, e_idx, dt)
             return
 
@@ -3241,7 +3241,7 @@ class GPXControlWidget(QWidget):
     
         if len(coords) < 2:
             QMessageBox.warning(self, "Invalid route",
-                "Zu wenige Punkte in Mapbox-Route.\nFalle zurück auf lokal.")
+                "Too few points in the Mapbox route.\nFalling back to local interpolation.")
             self._close_gaps_local_interpolation(b_idx, e_idx, dt)
             return
 

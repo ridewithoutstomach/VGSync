@@ -145,7 +145,7 @@ def verfuegbar():
 def fehlgrund():
     """Warum 360 nicht geht - leerer Text, wenn es geht."""
     if _GST_IMPORT_ERROR is not None:
-        return f"GStreamer nicht ladbar: {_GST_IMPORT_ERROR}"
+        return f"GStreamer could not be loaded: {_GST_IMPORT_ERROR}"
     # Ohne Gst.init() ist die Registry leer und JEDES Element gilt als nicht
     # vorhanden. Der Aufrufer kann frueher dran sein als das Backend, deshalb
     # hier selbst nachziehen - Gst.init ist mehrfach aufrufbar.
@@ -153,7 +153,7 @@ def fehlgrund():
         if not Gst.is_initialized():
             Gst.init(None)
     except Exception as exc:
-        return f"GStreamer nicht startbar: {exc}"
+        return f"GStreamer could not be started: {exc}"
     fehlt = []
     for name in ("glupload", "glcolorconvert", "glshader", "gldownload"):
         try:
@@ -162,8 +162,8 @@ def fehlgrund():
         except Exception:
             fehlt.append(name)
     if fehlt:
-        return ("360 braucht die GL-Elemente " + ", ".join(fehlt)
-                + " (Linux: Paket gstreamer1.0-gl)")
+        return ("360 needs the GL elements " + ", ".join(fehlt)
+                + " (Linux: package gstreamer1.0-gl)")
     return ""
 
 

@@ -71,6 +71,34 @@ Only the gradient is shown at the current point. That is the value you compare
 against the picture; metres above sea level say nothing about what you are
 looking at.
 
+**Every text in the program is English again**
+
+The features built on 31 August and 1 September were written in German: the
+View and Config menu entries "Fenster-Kopfzeilen", "Höhenprofil im Video" and
+"Vorschaubilder in der Timeline", the right-click menu on a cut, the dialogs of
+the cut undo, both overlay dialogs, the messages drawn into the video picture in
+360 mode, several tooltips and the export log. All of them are English now. The
+German wording only remains in comments, docstrings and console output, none of
+which reaches a user.
+
+**A new icon for the video/GPX sync button**
+
+The old one packed a map pin, a video frame and two arrows into 25 pixels and
+was taller than every other button in the bar. It is now a map pin inside the
+two sync arrows at 20 pixels, the same height as the cut buttons beside it.
+The red background that marks "no sync point set yet" is unchanged.
+
+**The hint about the sync point shows the button**
+
+Answering "No" to the sync question used to end with "click on the red button",
+which left the user searching a bar of a dozen buttons. The hint now carries a
+picture of the button underneath the text. The picture is taken from the live
+button when the hint opens, so it stays correct if the icon changes again.
+
+**GSync button 5 pixels wider**
+
+It was fixed at 45 pixels while the label needs more, so the G was clipped.
+
 ### Added
 
 **Elevation profile inside the video picture**

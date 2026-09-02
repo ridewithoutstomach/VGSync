@@ -371,35 +371,33 @@ class VideoCutManager(QObject):
         wenn Video und Spur auseinanderlaufen.
         """
         if not self.hat_aufzeichnung(start_s, end_s):
-            return False, ("Für diesen Schnitt ist nicht aufgezeichnet, was er "
-                           "aus der GPX-Spur entfernt hat. Er stammt aus einem "
-                           "Projekt, das vor dieser Funktion gespeichert "
-                           "wurde."), ""
+            return False, ("There is no record of what this cut removed from "
+                           "the GPX track. It comes from a project that was "
+                           "saved before this function existed."), ""
         if self.wird_ueberdeckt(start_s, end_s):
-            return False, ("Dieser Schnitt liegt innerhalb eines späteren, "
-                           "größeren Schnitts. Die Punkte kämen in einen "
-                           "Bereich zurück, den das Video ohnehin nicht "
-                           "zeigt."), ""
+            return False, ("This cut lies inside a later, larger cut. The "
+                           "points would come back into a range the video does "
+                           "not show anyway."), ""
         if not gpx_data:
             return True, "", ""
 
         # Zeiten: Struktur. Ohne sie stimmt gar nichts mehr.
         if not self.zeiten_unveraendert(gpx_data):
-            return False, ("Die Zeiten der GPX-Spur wurden seit diesem Schnitt "
-                           "verändert (etwa durch chT, Close Gaps oder "
-                           "Resample). Ein Zurücknehmen würde die Punkte an "
-                           "der falschen Stelle einsetzen."), ""
+            return False, ("The times of the GPX track have been changed since "
+                           "this cut (for example by chT, Close Gaps or "
+                           "Resample). Undoing it would insert the points at "
+                           "the wrong place."), ""
 
         # Werte: kommen richtig zurueck, aber mit dem Stand von damals.
         if not self.werte_unveraendert(gpx_data):
-            return True, "", ("Seit diesem Schnitt wurden Höhen oder Positionen "
-                              "geändert – etwa durch Glätten oder eine "
-                              "Höhenkorrektur.\n\n"
-                              "Die zurückkehrenden Punkte tragen noch den Stand "
-                              "von damals. Im Höhenprofil kann dadurch an dieser "
-                              "Stelle eine Stufe entstehen.\n\n"
-                              "Bitte den Bereich anschließend im Chart prüfen "
-                              "und die Änderung gegebenenfalls erneut anwenden.")
+            return True, "", ("Elevations or positions have been changed since "
+                              "this cut - for example by smoothing or an "
+                              "elevation correction.\n\n"
+                              "The returning points still carry the state from "
+                              "back then. This can create a step in the "
+                              "elevation profile at that place.\n\n"
+                              "Please check that range in the chart afterwards "
+                              "and apply the change again if needed.")
         return True, "", ""
 
     def wird_ueberdeckt(self, start_s, end_s, eps: float = 0.001) -> bool:

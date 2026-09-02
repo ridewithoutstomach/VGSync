@@ -378,7 +378,7 @@ def main():
     if current_os not in ("Windows", "Darwin", "Linux"):
         QMessageBox.critical(
             None, "Unsupported OS",
-            f"Dein Betriebssystem ({current_os}) wird derzeit nicht unterstützt.")
+            f"Your operating system ({current_os}) is not supported at the moment.")
         sys.exit(1)
 
     from core.ges_backend import is_available as ges_verfuegbar

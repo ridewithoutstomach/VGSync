@@ -661,9 +661,9 @@ class MainWindow(QMainWindow):
 
         # Die Kopfzeilen der Fenster kosten je rund 20 px. Ausgeschaltet
         # bleiben Schwebeknopf und Rechtsklick als Wege zum Umschalten.
-        self.action_slot_kopf = QAction("Fenster-Kopfzeilen", self, checkable=True)
+        self.action_slot_kopf = QAction("Window Headers", self, checkable=True)
         self.action_slot_kopf.setStatusTip(
-            "Schmale Leiste je Fenster mit dem Modulnamen ein-/ausblenden.")
+            "Show or hide a slim bar with the module name on each window.")
         self.action_slot_kopf.setChecked(
             QSettings("KVRouite", "KVRouite").value(
                 self._KOPFZEILEN_KEY, False, type=bool))
@@ -673,9 +673,9 @@ class MainWindow(QMainWindow):
 
         # Hoehenprofil ins Videobild einblenden (unten links).
         self.action_hoehen_overlay = QAction(
-            "Höhenprofil im Video", self, checkable=True)
+            "Elevation Profile in Video", self, checkable=True)
         self.action_hoehen_overlay.setStatusTip(
-            "Blendet das Höhenprofil unten links ins Videobild ein.")
+            "Shows the elevation profile in the lower left of the video image.")
         self.action_hoehen_overlay.setChecked(
             QSettings("KVRouite", "KVRouite").value(
                 self._OVERLAY_KEY, False, type=bool))
@@ -759,7 +759,7 @@ class MainWindow(QMainWindow):
         
         self.overlay_setup_action = QAction("Overlay Library", self)
         self.overlay_setup_action.setStatusTip(
-            "Bilder verwalten, die beim Einfuegen zur Auswahl stehen")
+            "Manage the images offered when inserting an overlay.")
         self.overlay_setup_action.setEnabled(False)  # Standard: ausgegraut
         setup_menu.addAction(self.overlay_setup_action)
         self.overlay_setup_action.triggered.connect(self._on_overlay_setup_clicked)
@@ -960,10 +960,10 @@ class MainWindow(QMainWindow):
         # aus den Videodateien geholt, und das kostet bei grossem Material
         # spuerbar Zeit und Plattenzugriffe. Wer sie will, schaltet sie ein.
         self.action_timeline_thumbs = QAction(
-            "Vorschaubilder in der Timeline", self, checkable=True)
+            "Thumbnails in Timeline", self, checkable=True)
         self.action_timeline_thumbs.setStatusTip(
-            "Zeigt Einzelbilder des Videos als Streifen in der Timeline. "
-            "Die Bilder werden im Hintergrund aus den Videodateien geholt.")
+            "Shows single frames of the video as a strip in the timeline. "
+            "The images are fetched from the video files in the background.")
         self.action_timeline_thumbs.setChecked(
             QSettings("KVRouite", "KVRouite").value(
                 self._THUMBS_KEY, False, type=bool))
@@ -3797,22 +3797,22 @@ class MainWindow(QMainWindow):
         from PySide6.QtWidgets import QMenu
 
         menue = QMenu(self)
-        titel = menue.addAction(f"Schnitt {self._sek_kurz(start_s)} – {self._sek_kurz(end_s)}")
+        titel = menue.addAction(f"Cut {self._sek_kurz(start_s)} – {self._sek_kurz(end_s)}")
         titel.setEnabled(False)
         menue.addSeparator()
 
         hart = self.cut_manager.is_hard_cut(start_s, end_s)
-        a_blende = menue.addAction("Mit Blende" if not hart else "Auf Blende umstellen")
+        a_blende = menue.addAction("With Crossfade" if not hart else "Switch to Crossfade")
         a_blende.setCheckable(True)
         a_blende.setChecked(not hart)
-        a_hart = menue.addAction("Harte Kante")
+        a_hart = menue.addAction("Hard Cut")
         a_hart.setCheckable(True)
         a_hart.setChecked(hart)
         menue.addSeparator()
 
         moeglich, grund, warnung = self.cut_manager.ruecknahme_moeglich(
             start_s, end_s, self._gpx_data)
-        a_weg = menue.addAction("Schnitt zurücknehmen"
+        a_weg = menue.addAction("Undo Cut"
                                 + (" …" if warnung else ""))
         a_weg.setEnabled(moeglich)
         a_weg.setToolTip(grund or warnung)
@@ -3843,12 +3843,12 @@ class MainWindow(QMainWindow):
         moeglich, grund, warnung = self.cut_manager.ruecknahme_moeglich(
             start_s, end_s, self._gpx_data)
         if not moeglich:
-            QMessageBox.information(self, "Zurücknehmen nicht möglich", grund)
+            QMessageBox.information(self, "Undo not possible", grund)
             return
 
         if warnung:
             antwort = QMessageBox.warning(
-                self, "Spur wurde zwischenzeitlich bearbeitet", warnung,
+                self, "Track was edited in the meantime", warnung,
                 QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
             if antwort != QMessageBox.Yes:
                 return
@@ -3857,9 +3857,9 @@ class MainWindow(QMainWindow):
         neue_spur = self.cut_manager.spur_ohne_schnitt(
             start_s, end_s, self._gpx_data)
         if not neue_spur or len(neue_spur) < 2:
-            QMessageBox.warning(self, "Zurücknehmen fehlgeschlagen",
-                                "Die GPX-Spur ließ sich nicht zurückrechnen. "
-                                "Es wurde nichts verändert.")
+            QMessageBox.warning(self, "Undo failed",
+                                "The GPX track could not be restored. "
+                                "Nothing was changed.")
             return
 
         # Beides zusammen ist EIN Schritt fuer Strg+Z.
@@ -4808,11 +4808,25 @@ class MainWindow(QMainWindow):
         else:
             # remember and give the hint
             self._sync_prompt_answer = False
-            QMessageBox.information(
-                self, "Video & GPX Sync",
-                "In this case it is advised to define the sync point.\n "
-                "Select a GPX point, find it in video and click on the red button"
-            )
+            # Der Hinweis zeigt den Knopf, statt ihn zu beschreiben: das
+            # Abbild wird hier vom echten Knopf genommen, damit es auch nach
+            # einem Icon- oder Groessenwechsel noch stimmt.
+            hinweis = QMessageBox(self)
+            hinweis.setWindowTitle("Video & GPX Sync")
+            hinweis.setIcon(QMessageBox.Information)
+            hinweis.setText(
+                "In this case it is advised to define the sync point.\n"
+                "Select a GPX point, find it in the video, "
+                "then click this button:")
+            knopf = self.video_control.set_sync_button
+            war_an = knopf.isEnabled()
+            knopf.setEnabled(True)   # ausgegraut waere das Abbild nicht zu erkennen
+            abbild = knopf.grab()
+            knopf.setEnabled(war_an)
+            knopf_bild = QLabel()
+            knopf_bild.setPixmap(abbild)
+            hinweis.layout().addWidget(knopf_bild, 1, 2)   # Zeile unter dem Text
+            hinweis.exec()
     
                 
     def enableVideoGpxSync(self,enable = True):
@@ -9040,8 +9054,8 @@ class MainWindow(QMainWindow):
                 from PySide6.QtWidgets import QMessageBox
                 QMessageBox.information(
                     self, "Multiple files",
-                    "Please load only one GPX/FIT-Datei via Drag & Drop.\n"
-                    "I import the first one!."
+                    "Please load only one GPX/FIT file via drag & drop.\n"
+                    "Only the first one is imported."
                 )
             except Exception:
                 pass  # not critical for headless/test runs

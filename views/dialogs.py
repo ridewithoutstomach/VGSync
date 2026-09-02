@@ -113,7 +113,7 @@ class _IndexingDialog(QDialog):
         self.process.start()
 
         if not self.process.waitForStarted(-1):
-            QMessageBox.critical(self, "Fehler", f"Konnte ffprobe nicht starten:\n{cmd}")
+            QMessageBox.critical(self, "Error", f"Could not start ffprobe:\n{cmd}")
             self.reject()
 
     def _on_process_stdout(self):

@@ -54,8 +54,8 @@ from PySide6.QtWidgets import (
 
 from core import overlay_library
 
-BILDFILTER = ("Bilder (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tif *.tiff);;"
-              "Alle Dateien (*)")
+BILDFILTER = ("Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tif *.tiff);;"
+              "All files (*)")
 
 
 class OverlayInsertDialog(QDialog):
@@ -80,8 +80,8 @@ class OverlayInsertDialog(QDialog):
 
         aufbau = QVBoxLayout(self)
         aufbau.addWidget(QLabel(
-            "Bild auswaehlen - aus diesem Projekt, aus der Bibliothek\n"
-            "oder eine neue Datei."))
+            "Choose an image - from this project, from the library\n"
+            "or a new file."))
 
         self.liste = QListWidget()
         self.liste.setIconSize(QSize(self.VORSCHAU, self.VORSCHAU))
@@ -90,13 +90,13 @@ class OverlayInsertDialog(QDialog):
         aufbau.addWidget(self.liste, 1)
 
         zeile = QHBoxLayout()
-        knopf_datei = QPushButton("Datei waehlen…")
+        knopf_datei = QPushButton("Choose File…")
         knopf_datei.clicked.connect(self._auf_datei_waehlen)
         zeile.addWidget(knopf_datei)
-        self.haken_bibliothek = QCheckBox("in die Bibliothek aufnehmen")
+        self.haken_bibliothek = QCheckBox("Add to library")
         self.haken_bibliothek.setEnabled(False)
         self.haken_bibliothek.setToolTip(
-            "Nur ankreuzen, wenn dieses Bild spaeter wieder gebraucht wird.")
+            "Only tick this if the image will be needed again later.")
         zeile.addWidget(self.haken_bibliothek)
         zeile.addStretch(1)
         aufbau.addLayout(zeile)
@@ -124,10 +124,10 @@ class OverlayInsertDialog(QDialog):
         aufbau.addLayout(fade)
 
         kaesten = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        self.knopf_erweitert = kaesten.addButton("Erweitert…",
+        self.knopf_erweitert = kaesten.addButton("Advanced…",
                                                  QDialogButtonBox.ActionRole)
         self.knopf_erweitert.setToolTip(
-            "Skalierung, Ecke und Abstaende von Hand eingeben.")
+            "Enter scale, corner and offsets by hand.")
         self.knopf_erweitert.clicked.connect(self._auf_erweitert)
         kaesten.accepted.connect(self._auf_ok)
         kaesten.rejected.connect(self.reject)
@@ -159,9 +159,9 @@ class OverlayInsertDialog(QDialog):
         if groesse:
             text += "   %dx%d" % groesse
         elif not os.path.isfile(pfad):
-            text += "   (Datei fehlt)"
+            text += "   (file missing)"
         else:
-            text += "   (kein lesbares Bild)"
+            text += "   (not a readable image)"
         if zusatz:
             text += "   " + zusatz
         eintrag = QListWidgetItem(symbol, text)
@@ -192,37 +192,37 @@ class OverlayInsertDialog(QDialog):
 
         projekt = self._projekt_bilder()
         if projekt:
-            self._ueberschrift("In diesem Projekt benutzt  -  Auswahl = Kopie")
+            self._ueberschrift("Used in this project  -  selecting makes a copy")
             for ovl in projekt:
                 skalierung = float(ovl.get("scale", 1.0) or 1.0)
                 self._bild_eintragen(
                     str(ovl.get("image", "")),
                     {"quelle": "projekt", "overlay": ovl},
-                    zusatz="Skalierung %g" % skalierung)
+                    zusatz="Scale %g" % skalierung)
 
         bibliothek = overlay_library.eintraege()
         if bibliothek:
-            self._ueberschrift("Bibliothek")
+            self._ueberschrift("Library")
             for eintrag in bibliothek:
                 self._bild_eintragen(
                     eintrag["pfad"],
                     {"quelle": "bibliothek", "eintrag": eintrag},
-                    zusatz="%s, Skalierung %g" % (eintrag["ecke"],
+                    zusatz="%s, scale %g" % (eintrag["ecke"],
                                                   eintrag["scale"]))
 
         if not projekt and not bibliothek:
-            self._ueberschrift("Noch keine Bilder - waehle eine Datei aus.")
+            self._ueberschrift("No images yet - choose a file.")
 
     # ----------------------------------------------------------------- Knoepfe
     def _auf_datei_waehlen(self):
         pfad, _ = QFileDialog.getOpenFileName(
-            self, "Overlay-Bild waehlen", "", BILDFILTER)
+            self, "Choose overlay image", "", BILDFILTER)
         if not pfad:
             return
         self._neue_datei = pfad
         self.haken_bibliothek.setEnabled(True)
         self._liste_fuellen()
-        self._ueberschrift("Neu gewaehlt")
+        self._ueberschrift("Newly chosen")
         eintrag = self._bild_eintragen(pfad, {"quelle": "neu", "pfad": pfad})
         self.liste.setCurrentItem(eintrag)
         self.liste.scrollToItem(eintrag)
@@ -232,8 +232,8 @@ class OverlayInsertDialog(QDialog):
         try:
             klasse = type(self._manager).FullOverlayDialog
         except AttributeError:
-            QMessageBox.warning(self, "Nicht verfuegbar",
-                                "Der erweiterte Dialog fehlt.")
+            QMessageBox.warning(self, "Not available",
+                                "The advanced dialog is missing.")
             return
         dlg = klasse(self.marker_s, self._manager, parent=self)
         if dlg.exec() == QDialog.Accepted:
@@ -244,9 +244,9 @@ class OverlayInsertDialog(QDialog):
         eintrag = self.liste.currentItem()
         daten = eintrag.data(Qt.UserRole) if eintrag is not None else None
         if not daten:
-            QMessageBox.information(self, "Kein Bild gewaehlt",
-                                    "Bitte ein Bild aus der Liste waehlen "
-                                    "oder eine Datei oeffnen.")
+            QMessageBox.information(self, "No image selected",
+                                    "Please choose an image from the list "
+                                    "or open a file.")
             return
 
         quelle = daten.get("quelle")
@@ -271,15 +271,15 @@ class OverlayInsertDialog(QDialog):
                                                   "center", 0, 0)):
                 # Das Overlay entsteht trotzdem - nur gemerkt wird es nicht.
                 QMessageBox.information(
-                    self, "Bibliothek ist voll",
-                    f"Die Bibliothek fasst {overlay_library.HOECHSTZAHL} "
-                    "Bilder.\nDas Overlay wird eingefuegt, aber nicht "
-                    "aufgenommen.\n\nUnter Setup -> Overlay Library laesst "
-                    "sich Platz schaffen.")
+                    self, "Library is full",
+                    f"The library holds {overlay_library.HOECHSTZAHL} "
+                    "images.\nThe overlay is inserted, but it is not "
+                    "added.\n\nUse Setup -> Overlay Library to free "
+                    "a slot.")
 
         if not pfad or not os.path.isfile(pfad):
-            QMessageBox.warning(self, "Bild fehlt",
-                                "Die Datei gibt es nicht mehr:\n" + str(pfad))
+            QMessageBox.warning(self, "Image missing",
+                                "This file no longer exists:\n" + str(pfad))
             return
 
         dauer = self.spin_dur.value()

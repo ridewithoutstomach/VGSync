@@ -47,8 +47,8 @@ from PySide6.QtWidgets import (
 
 from core import overlay_library
 
-BILDFILTER = ("Bilder (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tif *.tiff);;"
-              "Alle Dateien (*)")
+BILDFILTER = ("Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tif *.tiff);;"
+              "All files (*)")
 
 
 class OverlayLibraryDialog(QDialog):
@@ -77,43 +77,43 @@ class OverlayLibraryDialog(QDialog):
         aufbau.addWidget(self.liste, 1)
 
         zeile = QHBoxLayout()
-        self.knopf_hinzu = QPushButton("Datei hinzufuegen…")
+        self.knopf_hinzu = QPushButton("Add File…")
         self.knopf_hinzu.clicked.connect(self._auf_hinzufuegen)
         zeile.addWidget(self.knopf_hinzu)
-        self.knopf_weg = QPushButton("Entfernen")
+        self.knopf_weg = QPushButton("Remove")
         self.knopf_weg.clicked.connect(self._auf_entfernen)
         zeile.addWidget(self.knopf_weg)
         zeile.addStretch(1)
         aufbau.addLayout(zeile)
 
-        self.kasten = QGroupBox("Vorgabe fuer dieses Bild")
+        self.kasten = QGroupBox("Default for this image")
         felder = QFormLayout(self.kasten)
         self.spin_scale = QDoubleSpinBox()
         self.spin_scale.setRange(0.01, 20.0)
         self.spin_scale.setDecimals(2)
         self.spin_scale.setSingleStep(0.05)
         self.spin_scale.valueChanged.connect(self._auf_feld)
-        felder.addRow("Skalierung:", self.spin_scale)
+        felder.addRow("Scale:", self.spin_scale)
 
         self.combo_ecke = QComboBox()
         self.combo_ecke.addItems(list(overlay_library.ECKEN))
         self.combo_ecke.currentIndexChanged.connect(self._auf_feld)
-        felder.addRow("Ecke:", self.combo_ecke)
+        felder.addRow("Corner:", self.combo_ecke)
 
         self.spin_dx = QSpinBox()
         self.spin_dx.setRange(-9999, 9999)
         self.spin_dx.valueChanged.connect(self._auf_feld)
-        felder.addRow("Abstand dx:", self.spin_dx)
+        felder.addRow("Offset dx:", self.spin_dx)
 
         self.spin_dy = QSpinBox()
         self.spin_dy.setRange(-9999, 9999)
         self.spin_dy.valueChanged.connect(self._auf_feld)
-        felder.addRow("Abstand dy:", self.spin_dy)
+        felder.addRow("Offset dy:", self.spin_dy)
         aufbau.addWidget(self.kasten)
 
         aufbau.addWidget(QLabel(
-            "Die Vorgabelage gilt beim Einfuegen. Danach laesst sich das\n"
-            "Overlay im Vorschaubild frei ziehen."))
+            "The default position is used when inserting. After that the\n"
+            "overlay can be dragged freely in the preview image."))
 
         kaesten = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         kaesten.accepted.connect(self._auf_ok)
@@ -127,10 +127,10 @@ class OverlayLibraryDialog(QDialog):
         text = os.path.basename(eintrag["pfad"])
         bild = QImage(eintrag["pfad"])
         if bild.isNull():
-            text += "   (Datei fehlt)"
+            text += "   (file missing)"
         else:
             text += f"   {bild.width()}x{bild.height()}"
-        text += (f"\n{eintrag['ecke']},  Skalierung {eintrag['scale']:g},  "
+        text += (f"\n{eintrag['ecke']},  scale {eintrag['scale']:g},  "
                  f"dx {eintrag['dx']},  dy {eintrag['dy']}")
         return text
 
@@ -161,8 +161,8 @@ class OverlayLibraryDialog(QDialog):
         anzahl = len(self._eintraege)
         grenze = overlay_library.HOECHSTZAHL
         self.kopfzeile.setText(
-            f"Bilder, die beim Einfuegen zur Auswahl stehen: "
-            f"{anzahl} von {grenze}.")
+            f"Images offered when inserting an overlay: "
+            f"{anzahl} of {grenze}.")
         self.knopf_hinzu.setEnabled(anzahl < grenze)
 
     def _auf_auswahl(self, zeile):
@@ -197,20 +197,20 @@ class OverlayLibraryDialog(QDialog):
     def _auf_hinzufuegen(self):
         if len(self._eintraege) >= overlay_library.HOECHSTZAHL:
             QMessageBox.information(
-                self, "Bibliothek ist voll",
-                f"Es passen {overlay_library.HOECHSTZAHL} Bilder hinein.\n"
-                "Entferne zuerst eines.")
+                self, "Library is full",
+                f"It holds {overlay_library.HOECHSTZAHL} images.\n"
+                "Remove one first.")
             return
         pfad, _ = QFileDialog.getOpenFileName(
-            self, "Bild aufnehmen", "", BILDFILTER)
+            self, "Add image", "", BILDFILTER)
         if not pfad:
             return
         for i, vorhanden in enumerate(self._eintraege):
             if os.path.normcase(os.path.abspath(vorhanden["pfad"])) == \
                     os.path.normcase(os.path.abspath(pfad)):
-                QMessageBox.information(self, "Schon vorhanden",
-                                        "Dieses Bild steht bereits in der "
-                                        "Bibliothek.")
+                QMessageBox.information(self, "Already there",
+                                        "This image is already in the "
+                                        "library.")
                 self.liste.setCurrentRow(i)
                 return
         self._eintraege.append({"pfad": pfad, "scale": 1.0, "ecke": "top-left",
@@ -223,10 +223,10 @@ class OverlayLibraryDialog(QDialog):
             return
         name = os.path.basename(self._eintraege[zeile]["pfad"])
         antwort = QMessageBox.question(
-            self, "Aus der Bibliothek entfernen",
-            f"{name} aus der Bibliothek entfernen?\n\n"
-            "Die Bilddatei selbst bleibt liegen, und Overlays, die dieses "
-            "Bild schon benutzen, bleiben unveraendert.")
+            self, "Remove from library",
+            f"Remove {name} from the library?\n\n"
+            "The image file itself stays where it is, and overlays that "
+            "already use this image stay unchanged.")
         if antwort != QMessageBox.Yes:
             return
         self._eintraege.pop(zeile)

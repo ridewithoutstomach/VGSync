@@ -164,7 +164,7 @@ class _Quellen:
             asset = GES.UriClipAsset.request_sync(uri)
             dauer = asset.get_duration()
             if not dauer or dauer <= 0:
-                raise GesRenderError(f"Laenge nicht lesbar: {pfad}")
+                raise GesRenderError(f"Duration not readable: {pfad}")
             self.assets.append(asset)
             self.grenzen.append((lauf, lauf + dauer))
             lauf += dauer
@@ -175,7 +175,7 @@ class _Quellen:
         info = self.assets[0].get_info()
         stroeme = info.get_video_streams()
         if not stroeme:
-            raise GesRenderError("Die erste Datei enthaelt keine Videospur")
+            raise GesRenderError("The first file has no video track")
         s = stroeme[0]
         num = s.get_framerate_num() or 30
         den = s.get_framerate_denom() or 1
@@ -331,7 +331,7 @@ def _timeline_bauen(quellen, skip_list, overlay_list, breite, hoehe, fps_n, fps_
     def clip_setzen(layer, asset, start, inpoint, dauer, rohstart=0):
         clip = layer.add_asset(asset, start, inpoint, dauer, GES.TrackType.UNKNOWN)
         if clip is None:
-            raise GesRenderError("Clip konnte nicht eingefuegt werden")
+            raise GesRenderError("Clip could not be inserted")
         richtung = _orientierung(asset)
         if richtung is not None:
             for element in clip.find_track_elements(None, GES.TrackType.VIDEO,
@@ -345,7 +345,7 @@ def _timeline_bauen(quellen, skip_list, overlay_list, breite, hoehe, fps_n, fps_
         if blick is not None:
             if view360.effekt_anhaengen(clip, blick, aspect) is None:
                 raise GesRenderError(
-                    "360-Effekt liess sich nicht anhaengen: "
+                    "360 effect could not be attached: "
                     + (view360.fehlgrund() or "unbekannter Grund"))
             view360.rahmen_setzen(clip, breite, hoehe)
         return clip
@@ -454,7 +454,7 @@ def _timeline_bauen(quellen, skip_list, overlay_list, breite, hoehe, fps_n, fps_
 
     timeline.commit_sync()
     gesamt = timeline.get_duration()
-    log(f"[GES] Timeline: {len(stuecke)} Stueck(e), {blenden} Blende(n), "
+    log(f"[GES] Timeline: {len(stuecke)} piece(s), {blenden} crossfade(s), "
         f"{gesamt / NS:.6f}s bei {breite}x{hoehe} @ {fps_n}/{fps_d}")
     return timeline, gesamt
 
@@ -496,7 +496,7 @@ def _overlays_setzen(layer, overlay_list, breite, hoehe, abbildung,
     for ovl in overlay_list or []:
         bild = ovl.get("image") or ""
         if not bild or not os.path.isfile(bild):
-            log(f"[GES] Overlay uebersprungen, Datei fehlt: {bild}")
+            log(f"[GES] Overlay skipped, file missing: {bild}")
             continue
         roh_start = float(ovl.get("start", 0.0))
         roh_ende = float(ovl.get("end", 0.0))
@@ -509,8 +509,8 @@ def _overlays_setzen(layer, overlay_list, breite, hoehe, abbildung,
         start_ns = _auf_ausgabe(roh_start, abbildung)
         ende_ns = _auf_ausgabe(roh_ende, abbildung)
         if start_ns is None and ende_ns is None:
-            log(f"[GES] Overlay {os.path.basename(bild)} liegt komplett in einem "
-                f"Schnitt ({roh_start:.2f}s - {roh_ende:.2f}s) und entfaellt")
+            log(f"[GES] Overlay {os.path.basename(bild)} lies completely inside "
+                f"a cut ({roh_start:.2f}s - {roh_ende:.2f}s) and is dropped")
             continue
         if start_ns is None:
             for roh_von, _rb, out_ns in abbildung:
@@ -522,8 +522,8 @@ def _overlays_setzen(layer, overlay_list, breite, hoehe, abbildung,
                 if roh_von <= roh_ende:
                     ende_ns = out_ns + int(round((roh_bis - roh_von) * NS))
         if start_ns is None or ende_ns is None or ende_ns <= start_ns:
-            log(f"[GES] Overlay {os.path.basename(bild)} liess sich nicht "
-                f"einordnen und entfaellt")
+            log(f"[GES] Overlay {os.path.basename(bild)} could not be placed "
+                f"and is dropped")
             continue
         start, ende = start_ns / NS, ende_ns / NS
 
@@ -531,14 +531,14 @@ def _overlays_setzen(layer, overlay_list, breite, hoehe, abbildung,
             uri = GLib.filename_to_uri(os.path.abspath(bild), None)
             asset = GES.UriClipAsset.request_sync(uri)
         except Exception as exc:
-            log(f"[GES] Overlay nicht ladbar ({bild}): {exc}")
+            log(f"[GES] Overlay not loadable ({bild}): {exc}")
             continue
 
         dauer_ns = ende_ns - start_ns
         clip = layer.add_asset(asset, start_ns, 0, dauer_ns,
                                GES.TrackType.VIDEO)
         if clip is None:
-            log(f"[GES] Overlay konnte nicht eingefuegt werden: {bild}")
+            log(f"[GES] Overlay could not be inserted: {bild}")
             continue
 
         # Groesse des Bildes ermitteln, damit Ausdruecke wie "(W-w)/2" stimmen.
@@ -589,9 +589,9 @@ def _profil(encoder, hw_encode, crf, preset, bitrate_mbps, log):
     if hw and hw != "none":
         eintrag = _HW_ENCODER.get(hw)
         if eintrag is None:
-            log(f"[GES] unbekanntes hardware_encode={hw_encode}, nutze CPU")
+            log(f"[GES] unknown hardware_encode={hw_encode}, using CPU")
         elif not _element_da(eintrag[0]):
-            log(f"[GES] {eintrag[0]} nicht verfuegbar, nutze CPU")
+            log(f"[GES] {eintrag[0]} not available, using CPU")
         else:
             element, caps = eintrag
             return _profil_bauen(element, caps,
@@ -697,7 +697,7 @@ def _gpu_eigenschaften(element, crf, preset, bitrate_mbps):
 
 def _profil_bauen(element, video_caps, eigenschaften, log):
     behaelter = GstPbutils.EncodingContainerProfile.new(
-        "KVRouite", "MP4 ohne Ton",
+        "KVRouite", "MP4 without audio",
         Gst.Caps.from_string("video/quicktime,variant=iso"), None)
     video = GstPbutils.EncodingVideoProfile.new(
         Gst.Caps.from_string(video_caps), None, None, 0)
@@ -718,7 +718,7 @@ def _profil_bauen(element, video_caps, eigenschaften, log):
                 probe.set_property(name, wert)
                 struktur.set_value(name, probe.get_property(name))
             except Exception as exc:
-                log(f"[GES] {element}: {name}={wert} nicht gesetzt ({exc})")
+                log(f"[GES] {element}: {name}={wert} not set ({exc})")
         video.set_element_properties(struktur)
         log(f"[GES] Encoder: {element} ({struktur.to_string()})")
     else:
@@ -737,12 +737,12 @@ def _rendern(timeline, profil, ziel, gesamt_ns, log):
     pipeline.set_timeline(timeline)
     uri = GLib.filename_to_uri(os.path.abspath(ziel), None)
     if not pipeline.set_render_settings(uri, profil):
-        raise GesRenderError("Render-Einstellungen wurden abgelehnt")
+        raise GesRenderError("Render settings were rejected")
     if not pipeline.set_mode(GES.PipelineFlags.RENDER):
-        raise GesRenderError("Render-Modus liess sich nicht setzen")
+        raise GesRenderError("Render mode could not be set")
 
     if pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
-        raise GesRenderError("Pipeline startete nicht")
+        raise GesRenderError("Pipeline did not start")
 
     bus = pipeline.get_bus()
     begonnen = time.time()
@@ -802,12 +802,12 @@ def ges_xfade_main(cfg_path):
         "encoder/bitrate_mbps", 20, type=int)
 
     log = print
-    log("[GES] Render-Engine: GStreamer Editing Services (zweiter Weg)")
-    log(f"[GES] Ziel: {final_out}")
+    log("[GES] Render engine: GStreamer Editing Services (second path)")
+    log(f"[GES] Target: {final_out}")
 
     quellen = _Quellen(videos)
     q_breite, q_hoehe, q_num, q_den = quellen.masse()
-    log(f"[GES] Quelle: {len(videos)} Datei(en), "
+    log(f"[GES] Source: {len(videos)} file(s), "
         f"{quellen.gesamt_ns / NS:.6f}s, {q_breite}x{q_hoehe} @ "
         f"{q_num}/{q_den}")
 
@@ -858,9 +858,9 @@ def ges_xfade_main(cfg_path):
     if blicke:
         grund = view360.fehlgrund()
         if grund:
-            raise GesRenderError(f"360 ist eingeschaltet, geht aber nicht: {grund}")
-        log(f"[GES] 360: {len(blicke)} Quelle(n) werden projiziert, "
-            f"Ausgabe {breite}x{hoehe}")
+            raise GesRenderError(f"360 is switched on but does not work: {grund}")
+        log(f"[GES] 360: {len(blicke)} source(s) are projected, "
+            f"output {breite}x{hoehe}")
 
     timeline, gesamt_ns = _timeline_bauen(quellen, skip_list, overlay_list,
                                           breite, hoehe, fps_n, fps_d, log,

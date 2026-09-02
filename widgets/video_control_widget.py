@@ -199,8 +199,8 @@ class VideoControlWidget(QWidget):
         layout.addWidget(self.cut_end_button)
 
         self.set_sync_button = QPushButton()
-        self.set_sync_button.setIcon(QIcon("icon/video_gpx_sync.png")) 
-        self.set_sync_button.setIconSize(QSize(25, 25))
+        self.set_sync_button.setIcon(QIcon("icon/vg_sync_ring.png")) 
+        self.set_sync_button.setIconSize(QSize(20, 20))
         self.set_sync_button.setToolTip("Set current video frame synchronized with selected GPX Point")
         self.set_sync_button.clicked.connect(self.setSyncClicked.emit)
         self.update_set_sync_highlight()
@@ -208,7 +208,7 @@ class VideoControlWidget(QWidget):
 
         self.sync_button = QPushButton("GSync")
         self.sync_button.setToolTip("Select the corresponding GPX-Point")
-        self.sync_button.setFixedWidth(45)
+        self.sync_button.setFixedWidth(50)
         self.sync_button.clicked.connect(self.syncClicked.emit)
         layout.addWidget(self.sync_button)
         

@@ -84,7 +84,7 @@ class SlotWidget(QWidget):
         # Karte (Move/V-Sync, +/-) und Chart (Legende) schon belegt sind.
         self._knopf = QToolButton(self)
         self._knopf.setText("▾")
-        self._knopf.setToolTip("Modul wechseln")
+        self._knopf.setToolTip("Switch module")
         self._knopf.setCursor(Qt.PointingHandCursor)
         self._knopf.setFixedSize(QSize(34, 18))
         self._knopf.setStyleSheet(

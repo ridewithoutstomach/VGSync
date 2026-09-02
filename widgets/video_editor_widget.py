@@ -59,7 +59,7 @@ class _OverlayGriff(QWidget):
         super().__init__(parent)
         self.setFixedSize(self.GROESSE, self.GROESSE)
         self.setCursor(Qt.SizeAllCursor)
-        self.setToolTip("Höhenprofil verschieben")
+        self.setToolTip("Move elevation profile")
         self._greifpunkt = None
 
     def paintEvent(self, event):
@@ -629,7 +629,7 @@ class VideoEditorWidget(QWidget):
         if not self._backend.supports_360():
             grund = getattr(self._backend, "unsupported_360_reason",
                             lambda: "")()
-            self._show_speed_label(grund or "360° braucht das GES-Backend")
+            self._show_speed_label(grund or "360° needs the GES backend")
             return
 
         ziel = (not self._is_360_mode) if an is None else bool(an)
@@ -638,7 +638,7 @@ class VideoEditorWidget(QWidget):
 
         try:
             if not self._backend.set_360(ziel):
-                self._show_speed_label("360° liess sich nicht einschalten")
+                self._show_speed_label("360° could not be switched on")
                 return
             self._is_360_mode = ziel
             self.video_surface.set_360_aktiv(ziel)
@@ -647,10 +647,10 @@ class VideoEditorWidget(QWidget):
                 # Beim Einschalten den Blickwinkel NICHT anfassen: beim Laden
                 # eines Projekts steht er schon, und ihn hier zu nullen wuerde
                 # ihn genau dann wegwerfen.
-                self._show_speed_label("360°-Modus: AN")
+                self._show_speed_label("360° mode: ON")
             else:
                 self._360_label.hide()
-                self._show_speed_label("360°-Modus: AUS")
+                self._show_speed_label("360° mode: OFF")
         except Exception as e:
             print(f"Fehler beim Umschalten des 360°-Modus: {e}")
 
@@ -1110,7 +1110,7 @@ class VideoEditorWidget(QWidget):
         # Kleinerer Bildwinkel = staerkere Vergroesserung, deshalb minus.
         self._blick_verschieben(d_fov=-dz)
         _, _, fov = self._backend.view360()
-        self._show_speed_label(f"Zoom: {math.degrees(fov):.0f}° Bildwinkel")
+        self._show_speed_label(f"Zoom: {math.degrees(fov):.0f}° FOV")
 
     def _nudge_pan(self, dx: float = 0.0, dy: float = 0.0):
         """Schwenken und neigen."""
@@ -1118,7 +1118,7 @@ class VideoEditorWidget(QWidget):
             return
         self._blick_verschieben(d_yaw=dx, d_pitch=dy)
         yaw, pitch, _ = self._backend.view360()
-        self._show_speed_label(f"Blick: {math.degrees(yaw):+.0f}° / "
+        self._show_speed_label(f"View: {math.degrees(yaw):+.0f}° / "
                                f"{math.degrees(pitch):+.0f}°")
 
     def _reset_view(self):
@@ -1133,11 +1133,11 @@ class VideoEditorWidget(QWidget):
         """Kann und soll gerade am Blickwinkel gedreht werden?"""
         if not self._backend.supports_360():
             if melden:
-                self._show_speed_label("360° braucht das GES-Backend")
+                self._show_speed_label("360° needs the GES backend")
             return False
         if not getattr(self, "_is_360_mode", False):
             if melden:
-                self._show_speed_label("Nur im 360°-Modus (Taste V)")
+                self._show_speed_label("Only in 360° mode (key V)")
             return False
         return True
 
@@ -1229,6 +1229,6 @@ class VideoEditorWidget(QWidget):
         # Bildwinkel.
         self._blick_verschieben(d_fov=-schritte * self.RAD_SCHRITT)
         _, _, fov = self._backend.view360()
-        self._show_speed_label(f"Zoom: {math.degrees(fov):.0f}° Bildwinkel")
+        self._show_speed_label(f"Zoom: {math.degrees(fov):.0f}° FOV")
 
     
