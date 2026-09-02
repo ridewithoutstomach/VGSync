@@ -255,10 +255,22 @@ if getattr(sys, "frozen", False):
         import gstreamer_libs
         gstreamer_libs.setup_python_environment()
     except Exception as _exc:
-        # Kein Abbruch: die Meldung dazu kommt weiter unten aus main(), samt
-        # Hinweis, was zu tun ist. Hier waere noch kein Fenster da, um sie zu
-        # zeigen.
-        print("[WARN] GStreamer-Umgebung nicht aufgebaut:", _exc)
+        # Die Wheel-Funktion rechnet die Pfade aus der Lage in site-packages
+        # aus. Im macOS-Buendel gibt es das nicht mehr, sie scheitert dort mit
+        # "Couldn't find site-packages prefix". Ohne GI_TYPELIB_PATH findet
+        # "import gi" danach nichts, und Wiedergabe, Vorschau und Export
+        # fallen alle aus - gemessen am ersten Buendel vom 02.09.2026.
+        #
+        # Deshalb ein zweiter Weg: dieselbe Umgebung aus dem aufbauen, was
+        # tatsaechlich neben dem Programm liegt.
+        print("[WARN] GStreamer-Umgebung nicht ueber das Wheel aufgebaut:", _exc)
+        try:
+            from core.gst_umgebung import umgebung_aufbauen, bericht
+            umgebung_aufbauen()
+            for _zeile in bericht():
+                print("[INFO] " + _zeile)
+        except Exception as _exc2:
+            print("[WARN] Auch der zweite Weg schlug fehl:", _exc2)
 
 # ---------------------------------------------------------
 import path_manager

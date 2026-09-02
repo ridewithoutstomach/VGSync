@@ -245,8 +245,20 @@ def rechtstexte_einlegen(buendel):
 
     doc = os.path.join(BASE_DIR, "doc")
     if os.path.isdir(doc):
-        print("[INFO] Nur die PDFs aus doc/ -> Contents/Resources/doc")
-        copy_only_pdfs(doc, os.path.join(resources, "doc"))
+        ziel_doc = os.path.join(resources, "doc")
+        print("[INFO] Nur die PDFs aus doc/ -> " + ziel_doc)
+        copy_only_pdfs(doc, ziel_doc)
+        # Das Kinomap-Logo ist kein PDF, wird aber gebraucht: es steht in der
+        # GPX-Leiste und im Copyright-Fenster. Der Windows-Build kopiert es
+        # ausdruecklich mit, hier fehlte es - der Selbsttest im ersten Buendel
+        # hat es gemeldet.
+        logo = os.path.join(doc, "Kinomap_Logo.png")
+        if os.path.isfile(logo):
+            os.makedirs(ziel_doc, exist_ok=True)
+            print("[COPY] Kinomap_Logo.png -> " + ziel_doc)
+            shutil.copy2(logo, os.path.join(ziel_doc, "Kinomap_Logo.png"))
+        else:
+            print("[WARN] doc/Kinomap_Logo.png fehlt im Projekt.")
     return fehlen
 
 
