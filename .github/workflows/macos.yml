@@ -126,7 +126,7 @@ jobs:
               sys.exit(1)
           PY
 
-      - name: GPX-Parser pruefen
+      - name: GPX-Rundlauf pruefen (lesen, exportieren, wieder lesen)
         run: |
           cat > ci_test.gpx <<'GPX'
           <?xml version="1.0" encoding="UTF-8"?>
@@ -141,9 +141,10 @@ jobs:
           </gpx>
           GPX
           python - <<'PY'
-          import sys
+          import os, sys
           from core.gpx_parser import parse_gpx, recalc_gpx_data
 
+          # ---- 1. Einlesen -------------------------------------------------
           punkte = parse_gpx("ci_test.gpx")
           print("Punkte gelesen:", len(punkte))
           if len(punkte) != 5:
@@ -152,9 +153,50 @@ jobs:
           print("erster Punkt:", punkte[0])
 
           recalc_gpx_data(punkte)
-          letzter = punkte[-1]
-          print("letzter Punkt nach recalc:", letzter)
-          print("ERGEBNIS: GPX-Parser arbeitet.")
+          print("letzter Punkt nach recalc:", punkte[-1])
+
+          # ---- 2. Exportieren ----------------------------------------------
+          # _save_gpx_to_file benutzt kein self, laesst sich also ohne
+          # Hauptfenster aufrufen - es ist derselbe Schreiber, den der
+          # Menuepunkt "Export GPX..." verwendet.
+          from views.mainwindow import MainWindow
+          ZIEL = "ci_export.gpx"
+          MainWindow._save_gpx_to_file(None, punkte, ZIEL)
+          if not os.path.isfile(ZIEL):
+              print("ERGEBNIS: Es wurde keine GPX-Datei geschrieben.")
+              sys.exit(1)
+          print(f"geschrieben: {ZIEL}, {os.path.getsize(ZIEL)} Bytes")
+
+          # ---- 3. Rundlauf: das Geschriebene wieder einlesen ----------------
+          zurueck = parse_gpx(ZIEL)
+          print("wieder gelesen:", len(zurueck), "Punkte")
+
+          fehler = []
+          if len(zurueck) != len(punkte):
+              fehler.append(f"{len(punkte)} Punkte geschrieben, {len(zurueck)} zurueckgelesen")
+          else:
+              for i, (a, b) in enumerate(zip(punkte, zurueck)):
+                  for feld in ("lat", "lon", "ele"):
+                      va, vb = a.get(feld), b.get(feld)
+                      if va is None or vb is None or abs(float(va) - float(vb)) > 1e-6:
+                          fehler.append(f"Punkt {i}: {feld} {va} != {vb}")
+                  if a.get("time") and b.get("time") and a["time"] != b["time"]:
+                      fehler.append(f"Punkt {i}: Zeit {a['time']} != {b['time']}")
+
+          print("--- Anfang der erzeugten Datei ---")
+          with open(ZIEL, encoding="utf-8") as f:
+              for zeile in f.readlines()[:12]:
+                  print("   ", zeile.rstrip())
+          print("--- Ende des Ausschnitts ---")
+
+          if fehler:
+              for f_ in fehler[:10]:
+                  print("  PROBLEM:", f_)
+              print("ERGEBNIS: Der GPX-Rundlauf stimmt nicht.")
+              sys.exit(1)
+
+          print("ERGEBNIS: GPX-Rundlauf in Ordnung - lesen, exportieren und "
+                "wieder einlesen liefert dieselben Punkte.")
           PY
 
       - name: Export-Test - echtes Rendern ueber GES
@@ -268,6 +310,7 @@ jobs:
             ci_export.mp4
             ci_quelle.mp4
             ci_cfg.json
+            ci_export.gpx
           if-no-files-found: warn
           retention-days: 14
 
