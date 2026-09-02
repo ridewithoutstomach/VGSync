@@ -8,17 +8,27 @@
 # Der Testlauf (macos.yml) bleibt davon unberuehrt - der ist kurz und darf bei
 # jedem Push laufen.
 #
-# Starten: Reiter "Actions" -> "macOS Build" -> "Run workflow".
-# Zusaetzlich laeuft er bei einem Tag der Form v6.02, damit zu einer Version
-# automatisch ein Buendel entsteht.
+# Starten geht auf zwei Wegen:
+#
+#   1. Reiter "Actions" -> "macOS Build" -> "Run workflow".
+#      ACHTUNG: Diesen Knopf zeigt GitHub nur, wenn diese Datei im
+#      STANDARDBRANCH liegt (main). Solange sie nur auf einem Arbeitszweig
+#      steht, gibt es ihn nicht - das ist eine Regel von GitHub, kein Fehler.
+#
+#   2. Bis dahin: der Lauf startet, sobald sich eine der drei Dateien aendert,
+#      die zum Bauen gehoeren (siehe paths unten). Ein Kommentar in
+#      build_macos.py genuegt, um ihn auszuloesen. Bei allen anderen Pushs
+#      passiert nichts - genau das war ja der Sinn.
 
 name: macOS Build
 
 on:
-  workflow_dispatch:        # der Knopf
+  workflow_dispatch:        # der Knopf, sobald die Datei in main liegt
   push:
-    tags:
-      - "v*"                # nur Versions-Tags, nicht jeder Push
+    paths:                  # sonst nur, wenn am Bauen selbst etwas geaendert wird
+      - "build_macos.py"
+      - "requirements-build-macos.txt"
+      - ".github/workflows/build-macos.yml"
 
 jobs:
   build:
