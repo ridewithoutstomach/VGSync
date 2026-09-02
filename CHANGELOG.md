@@ -185,21 +185,52 @@ and a dark map makes roads, contour lines and the GPX track harder to read.
 `myproject.KVRouiteproj - KVRouite v6.01 - …`. The name comes first because
 the taskbar and the window switcher cut from the right.
 
-**macOS: the application installs and starts**
+**macOS: there are binaries**
 
-`.github/workflows/macos.yml` runs on every push, on Apple Silicon and on Intel.
-What it establishes: the dependencies install, `check_ges.py` passes, the
-modules import, and the application runs for 25 seconds without exiting.
+KVRouite is now built for the Mac, for both architectures:
 
-What it does NOT establish, and what nobody should read into it: the run is
-headless (`QT_QPA_PLATFORM=offscreen`). Playback, cutting, export, the map and
-copy mode have not been exercised on a Mac even once. Nobody here owns one, so
-this workflow is the only place a Mac problem can surface before a user reports
-it. Treat macOS as new and unproven.
+    KVRouite_6.02_macOS_arm64.zip     Apple Silicon, M1 to M4
+    KVRouite_6.02_macOS_x86_64.zip    Intel
 
-Two defects on that path came out of the first run and are fixed above: the
-ffmpeg menu wrote to a key the search never read, and the help windows asked
-for fonts that exist on Windows only.
+Each carries `KVRouite.app` with everything it needs inside it, GStreamer
+included. Nothing has to be installed first. `build_macos.py` builds it and
+`.github/workflows/build-macos.yml` runs that build on Apple hardware.
+
+The architecture is part of the file name, and it is not taken from the name of
+the build machine - it comes from `platform.machine()`, so it states what was
+actually built. The workflow then reads the architecture back out of the
+finished binary with `lipo` and refuses to publish a bundle whose name does not
+match its contents. Both names used to be identical, which meant the two could
+overwrite each other and the checksum file would point at the wrong archive.
+
+**macOS: the bundle proves itself**
+
+`selftest.py` is new, and it runs inside the finished bundle - started from a
+foreign working directory, the way a double-click starts it. Five checks:
+
+    1  the bundled files are found        map, OpenLayers, icons, logo
+    2  the icons load                     light and dark
+    3  GStreamer and GES answer           x264enc, mp4mux, qtdemux, timeline
+    4  GPX read, written, read back       values unchanged
+    5  a video is cut and encoded         8s source, cut 3-5s, 6.00s h264 out
+
+All five pass on Apple Silicon and on Intel. Cutting and export on a Mac are
+therefore no longer an assumption; step 5 measures the result and checks its
+length, codec and frame size against what the cut arithmetic predicts. Run it
+yourself with `KVRouite --selftest`; it works on Windows and Linux too.
+
+What this still does NOT establish: nobody has operated the application by hand
+on a Mac. The runs are headless (`QT_QPA_PLATFORM=offscreen`), so the map, copy
+mode and every mouse interaction remain untested. The bundle is also neither
+signed nor notarised - Apple charges a yearly fee for that, and KVRouite is
+free. Gatekeeper will call it unverifiable; opening it goes through
+right-click, then Open.
+
+Defects found and fixed on this path: the ffmpeg menu wrote to a key the search
+never read; the help windows asked for fonts that exist on Windows only; the
+bundle could not find its own GStreamer, because the wheels work out their
+paths from `site-packages` and a bundle has none (`core/gst_umgebung.py` now
+rebuilds that environment from what is actually there).
 
 ### Removed
 

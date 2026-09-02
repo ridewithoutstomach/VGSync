@@ -32,15 +32,17 @@ on:
 
 jobs:
   build:
-    name: ${{ matrix.os }}
+    name: ${{ matrix.arch }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60      # ein Buendel mit GStreamer braucht seine Zeit
     strategy:
       fail-fast: false       # bricht ein Ziel, laeuft das andere trotzdem
       matrix:
         include:
-          - os: macos-15         # Apple Silicon (arm64)
-          - os: macos-15-intel   # Intel (x86_64)
+          - os: macos-15
+            arch: arm64          # Apple Silicon, M1 bis M4
+          - os: macos-15-intel
+            arch: x86_64         # Intel
 
     steps:
       - name: Quelltext holen
@@ -79,6 +81,17 @@ jobs:
           echo
           echo "----- Contents/Resources (Rechtstexte, doc) -----"
           ls -1 "$BUENDEL/Contents/Resources" | head -30
+          echo
+          echo "----- Architektur -----"
+          # Der Dateiname des Archivs verspricht eine Architektur. Hier wird
+          # geprueft, dass das Programm sie auch hat - sonst laedt sich jemand
+          # ein Buendel herunter, das auf seinem Mac nicht startet.
+          ARCH=$(lipo -archs "$BUENDEL/Contents/MacOS/KVRouite")
+          echo "gebaut: $ARCH / erwartet: ${{ matrix.arch }}"
+          if [ "$ARCH" != "${{ matrix.arch }}" ]; then
+            echo "ABBRUCH: Das Buendel passt nicht zu seinem Namen."
+            exit 1
+          fi
           echo
           echo "----- Info.plist -----"
           /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$BUENDEL/Contents/Info.plist" || true
@@ -144,9 +157,9 @@ jobs:
         if: always()          # auch bei fehlgeschlagenem Startversuch abholbar
         uses: actions/upload-artifact@v4
         with:
-          name: KVRouite-macOS-${{ matrix.os }}
+          name: KVRouite-macOS-${{ matrix.arch }}
           path: |
-            dist/*/KVRouite_*_macOS.zip
-            dist/*/KVRouite_*_macOS.zip.sha256
+            dist/*/KVRouite_*_macOS_*.zip
+            dist/*/KVRouite_*_macOS_*.zip.sha256
           if-no-files-found: error
           retention-days: 14

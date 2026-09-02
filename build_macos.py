@@ -43,6 +43,7 @@ waere. Wer das umstellen will, aendert zuerst die Suche im Programm.
 
 import importlib.util
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -299,6 +300,25 @@ def gstreamer_pruefen(buendel):
     return fehlend
 
 
+def architektur():
+    """Fuer welche CPU dieser Lauf baut - "arm64" oder "x86_64".
+
+    Der Wert kommt aus platform.machine(), also aus dem Python, das gerade
+    laeuft, und damit aus genau dem, was PyInstaller gleich baut. Nicht aus
+    dem Namen der Maschine: GitHub nennt seine Runner "macos-15" und
+    "macos-15-intel", das ist die macOS-Version plus ein Zusatz und sagt ueber
+    den Prozessor nichts Verlaessliches. Und wer auf einem Apple-Silicon-Mac
+    ein Python unter Rosetta startet, baut x86_64 - platform.machine() sagt
+    dann x86_64, der Maschinenname weiter arm64. Der Name des Archivs muss
+    dem folgen, was drin ist.
+
+    Warum das zaehlt: bis zum 02.09.2026 hiessen beide Archive gleich
+    (KVRouite_6.02_macOS.zip). Nebeneinander gelegt ueberschrieb eines das
+    andere, und die Pruefsummendatei zeigte danach auf die falsche Datei.
+    """
+    return platform.machine()
+
+
 def zippen(buendel, ziel_ordner, app_version):
     """Das Buendel als ZIP - so wird es abgelegt und weitergegeben.
 
@@ -314,7 +334,7 @@ def zippen(buendel, ziel_ordner, app_version):
     steht nur fuer den Fall, dass es einmal fehlt; er ist ausdruecklich die
     schlechtere Fassung und sagt das auch.
     """
-    name = "KVRouite_%s_macOS.zip" % app_version
+    name = "KVRouite_%s_macOS_%s.zip" % (app_version, architektur())
     ziel = os.path.join(ziel_ordner, name)
     print("[INFO] Packe", ziel)
 
@@ -349,9 +369,11 @@ def build_macos():
 
     app_version = load_app_version()
     print("[INFO] APP_VERSION:", app_version)
+    print("[INFO] Architektur:", architektur())
 
-    ziel_ordner = os.path.join(BASE_DIR, "dist",
-                               "KVRouite_%s_macOS" % app_version)
+    ziel_ordner = os.path.join(
+        BASE_DIR, "dist",
+        "KVRouite_%s_macOS_%s" % (app_version, architektur()))
     if os.path.isdir(ziel_ordner):
         print("[INFO] Alten Ordner entfernen:", ziel_ordner)
         shutil.rmtree(ziel_ordner)
