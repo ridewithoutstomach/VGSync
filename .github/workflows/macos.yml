@@ -25,6 +25,10 @@ jobs:
             python: "3.12"
           - os: macos-15-intel   # Intel (x86_64)
             python: "3.12"
+          - os: macos-26         # Apple Silicon auf der neuesten macOS-Fassung
+            python: "3.12"
+          - os: macos-26-intel   # Intel auf der neuesten macOS-Fassung
+            python: "3.12"
 
     steps:
       - name: Quelltext holen
