@@ -1,0 +1,79 @@
+# Prueft, ob KVRouite auf macOS installiert und startet.
+#
+# Laeuft auf GitHub-Rechnern, nicht bei dir. Fuer oeffentliche Repositories
+# sind die macOS-Runner kostenlos.
+#
+# Ausloeser: bei jedem Push, und von Hand ueber den Reiter
+# "Actions" -> "macOS" -> "Run workflow".
+
+name: macOS
+
+on:
+  push:                   # laeuft auf jedem Branch, auf den du pushst
+  workflow_dispatch:      # Knopf zum manuellen Starten
+
+jobs:
+  test:
+    name: ${{ matrix.os }} (Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false     # ein defektes Ziel stoppt das andere nicht
+      matrix:
+        include:
+          - os: macos-14   # Apple Silicon (arm64)
+            python: "3.12"
+          - os: macos-13   # Intel (x86_64)
+            python: "3.12"
+
+    steps:
+      - name: Quelltext holen
+        uses: actions/checkout@v4
+
+      - name: Python einrichten
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Umgebung anzeigen
+        run: |
+          echo "Rechner : $(uname -m) / $(sw_vers -productVersion)"
+          echo "Python  : $(python --version)"
+
+      - name: Abhaengigkeiten installieren
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Was tatsaechlich installiert wurde
+        run: pip list
+
+      - name: GStreamer/GES pruefen (check_ges.py)
+        run: python check_ges.py
+
+      - name: Startest - Anwendung importieren, ohne Fenster zu oeffnen
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python - <<'PY'
+          import importlib, sys
+          # KVRouite.py hat einen __main__-Guard, der Import startet also nichts.
+          for modul in ("KVRouite", "config", "path_manager", "core.ges_backend"):
+              importlib.import_module(modul)
+              print("  ok:", modul)
+          print("Alle Module importiert, Python", sys.version.split()[0])
+          PY
+
+      - name: GStreamer-Plugins auflisten (zur Information)
+        if: always()
+        run: |
+          python - <<'PY'
+          import gi
+          gi.require_version("Gst", "1.0")
+          from gi.repository import Gst
+          Gst.init(None)
+          reg = Gst.Registry.get()
+          namen = sorted(p.get_name() for p in reg.get_plugin_list())
+          print(len(namen), "Plugins gefunden")
+          for n in ("coreelements", "libav", "x264", "ges", "playback", "videoconvertscale"):
+              print(("  vorhanden: " if n in namen else "  FEHLT   : ") + n)
+          PY
