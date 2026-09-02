@@ -64,27 +64,60 @@ jobs:
           print("Alle Module importiert, Python", sys.version.split()[0])
           PY
 
-      - name: Startversuch - Anwendung wirklich starten
+      - name: Startversuch - laeuft die App bis zum Hauptfenster durch?
+        timeout-minutes: 5          # haengt ein Dialog, schlaegt der Schritt fehl
         env:
-          QT_QPA_PLATFORM: offscreen    # Qt zeichnet in den Speicher, kein Bildschirm noetig
+          QT_QPA_PLATFORM: offscreen
         run: |
-          set +e
-          python KVRouite.py > start.log 2>&1 &
-          PID=$!
-          sleep 25
-          if kill -0 $PID 2>/dev/null; then
-            echo "ERGEBNIS: Anwendung laeuft nach 25 Sekunden noch - Start erfolgreich."
-            kill $PID 2>/dev/null
-            RC=0
-          else
-            wait $PID; CODE=$?
-            echo "ERGEBNIS: Anwendung hat sich vorzeitig beendet, Rueckgabewert $CODE"
-            RC=1
-          fi
-          echo "----- Ausgabe der Anwendung -----"
-          cat start.log
-          echo "---------------------------------"
-          exit $RC
+          python - <<'PY'
+          import sys
+          from PySide6.QtCore import QSettings
+          from PySide6.QtWidgets import QApplication
+
+          import config, KVRouite
+
+          # Beim allerersten Start zeigt KVRouite zwei modale Dialoge:
+          #   1. den Disclaimer (KVRouite.py, is_disclaimer_accepted)
+          #   2. "ffmpeg not found" (Merker hints/ffmpeg_missing_shown)
+          # Beide warten auf einen Klick und wuerden hier ewig blockieren.
+          # Sie werden deshalb vorab als "schon gesehen" hinterlegt - genau so,
+          # wie es nach dem ersten echten Start eines Anwenders aussieht.
+          # appVersion muss mitgesetzt werden, sonst loescht
+          # check_app_version_and_reset_if_necessary() den Disclaimer-Merker.
+          s = QSettings("KVRouite", "KVRouite")
+          s.setValue("appVersion", config.APP_VERSION)
+          s.setValue("disclaimerAccepted", True)
+          s.setValue("hints/ffmpeg_missing_shown", True)
+          s.sync()
+          print("Vorbelegt fuer Version", config.APP_VERSION)
+
+          # main() endet mit app.exec(). Statt dort in die Ereignisschleife zu
+          # gehen, wird nachgesehen, welche Fenster offen sind - und zurueck.
+          gefunden = []
+          def statt_exec(self):
+              for w in self.topLevelWidgets():
+                  if w.isVisible():
+                      gefunden.append((type(w).__name__, w.windowTitle()))
+              return 0
+          QApplication.exec = statt_exec
+
+          try:
+              KVRouite.main()
+          except SystemExit as e:
+              if e.code not in (0, None):
+                  print("main() hat sich mit Code", e.code, "beendet")
+                  sys.exit(1)
+
+          print("Sichtbare Fenster beim Erreichen der Ereignisschleife:")
+          for name, titel in gefunden:
+              print("   ", name, "-", repr(titel))
+
+          if any(n == "MainWindow" for n, _ in gefunden):
+              print("ERGEBNIS: Hauptfenster wurde aufgebaut und angezeigt.")
+          else:
+              print("ERGEBNIS: KEIN Hauptfenster - die App kam nicht so weit.")
+              sys.exit(1)
+          PY
 
       - name: GStreamer-Plugins auflisten (zur Information)
         if: always()
