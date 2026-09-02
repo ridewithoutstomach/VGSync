@@ -145,6 +145,82 @@ the same font as before, because Segoe UI and Consolas still come first.
 
 ### Added
 
+**A cut can be taken back - any cut, not just the last one**
+
+Right-click a cut in the timeline. The menu names it by its time, switches it
+between a crossfade and a hard cut, and offers *Undo Cut*.
+
+Taking a cut back has to put the GPX track back too, and that is where the work
+was. What a cut removed is recorded beside the cut list, under the same rounded
+(start, end) key that `_hard_cuts` already uses - `_cut_intervals` stays a plain
+list of time pairs, because it is unpacked at around 18 places in the program
+and must not change shape. Recorded per cut: the removed points with their
+original times, the points the ordering check additionally dropped (they would
+otherwise be gone for good), the point interpolated at the seam if there was
+one, and how far everything behind it moved forward.
+
+The keys stay valid because cuts are stored in RAW time. If an earlier cut is
+taken back, only the place where a later one ends up in the finished video
+moves - not its key.
+
+Whether taking it back is still safe is decided by a **fingerprint of the
+track**, not by a counter. A counter would have to be maintained in every
+editing function, and a single overlooked place would produce a false promise;
+a fingerprint cannot overlook anything. There are two of them, because not
+every change weighs the same:
+
+- **Times** decide the structure. The undo works purely by comparing times, so
+  if those have moved the points would land in the wrong place. Hard block.
+- **Values** - position and elevation - change nothing structurally. The points
+  come back in the right places but carry the state from before the cut, so
+  after a smoothing or an elevation change there would be a step in the
+  profile. That is visible in the chart, so a warning is enough.
+
+Measured, not assumed: `_apply_smoothing()` only works over elevation and the
+distances and never touches `time`. Changing times, Close Gaps and Resample do -
+exactly the cases that belong behind the block.
+
+**Adjacent cuts make one crossfade, not two**
+
+Where two cuts touch or overlap, the video has one hole. Two crossfades were
+built for it, and the inner one faded onto material the neighbouring cut had
+already removed - a brief freeze at the joint. The preview now works on the
+merged ranges, which is what the export has always done
+(`_compute_keep_intervals()` merges them itself), so the export was never
+affected.
+
+**The cut you clicked is highlighted**
+
+Brightened slightly, with a dashed border, for as long as its menu or the
+confirmation is open. With several cuts close together there was otherwise no
+way to tell which one was meant.
+
+**A filmstrip in the timeline - Config > Thumbnails in Timeline**
+
+Single frames of the video drawn along the timeline, so that a cut can be
+placed by looking at the picture rather than at the clock.
+
+**Off by default**, deliberately: the images are pulled out of the video files,
+and with large material that costs time and disk access. Whoever wants them
+switches them on.
+
+Two things make it fast enough to be usable, and both have to stay that way
+(`core/thumb_cache.py`): the seek goes to KEYFRAMES (`Gst.SeekFlags.KEY_UNIT`),
+otherwise the decoder has to work through everything up to the target frame;
+and the pipeline stays OPEN per file, because rebuilding it for every image
+costs several times the actual work. Measured on a 4K GoPro file - 11.9 GB, 35
+minutes, on an external disk: 24 images at 160 px wide in 3.4 s, 111 ms each on
+average.
+
+Fetching runs in a thread of its own and reports back by signal; the timeline
+only ever asks for what it wants to draw. Zooming and panning change which
+timestamps are needed, but reloading waits until the movement stops - otherwise
+the disk rattles on every notch of the wheel.
+
+The timeline row now has a fixed height rather than a minimum, because the size
+of the images depends on it. Dragging it to 300 px would mean re-fetching
+everything and drawing huge images. The edges above and below still drag.
+
 **Elevation profile inside the video picture**
 
 *View - Elevation Profile in Video*. The flow can be shown over the video, bottom left,
@@ -156,6 +232,15 @@ ratio of the video does not match the window there are black bars, and the
 profile stays inside the image rather than sitting on a bar. Only the handle
 accepts the mouse - the profile itself lets clicks through, so dragging the view
 in 360 mode still works underneath it.
+
+**Everything drawn over the video sits in the picture, not in the window**
+
+The status texts in the video - "Copymode" while copy mode is encoding, "V&G:On"
+for the video-and-GPX cut - used to be laid out against the edge of the widget.
+When the aspect ratio of the video does not match the window there are black
+bars, and the texts ended up sitting in them. They are now placed against the
+image itself, each on a fixed line of its own, the same way the elevation
+profile is. The 360 view can still be dragged underneath them.
 
 **"Video before cuts" in the GPX summary**
 
@@ -262,7 +347,22 @@ bright asphalt they were barely readable. Both are in the GPX summary now, as
 
 Replaced by the Chart-Flow module, see above.
 
+**The mpv source archive in `third-party-src/`**
+
+4 MB of ZIP that no longer had to be there. KVRouite has not shipped an mpv or
+FFmpeg binary since 3.25, so there is nothing left to supply the corresponding
+source for; both build scripts now refuse to package a build that contains
+either. What the versions up to 3.25 did ship is documented instead:
+`third-party-src/README.txt` says which file belongs to which version, and the
+BUILDINFO files record how those binaries were configured and built. Anyone who
+received them can still ask for the source, which is what the GPL requires.
+
 ### Fixed
+
+**Exported GPX files were signed "MyApp"**
+
+The `creator` attribute in the GPX header, which says which program wrote the
+file, carried a placeholder. It now reads `KVRouite v6.02`.
 
 **GPX button bar sat above the table**
 
