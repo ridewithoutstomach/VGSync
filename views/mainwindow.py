@@ -2734,10 +2734,26 @@ class MainWindow(QMainWindow):
     # "Reset Window Layout" im Config-Menue stellt den Auslieferungszustand
     # wieder her: Standardgroesse, zentriert, Splitter 50/50.
 
-    _GEOMETRY_KEY = "ui/window_geometry"
-    _SPLITTER_KEY = "ui/splitter_state"          # senkrecht: oben | Timeline | unten
-    _TOP_SPLITTER_KEY = "ui/top_splitter_state"       # Video | Karte
-    _BOTTOM_SPLITTER_KEY = "ui/bottom_splitter_state" # Chart | GPX-Tabelle
+    # Die Namen tragen seit 6.02 die Kennung der Fensteraufteilung, und zwar
+    # aus einem gemessenen Grund: bis 6.01 lag EIN waagerechter Splitter im
+    # Fenster (links | rechts), seit 6.02 ist es ein senkrechter mit drei
+    # Reihen und zwei waagerechten darin. Beide Fassungen schrieben ihren
+    # Zustand unter denselben Schluessel "ui/splitter_state". Wer abwechselnd
+    # 6.01 und 6.02 startet, bekam deshalb den Zustand der jeweils anderen
+    # Aufteilung auf seine eigene gelegt - das Fenster stand danach falsch,
+    # und "Reset Window Layout" half nur bis zum naechsten Wechsel.
+    #
+    # Die alten Namen ohne "_grid" bleiben unangetastet: sie gehoeren 6.01 und
+    # werden hier weder gelesen noch geschrieben. Beide Versionen duerfen
+    # damit nebeneinander laufen.
+    #
+    # Alles andere in QSettings bleibt bewusst GEMEINSAM - Encoder-Setup,
+    # Karten-Keys, ffmpeg-Pfad, Dateihistorie. Das ist derselbe Rechner und
+    # dieselben Vorlieben; doppelt einrichten will sie niemand.
+    _GEOMETRY_KEY = "ui/window_geometry_grid"
+    _SPLITTER_KEY = "ui/splitter_state_grid"          # senkrecht: oben | Timeline | unten
+    _TOP_SPLITTER_KEY = "ui/top_splitter_state_grid"       # Video | Karte
+    _BOTTOM_SPLITTER_KEY = "ui/bottom_splitter_state_grid" # Chart | GPX-Tabelle
 
     # Hoehe der Timeline-Zeile. Die Timeline hat die Zeile seit 6.02 fuer sich
     # allein - die Bedienleiste sitzt beim Player, der Mini-Chart ist weg.
