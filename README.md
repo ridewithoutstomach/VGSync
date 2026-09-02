@@ -12,7 +12,7 @@ KVRouite is a Python-based desktop application designed to synchronize GPX data 
 ![KVRouite Main Window](./screenshots/mainwindow.png)
 
 - Version: see Releases
-- Platforms: Windows 64-bit (official support), Linux (tested on Kubuntu 24.04.2)
+- Platforms: Windows 64-bit (official support), Linux (tested on Kubuntu 24.04.2), macOS 13+ on Apple Silicon and Intel (new, install and start verified on macOS 15 - see the macOS section)
 - License: GNU General Public License v3.0 or later (GPL-3.0-or-later)
 - KVRouite helps action cam users and outdoor enthusiasts to synchronize their recorded videos with GPS data for perfect route visualization and editing.
 -------------------------------------------------------------------------------
@@ -37,7 +37,7 @@ There are two requirements files:
 If you just want to run KVRouite, "requirements.txt" is all you need.
 
 -------------------------------------------------------------------------------
-## 🔧 Installation & Usage (Linux & Windows)
+## 🔧 Installation & Usage (Linux, Windows & macOS)
 
 ---
 
@@ -153,11 +153,78 @@ actually ended up in it.
 
 ---
 
+### 🍎 macOS
+
+macOS support is **new and not yet widely tested**. Installation and start are
+verified automatically on every push, on macOS 15 (Sequoia), on both Apple
+Silicon and Intel. Playback, cutting and export have not been tried by a human
+yet - if you run KVRouite on a Mac, please tell us how it went (see
+*Feedback wanted* at the end of this section).
+
+#### Requirements
+
+- **macOS 13 (Ventura) or newer.** This is a hard limit: PySide6 6.11 is only
+  published for macOS 13 and above, so `pip install` fails on macOS 12 or older.
+- **Python 3.12 (64-bit)** from [python.org](https://www.python.org/downloads/macos/)
+  - take the *macOS 64-bit universal2 installer*. Neither Homebrew nor pyenv is
+  needed.
+- Apple Silicon and Intel are both supported; the wheels are universal2.
+
+#### Setup and Run
+
+Open **Terminal**, then:
+
+```bash
+cd KVRouite
+python3.12 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+python KVRouite.py
+```
+
+The only difference from the Windows instructions above is the activation line:
+`source venv/bin/activate` instead of `venv\Scripts\activate`.
+
+#### GStreamer / GES
+
+As on Windows, the whole GStreamer runtime comes as pip wheels - no Homebrew,
+no GStreamer installer, nothing to install system-wide. It is part of
+`requirements.txt`, so the install above already covers it: `gstreamer-bundle`
+1.28.6, roughly 200 MB downloaded. This is **unlike Linux**, where GStreamer
+has to come from the distribution. Check the result with:
+
+```bash
+python check_ges.py
+```
+
+#### ffmpeg
+
+Only needed for the Copy-Mode, exactly as on the other platforms. Without it
+everything else works and Copy-Mode stays disabled. If you want it:
+
+```bash
+brew install ffmpeg
+```
+
+#### Feedback wanted
+
+Please open an issue at
+<https://github.com/ridewithoutstomach/KVRouite/issues> and tell us:
+
+- your macOS version and whether the Mac is Apple Silicon or Intel
+- whether the window opens and looks right
+- whether a video opens and plays
+- whether cutting and export work
+- any messages the Terminal printed - please paste the text
+
+---
+
 ### ❗ Important Notes
 
 - Always create and activate the virtual environment **inside** the `KVRouite` folder.
 - Do **not** run `python KVRouite.py` outside the project folder.
 - On **Linux**, make sure the GStreamer packages listed above are installed. `ffmpeg` is optional and only needed for the Copy-Mode.
+- On **macOS**, nothing has to be installed system-wide - `requirements.txt` brings GStreamer along, same as on Windows.
 
 
 

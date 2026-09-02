@@ -419,9 +419,9 @@ def main():
     # Bewusst NICHT ueber path_manager.ensure_ffmpeg(): das oeffnet bei
     # Misserfolg einen Ordner-Dialog, und genau das soll beim Start nicht
     # passieren.
-    ffmpeg_ordner = (path_manager.find_ffmpeg_folder_mac()
-                     if current_os == "Darwin"
-                     else path_manager.find_ffmpeg_folder())
+    # Eine Suche fuer alle Systeme: sie kennt die ueblichen Orte des jeweiligen
+    # Systems und den Namen, unter dem ein von Hand gesetzter Ordner steht.
+    ffmpeg_ordner = path_manager.find_ffmpeg_folder()
     if ffmpeg_ordner and path_manager.is_ffmpeg_in_folder(ffmpeg_ordner):
         path_manager.add_to_process_path(ffmpeg_ordner)
         print("[DEBUG] ffmpeg gefunden in", ffmpeg_ordner)

@@ -45,12 +45,33 @@ def add_to_process_path(path_str: str):
     new_path = path_str + os.pathsep + old_path
     os.environ["PATH"] = new_path
 
-def is_ffmpeg_in_folder(folder: str) -> bool:
+#: Die beiden Programme, die der Copy-Mode braucht.
+FFMPEG_WERKZEUGE = ("ffmpeg", "ffprobe")
+
+
+def programmname(name: str) -> str:
+    """Der Dateiname des Programms auf diesem System."""
+    return name + ".exe" if platform.system() == "Windows" else name
+
+
+def fehlende_werkzeuge_im_ordner(folder: str):
+    """Welche der beiden Programme in `folder` fehlen.
+
+    Leere Liste heisst: beide da. Ein Ordner mit nur ffmpeg taugt nicht -
+    ffprobe indiziert die Keyframes und misst die Segmentlaengen. Frueher
+    wurde nur auf ffmpeg geprueft: so ein Ordner wurde angenommen, in den PATH
+    gelegt, und der Copy-Mode blieb trotzdem aus. Fuer den Anwender sah es
+    aus, als haette das Setzen nichts bewirkt.
+    """
     if not folder or not os.path.isdir(folder):
-        return False
-    exe_name = "ffmpeg.exe" if platform.system().lower().startswith("win") else "ffmpeg"
-    path_exe = os.path.join(folder, exe_name)
-    return os.path.isfile(path_exe)
+        return list(FFMPEG_WERKZEUGE)
+    return [n for n in FFMPEG_WERKZEUGE
+            if not os.path.isfile(os.path.join(folder, programmname(n)))]
+
+
+def is_ffmpeg_in_folder(folder: str) -> bool:
+    """True nur, wenn BEIDE Programme in dem Ordner liegen."""
+    return not fehlende_werkzeuge_im_ordner(folder)
 
 #: Was dem Anwender angezeigt wird, wenn der Copy-Mode nicht zur Verfuegung
 #: steht. An einer Stelle formuliert, damit Menue, Werkzeugtipp und Log nicht
@@ -82,36 +103,78 @@ def copy_mode_fehlgrund() -> str:
     return " and ".join(fehlt) + " not in PATH"
 
 
-def find_ffmpeg_folder() -> str:
+def ffmpeg_schluessel() -> str:
+    """Unter welchem Namen der ffmpeg-Ordner in QSettings steht.
+
+    macOS hat einen eigenen Namen, weil dort ganz andere Orte in Frage kommen
+    und ein Rechner nicht beides gleichzeitig ist. Der Name gehoert deshalb
+    hierher und nicht in die Oberflaeche: das Menue "Config -> FFmpeg" schrieb
+    frueher immer nach "paths/ffmpeg", die Suche auf dem Mac las aber
+    "paths/ffmpeg_mac". Wer dort einen Ordner von Hand setzte, sah ihn beim
+    naechsten Start nicht wieder.
     """
-    1) QSettings
-    2) Standard Windows paths
-    3) which("ffmpeg")
-    Returns a folder path or "" if none found.
-    """
-    # 1) QSettings
+    return ("paths/ffmpeg_mac"
+            if platform.system() == "Darwin"
+            else "paths/ffmpeg")
+
+
+def gespeicherter_ffmpeg_ordner() -> str:
+    """Der von Hand gesetzte Ordner, oder "" wenn keiner (mehr) gilt."""
     s = QSettings("KVRouite", "KVRouite")
-    stored_folder = s.value("paths/ffmpeg", "", type=str)
+    return s.value(ffmpeg_schluessel(), "", type=str) or ""
+
+
+def ffmpeg_ordner_merken(ordner: str) -> None:
+    QSettings("KVRouite", "KVRouite").setValue(ffmpeg_schluessel(), ordner)
+
+
+def ffmpeg_ordner_vergessen() -> None:
+    QSettings("KVRouite", "KVRouite").remove(ffmpeg_schluessel())
+
+
+def ffmpeg_standardorte():
+    """Die ueblichen Orte des jeweiligen Systems."""
+    system = platform.system()
+    if system == "Windows":
+        return [r"C:\Program Files\FFmpeg\bin",
+                r"C:\Program Files (x86)\FFmpeg\bin",
+                r"C:\ffmpeg\bin"]
+    if system == "Darwin":
+        return ["/opt/homebrew/bin",   # Homebrew auf Apple Silicon
+                "/usr/local/bin",      # Homebrew auf Intel
+                "/opt/local/bin"]      # MacPorts
+    return ["/usr/bin", "/usr/local/bin", "/snap/bin"]   # Linux
+
+
+def find_ffmpeg_folder() -> str:
+    """Wo ffmpeg liegt - auf jedem System nach derselben Reihenfolge.
+
+    1) der von Hand gesetzte Ordner
+    2) der PATH
+    3) die ueblichen Orte des Systems
+
+    Frueher gab es hierfuer zwei Funktionen, die sich in der Reihenfolge und
+    in den durchsuchten Orten unterschieden; Linux hatte gar keine Liste.
+    Rueckgabe ist der Ordner oder "".
+    """
+    stored_folder = gespeicherter_ffmpeg_ordner()
     if is_ffmpeg_in_folder(stored_folder):
         return stored_folder
 
-    # 2) Windows standard paths
-    if platform.system().lower().startswith("win"):
-        possible_paths = [
-            r"C:\Program Files\FFmpeg\bin",
-            r"C:\Program Files (x86)\FFmpeg\bin",
-            r"C:\ffmpeg\bin"
-        ]
-        for p in possible_paths:
-            if is_ffmpeg_in_folder(p):
-                return p
-
-    # 3) which("ffmpeg")
     ffmpeg_exec = shutil.which("ffmpeg")
     if ffmpeg_exec:
         return os.path.dirname(ffmpeg_exec)
 
+    for p in ffmpeg_standardorte():
+        if is_ffmpeg_in_folder(p):
+            return p
+
     return ""
+
+
+def find_ffmpeg_folder_mac() -> str:
+    """Frueherer Name. find_ffmpeg_folder() kann das jetzt selbst."""
+    return find_ffmpeg_folder()
 
 def ensure_ffmpeg(parent_widget) -> bool:
     """
@@ -120,15 +183,13 @@ def ensure_ffmpeg(parent_widget) -> bool:
     we store it in QSettings so it shows up in "Show current path".
     If not found -> prompt user to pick a folder.
     """
-    s = QSettings("KVRouite", "KVRouite")
     folder = find_ffmpeg_folder()
 
     if folder and is_ffmpeg_in_folder(folder):
         # => falls QSettings leer oder ungültig war, aber wir 
         #    jetzt einen standard Pfad gefunden haben => in QSettings packen
-        stored_in_settings = s.value("paths/ffmpeg", "", type=str)
-        if stored_in_settings != folder:
-            s.setValue("paths/ffmpeg", folder)
+        if gespeicherter_ffmpeg_ordner() != folder:
+            ffmpeg_ordner_merken(folder)
 
         add_to_process_path(folder)
         return True
@@ -137,103 +198,29 @@ def ensure_ffmpeg(parent_widget) -> bool:
         QMessageBox.information(
             parent_widget,
             "FFmpeg Required",
-            "Please select the folder where FFmpeg is installed.\n"
+            "Please select the folder that contains ffmpeg and ffprobe.\n"
             "Example (Windows):\n"
             "  C:\\ffmpeg\\bin\n"
             "  C:\\Program Files\\FFmpeg\\bin\n\n"
-            "This is needed for video cutting and export."
+            "Both are needed: ffmpeg cuts, ffprobe indexes the keyframes."
         )
         chosen = QFileDialog.getExistingDirectory(parent_widget, "Select FFmpeg Folder")
         if not chosen:
             return False
-        if not is_ffmpeg_in_folder(chosen):
+        fehlt = fehlende_werkzeuge_im_ordner(chosen)
+        if fehlt:
             QMessageBox.critical(
                 parent_widget,
                 "FFmpeg Missing",
-                f"No valid ffmpeg executable found in:\n{chosen}"
+                "%s not found in:\n%s\n\n"
+                "Copy mode needs %s and %s in the same folder."
+                % (" and ".join(programmname(n) for n in fehlt), chosen,
+                   programmname("ffmpeg"), programmname("ffprobe"))
             )
             return False
 
         # => store
-        s.setValue("paths/ffmpeg", chosen)
+        ffmpeg_ordner_merken(chosen)
         add_to_process_path(chosen)
         return True
         
-def find_ffmpeg_folder_mac() -> str:
-    """
-    macOS: Sucht nach ffmpeg (ohne .exe):
-      1) QSettings
-      2) which("ffmpeg")
-      3) Mehrere Standardpfade (Homebrew, MacPorts, ...)
-      4) Falls nichts gefunden -> ""
-    """
-    s = QSettings("KVRouite", "KVRouite")
-    stored_folder = s.value("paths/ffmpeg_mac", "", type=str)
-    if is_ffmpeg_in_folder(stored_folder):
-        return stored_folder
-
-    # 2) systemweiter PATH prüfen
-    ffmpeg_exec = shutil.which("ffmpeg")
-    if ffmpeg_exec:
-        return os.path.dirname(ffmpeg_exec)
-
-    # 3) Liste mit Standardpfaden (einfach erweiterbar)
-    possible_ffmpeg_dirs = [
-        "/usr/local/bin",     # Homebrew (Intel)
-        "/opt/homebrew/bin",  # Homebrew (Apple Silicon)
-        "/opt/local/bin",     # MacPorts
-        # Hier kannst du beliebige weitere Pfade ergänzen:
-        # "/Applications/ffmpeg/bin",
-        # "/User/DeinName/Programme/ffmpeg/bin",
-        # usw.
-    ]
-    for pathdir in possible_ffmpeg_dirs:
-        if is_ffmpeg_in_folder(pathdir):
-            return pathdir
-
-    # 4) Keiner der Pfade war erfolgreich
-    return ""
-
-
-def ensure_ffmpeg_mac(parent_widget) -> bool:
-    """
-    Stellt sicher, dass ffmpeg (macOS) verfügbar ist.
-    1) Versucht find_ffmpeg_folder_mac().
-    2) Falls nicht gefunden -> lässt User den Ordner wählen.
-    3) Prüft ffmpeg-Executable -> schreibt in QSettings -> PATH
-    """
-    s = QSettings("KVRouite", "KVRouite")
-    folder = find_ffmpeg_folder_mac()
-
-    if folder and is_ffmpeg_in_folder(folder):
-        stored_in_settings = s.value("paths/ffmpeg_mac", "", type=str)
-        if stored_in_settings != folder:
-            s.setValue("paths/ffmpeg_mac", folder)
-
-        add_to_process_path(folder)
-        return True
-    else:
-        QMessageBox.information(
-            parent_widget,
-            "FFmpeg Required (macOS)",
-            "Please choose the folder that contains ffmpeg.\n\n"
-            "Example:\n"
-            "  /usr/local/bin\n"
-            "  /opt/homebrew/bin\n\n"
-            "Without FFmpeg, video cutting and export are not possible."
-        )
-        chosen = QFileDialog.getExistingDirectory(parent_widget, "Select FFmpeg Folder (macOS)")
-        if not chosen:
-            return False
-        if not is_ffmpeg_in_folder(chosen):
-            QMessageBox.critical(
-                parent_widget,
-                "FFmpeg Missing (macOS)",
-                f"No valid ffmpeg executable in:\n{chosen}"
-            )
-            return False
-
-        s.setValue("paths/ffmpeg_mac", chosen)
-        add_to_process_path(chosen)
-        return True    
-    

@@ -21,7 +21,6 @@
 # views/mainwindow.py
 import os
 import sys
-import platform
 import subprocess
 import json
 import shutil
@@ -34,7 +33,6 @@ import copy
 import tempfile
 import datetime
 import math
-import platform
 import subprocess
 import re
 import hashlib
@@ -1986,8 +1984,11 @@ class MainWindow(QMainWindow):
         
         
 
-        s = QSettings("KVRouite", "KVRouite")
-        path_stored = s.value("paths/ffmpeg", "", type=str)
+        # Ueber path_manager, nicht direkt ueber QSettings: auf dem Mac heisst
+        # der Eintrag anders, und frueher schrieb dieses Menue immer nach
+        # "paths/ffmpeg" - die Suche dort las aber "paths/ffmpeg_mac".
+        from path_manager import gespeicherter_ffmpeg_ordner
+        path_stored = gespeicherter_ffmpeg_ordner()
         if path_stored and os.path.isdir(path_stored):
             msg = f"Currently stored FFmpeg path:\n{path_stored}"
         else:
@@ -2003,7 +2004,7 @@ class MainWindow(QMainWindow):
         QMessageBox.information(
             self,
             "Set FFmpeg Path",
-            "Please select the folder where ffmpeg is installed.\n"
+            "Please select the folder that contains ffmpeg and ffprobe.\n"
             "e.g. C:\\ffmpeg\\bin"
         )
 
@@ -2011,16 +2012,24 @@ class MainWindow(QMainWindow):
         if not folder:
             return
         
-        exe_name = "ffmpeg.exe" if platform.system().lower().startswith("win") else "ffmpeg"
-        path_exe = os.path.join(folder, exe_name)
-        if not os.path.isfile(path_exe):
-            QMessageBox.critical(self, "Invalid FFmpeg",
-                f"No {exe_name} found in:\n{folder}")
+        # Beide Programme muessen da sein: ffmpeg schneidet, ffprobe indiziert
+        # die Keyframes. Ein Ordner mit nur einem der beiden wurde frueher
+        # angenommen - der Copy-Mode blieb danach trotzdem aus, ohne dass
+        # jemand sagte warum.
+        from path_manager import fehlende_werkzeuge_im_ordner, programmname
+        fehlt = fehlende_werkzeuge_im_ordner(folder)
+        if fehlt:
+            QMessageBox.critical(
+                self, "Invalid FFmpeg folder",
+                "%s not found in:\n%s\n\n"
+                "Copy mode needs %s and %s in the same folder."
+                % (" and ".join(programmname(n) for n in fehlt), folder,
+                   programmname("ffmpeg"), programmname("ffprobe")))
             return
     
-        # store in QSettings
-        s = QSettings("KVRouite", "KVRouite")
-        s.setValue("paths/ffmpeg", folder)
+        # store in QSettings (Name je nach System - siehe path_manager)
+        from path_manager import ffmpeg_ordner_merken
+        ffmpeg_ordner_merken(folder)
     
         # optionally add to PATH
         old_path = os.environ.get("PATH", "")
@@ -2286,8 +2295,8 @@ class MainWindow(QMainWindow):
         so that next time it might auto-detect or prompt again.
         """
        
-        s = QSettings("KVRouite", "KVRouite")
-        s.remove("paths/ffmpeg")
+        from path_manager import ffmpeg_ordner_vergessen
+        ffmpeg_ordner_vergessen()
     
         QMessageBox.information(self, "FFmpeg Path cleared",
             "The FFmpeg path has been removed from QSettings.")
@@ -8968,8 +8977,12 @@ class MainWindow(QMainWindow):
 
         help_html = """
         <style>
-          body { font-family: Segoe UI, sans-serif; font-size: 12.5px; }
-          code { font-family: Consolas, monospace; }
+          /* Die Liste wird von links nach rechts abgearbeitet, die erste
+             vorhandene Schrift gewinnt: Windows nimmt Segoe UI und Consolas,
+             macOS Helvetica Neue und Menlo, Linux DejaVu. Der Name mit
+             Leerzeichen gehoert in Anfuehrungszeichen. */
+          body { font-family: "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif; font-size: 12.5px; }
+          code { font-family: Consolas, Menlo, "DejaVu Sans Mono", monospace; }
           table { border-collapse: collapse; width: 100%; }
           th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #ddd; vertical-align: top; }
           th { background: #f3f3f3; }
@@ -9564,7 +9577,7 @@ class MainWindow(QMainWindow):
                     disp_latest  = re.sub(r'^[vV]', '', str(newest_stable or ""))
                     html = (
                         "<html><head><style>"
-                        "td{font-family:Consolas,'DejaVu Sans Mono',monospace;font-size:10pt}"
+                        "td{font-family:Consolas,Menlo,'DejaVu Sans Mono',monospace;font-size:10pt}"
                         "td.label{white-space:nowrap}"
                         "td.val{text-align:right;padding-left:12px;min-width:4em}"
                         "</style></head><body>"
@@ -9603,7 +9616,7 @@ class MainWindow(QMainWindow):
 
             html = (
                 "<html><head><style>"
-                "td{font-family:Consolas,'DejaVu Sans Mono',monospace;font-size:10pt}"
+                "td{font-family:Consolas,Menlo,'DejaVu Sans Mono',monospace;font-size:10pt}"
                 "td.label{white-space:nowrap}"
                 "td.val{text-align:right;padding-left:12px;min-width:4em}"
                 "</style></head><body>"

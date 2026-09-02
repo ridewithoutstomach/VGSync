@@ -8,7 +8,7 @@ Versions up to and including 5.0 are documented in the GitHub releases only.
 
 ---
 
-## 6.02 - 2026-09-01
+## 6.02 - 2026-09-02
 
 The window was rebuilt. Until 6.01 the layout was fixed: video and map on the
 left, chart and GPX table on the right, and the timeline squeezed in beside the
@@ -99,6 +99,50 @@ button when the hint opens, so it stays correct if the icon changes again.
 
 It was fixed at 45 pixels while the label needs more, so the G was clipped.
 
+**Button symbols follow the colour scheme**
+
+The symbols are single-colour drawings on white or transparent ground - black
+lines that vanish on a dark button. They are now recoloured at runtime: the
+darkness of a pixel becomes its opacity, so only the drawing is left and it is
+painted in the colour that fits. Whether a symbol is recoloured is decided by
+its measured saturation, not by a list: below 60 it counts as a line drawing,
+above it stays as it is. That is why the red and green VG marks are untouched.
+
+The same applies to Play, Pause, forward and back. Those are not files at all
+but symbols of the Qt style, which draws them black regardless of the palette.
+
+Two buttons in the GPX bar carried emoji: the scissors as U+2702 followed by
+variation selector 16 - the explicit request for the emoji rendering, which
+Windows paints in its own colour and which ignores the text colour. With the
+text variant (U+FE0E) the colour disappears: 63 coloured pixels became 0. The
+minus sign U+2796 stays an emoji even then, so it is a plain em dash now.
+
+**Chart position marker is quieter**
+
+The marker was a 2 pixel line in pure white across the full height. Against the
+chart ground that is a contrast of 15.9:1 - it read as a bar rather than a
+marker, especially at the very left where it sits while the position is at
+zero. It is 1 pixel now and slightly transparent, which brings it to 7.8:1.
+
+It disappears where it crosses the yellow elevation curve, but that was true
+before as well: white on yellow is 1.07:1 either way.
+
+**ffmpeg is looked for the same way on every system**
+
+There were two functions with different order and different places, and Linux
+had no list of its own at all. There is one now: the folder set by hand, then
+the PATH, then the usual places of the system - `/opt/homebrew/bin` and
+`/usr/local/bin` on macOS, the Program Files folders on Windows, `/usr/bin` and
+`/snap/bin` on Linux.
+
+**Fallback fonts for macOS and Linux**
+
+The help and version windows asked for Segoe UI and Consolas, which exist on
+Windows only. On a Mac the request fell through to a generic name Qt does not
+know under that alias. The lists now continue with Helvetica Neue and Menlo,
+then DejaVu, then the generic family. Windows is unaffected - measured: Qt picks
+the same font as before, because Segoe UI and Consolas still come first.
+
 ### Added
 
 **Elevation profile inside the video picture**
@@ -116,6 +160,46 @@ in 360 mode still works underneath it.
 **"Video before cuts" in the GPX summary**
 
 The length of the original video, next to the length after cuts.
+
+**A dark colour scheme - Config > Theme**
+
+Until now the program set neither a style nor a palette; it took whatever
+Windows handed it. That was the reason for the dated look, and for a mismatch:
+chart `#222222`, timeline `#333333` and the video picture black have always
+been dark, while the frame around them was light.
+
+Two entries, Light and Dark, stored per user. Light is the default, so nobody
+gets a different program without asking for it, and it is identical to what was
+there before - checked by comparing the rendered window pixel by pixel.
+
+The window title bar belongs to Windows, not to Qt, and has to be told
+separately (`DWMWA_USE_IMMERSIVE_DARK_MODE`). Dialogs and message boxes are
+separate windows too, so a watcher colours each one as it appears; otherwise
+only the windows open at the time of switching would have followed.
+
+What is deliberately NOT dark: the map. It is content, like the video picture,
+and a dark map makes roads, contour lines and the GPX track harder to read.
+
+**The loaded project in the window title**
+
+`myproject.KVRouiteproj - KVRouite v6.01 - …`. The name comes first because
+the taskbar and the window switcher cut from the right.
+
+**macOS: the application installs and starts**
+
+`.github/workflows/macos.yml` runs on every push, on Apple Silicon and on Intel.
+What it establishes: the dependencies install, `check_ges.py` passes, the
+modules import, and the application runs for 25 seconds without exiting.
+
+What it does NOT establish, and what nobody should read into it: the run is
+headless (`QT_QPA_PLATFORM=offscreen`). Playback, cutting, export, the map and
+copy mode have not been exercised on a Mac even once. Nobody here owns one, so
+this workflow is the only place a Mac problem can surface before a user reports
+it. Treat macOS as new and unproven.
+
+Two defects on that path came out of the first run and are fixed above: the
+ffmpeg menu wrote to a key the search never read, and the help windows asked
+for fonts that exist on Windows only.
 
 ### Removed
 
@@ -153,6 +237,40 @@ Replaced by the Chart Flow module, see above.
 
 It now sits below it, matching the player. Beside being consistent, it keeps the
 top edge free for the window switch.
+
+**6.01 and 6.02 fought over the window layout**
+
+Until 6.01 there was ONE horizontal splitter in the window (left | right);
+since 6.02 it is a vertical one with three rows and two horizontal ones inside.
+Both wrote their state under the same key, `ui/splitter_state`. Anyone starting
+6.01 and 6.02 in turn got the other version's layout applied to their own
+structure - the window stood wrong afterwards, and "Reset Window Layout" helped
+only until the next switch.
+
+The four layout keys are now called `ui/*_grid`. The old names are left alone
+and belong to 6.01; both versions run side by side. Everything else in the
+settings stays shared on purpose - encoder setup, map keys, ffmpeg path, file
+history. It is the same machine and the same preferences.
+
+**The ffmpeg menu did nothing on macOS**
+
+The search at startup read `paths/ffmpeg_mac` there, but the menu
+Config > FFmpeg wrote to `paths/ffmpeg` on every system. A folder set by hand
+was therefore gone at the next start, "Show current path" displayed a value
+nobody used, and "Clear ffmpeg Path" removed the wrong entry. Both sides now go
+through the same four functions in `path_manager.py`, which know the name for
+the system they are on.
+
+**A folder with only ffmpeg was accepted**
+
+Copy mode needs both programs - ffmpeg cuts on the keyframes, ffprobe indexes
+them and measures the segment lengths. Only ffmpeg was checked, so such a folder
+was taken and added to the PATH, and copy mode stayed off regardless. To the
+user it looked as if setting the folder had done nothing.
+
+Both are required now, and the message says which one is missing, with the file
+name of the system it is on: "ffprobe.exe not found in: … Copy mode needs
+ffmpeg.exe and ffprobe.exe in the same folder."
 
 ---
 
