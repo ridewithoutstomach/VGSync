@@ -69,6 +69,13 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
+          echo "HINWEIS: Meldungen der Form 'This plugin does not support ...'"
+          echo "kommen vom Qt-Grafiktreiber 'offscreen', den dieser Test erzwingt."
+          echo "Er hat kein Fenstersystem, also sind raise(), lower(), setParent"
+          echo "und propagateSizeHints wirkungslos und werden gemeldet. Auf einem"
+          echo "echten Mac laeuft Qt ueber 'cocoa' und keine dieser Zeilen kommt vor."
+          echo "Sie sind KEINE Fehler. Massgeblich ist die ERGEBNIS-Zeile unten."
+          echo
           python - <<'PY'
           import sys
           from PySide6.QtCore import QSettings
@@ -118,6 +125,151 @@ jobs:
               print("ERGEBNIS: KEIN Hauptfenster - die App kam nicht so weit.")
               sys.exit(1)
           PY
+
+      - name: GPX-Parser pruefen
+        run: |
+          cat > ci_test.gpx <<'GPX'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <gpx version="1.1" creator="KVRouite-CI" xmlns="http://www.topografix.com/GPX/1/1">
+            <trk><name>CI</name><trkseg>
+              <trkpt lat="50.9400" lon="6.9600"><ele>50.0</ele><time>2026-01-01T10:00:00Z</time></trkpt>
+              <trkpt lat="50.9410" lon="6.9610"><ele>55.0</ele><time>2026-01-01T10:00:02Z</time></trkpt>
+              <trkpt lat="50.9420" lon="6.9620"><ele>60.0</ele><time>2026-01-01T10:00:04Z</time></trkpt>
+              <trkpt lat="50.9430" lon="6.9630"><ele>58.0</ele><time>2026-01-01T10:00:06Z</time></trkpt>
+              <trkpt lat="50.9440" lon="6.9640"><ele>62.0</ele><time>2026-01-01T10:00:08Z</time></trkpt>
+            </trkseg></trk>
+          </gpx>
+          GPX
+          python - <<'PY'
+          import sys
+          from core.gpx_parser import parse_gpx, recalc_gpx_data
+
+          punkte = parse_gpx("ci_test.gpx")
+          print("Punkte gelesen:", len(punkte))
+          if len(punkte) != 5:
+              print("ERGEBNIS: erwartet 5 Punkte, bekommen", len(punkte))
+              sys.exit(1)
+          print("erster Punkt:", punkte[0])
+
+          recalc_gpx_data(punkte)
+          letzter = punkte[-1]
+          print("letzter Punkt nach recalc:", letzter)
+          print("ERGEBNIS: GPX-Parser arbeitet.")
+          PY
+
+      - name: Export-Test - echtes Rendern ueber GES
+        timeout-minutes: 10
+        run: |
+          python - <<'PY'
+          import json, os, sys
+          import gi
+          gi.require_version("Gst", "1.0")
+          gi.require_version("GstPbutils", "1.0")
+          from gi.repository import Gst, GstPbutils
+          Gst.init(None)
+
+          # ---- 1. Testmaterial erzeugen -----------------------------------
+          # 8 Sekunden 640x360 bei 30 fps, ohne Ton - der Export von KVRouite
+          # rendert ohnehin "MP4 without audio".
+          QUELLE = os.path.abspath("ci_quelle.mp4")
+          rohr = Gst.parse_launch(
+              "videotestsrc num-buffers=240 pattern=ball ! "
+              "video/x-raw,width=640,height=360,framerate=30/1 ! "
+              "x264enc key-int-max=30 ! mp4mux ! "
+              f"filesink location={QUELLE}")
+          rohr.set_state(Gst.State.PLAYING)
+          nachricht = rohr.get_bus().timed_pop_filtered(
+              30 * Gst.SECOND, Gst.MessageType.EOS | Gst.MessageType.ERROR)
+          rohr.set_state(Gst.State.NULL)
+          if nachricht is None or nachricht.type == Gst.MessageType.ERROR:
+              print("Testvideo konnte nicht erzeugt werden:",
+                    nachricht.parse_error() if nachricht else "Zeitueberschreitung")
+              sys.exit(1)
+          print(f"Testvideo: {os.path.getsize(QUELLE)} Bytes")
+
+          def pruefen(pfad):
+              """Dauer in Sekunden und Videocodec einer Datei."""
+              disc = GstPbutils.Discoverer.new(20 * Gst.SECOND)
+              info = disc.discover_uri(Gst.filename_to_uri(pfad))
+              vs = info.get_video_streams()[0]
+              caps = vs.get_caps().to_string().split(",")[0]
+              return info.get_duration() / Gst.SECOND, caps, vs.get_width(), vs.get_height()
+
+          dauer, codec, br, ho = pruefen(QUELLE)
+          print(f"  Quelle: {dauer:.2f}s, {codec}, {br}x{ho}")
+
+          # ---- 2. Welche Encoder gibt es hier ueberhaupt? ------------------
+          for name in ("x264enc", "x265enc"):
+              da = Gst.ElementFactory.make(name, None) is not None
+              print(("  vorhanden: " if da else "  FEHLT   : ") + name)
+
+          # ---- 3. Export fahren -------------------------------------------
+          # Genau der Weg, den auch encoder_manager.py:488 geht.
+          from managers.ges_encoder_manager import ges_xfade_main
+
+          ZIEL = os.path.abspath("ci_export.mp4")
+          cfg = {
+              "videos": [QUELLE],
+              # 3.0s bis 5.0s herausschneiden, mit 1 s Ueberblendung am Schnitt
+              "skip_instructions": [[3.0, 5.0, 1.0]],
+              "overlay_instructions": [],
+              "final_output": ZIEL,
+              "encoder": "libx264",
+              "hardware_encode": "none",
+              "crf": 28,
+              "fps": "30/1",
+              "width": 640,
+          }
+          with open("ci_cfg.json", "w", encoding="utf-8") as f:
+              json.dump(cfg, f)
+
+          print()
+          print("=== Ausgabe von ges_xfade_main ===")
+          ges_xfade_main("ci_cfg.json")
+          print("=== Ende der Ausgabe ===")
+          print()
+
+          # ---- 4. Ergebnis pruefen ----------------------------------------
+          if not os.path.isfile(ZIEL):
+              print("ERGEBNIS: Es wurde keine Datei erzeugt.")
+              sys.exit(1)
+          groesse = os.path.getsize(ZIEL)
+          dauer_z, codec_z, br_z, ho_z = pruefen(ZIEL)
+          print(f"  Ergebnis: {groesse} Bytes, {dauer_z:.2f}s, {codec_z}, {br_z}x{ho_z}")
+
+          # 8s Quelle minus 2s Schnitt = rund 6s. Grosszuegige Grenzen, weil
+          # die Ueberblendung die Laenge leicht verschiebt.
+          fehler = []
+          if groesse < 10000:
+              fehler.append(f"Datei ist mit {groesse} Bytes zu klein")
+          if not (5.0 <= dauer_z <= 7.0):
+              fehler.append(f"Dauer {dauer_z:.2f}s liegt nicht bei den erwarteten ~6s")
+          if "h264" not in codec_z:
+              fehler.append(f"unerwarteter Codec: {codec_z}")
+          if (br_z, ho_z) != (640, 360):
+              fehler.append(f"unerwartete Groesse: {br_z}x{ho_z}")
+
+          if fehler:
+              for f_ in fehler:
+                  print("  PROBLEM:", f_)
+              print("ERGEBNIS: Export lief, das Ergebnis stimmt aber nicht.")
+              sys.exit(1)
+
+          print("ERGEBNIS: Export ueber GES funktioniert - Schnitt, Ueberblendung "
+                "und x264-Kodierung inbegriffen.")
+          PY
+
+      - name: Ergebnisvideo zum Herunterladen bereitstellen
+        if: always()          # auch bei Fehlschlag, dann sieht man das Bruchstueck
+        uses: actions/upload-artifact@v4
+        with:
+          name: export-${{ matrix.os }}
+          path: |
+            ci_export.mp4
+            ci_quelle.mp4
+            ci_cfg.json
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: GStreamer-Plugins auflisten (zur Information)
         if: always()

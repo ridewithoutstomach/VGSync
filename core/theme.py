@@ -161,7 +161,12 @@ def ist_dunkel(modus: str = None) -> bool:
 
 
 def _schrift_setzen(app) -> str:
-    """Die Oberflaechenschrift von Windows 11, wenn vorhanden.
+    """Die Oberflaechenschrift des jeweiligen Systems, wenn vorhanden.
+
+    WIRD DERZEIT NICHT AUFGERUFEN. anwenden() laesst die Schrift bewusst in
+    Ruhe, damit "Light" genau der Zustand von vor 6.02 bleibt. Die Funktion
+    steht bereit, falls die Oberflaechenschrift einmal zur Wahl stehen soll -
+    und dann soll sie auf jedem System etwas finden, nicht nur auf Windows.
 
     Nur die Familie wird gesetzt, nicht die Groesse: mehrere Knoepfe haben
     eine feste Breite, eine groessere Schrift wuerde ihre Beschriftung
@@ -169,7 +174,10 @@ def _schrift_setzen(app) -> str:
     """
     from PySide6.QtGui import QFontDatabase
     vorhanden = set(QFontDatabase.families())
-    for name in ("Segoe UI Variable Text", "Segoe UI", "Inter", "Noto Sans"):
+    kandidaten = ("Segoe UI Variable Text", "Segoe UI",   # Windows
+                  "SF Pro Text", "Helvetica Neue",        # macOS
+                  "Inter", "Noto Sans", "DejaVu Sans")    # Linux
+    for name in kandidaten:
         if name in vorhanden:
             schrift = app.font()
             if schrift.family() != name:
