@@ -41,6 +41,7 @@ liegen die Web-Dateien deshalb, obwohl Contents/Resources der uebliche Ort
 waere. Wer das umstellen will, aendert zuerst die Suche im Programm.
 """
 
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -75,6 +76,87 @@ def lauf(befehl):
     subprocess.run(befehl, check=True)
 
 
+#: Die gi-Module, deren PyInstaller-Hooks auf ein systemweit installiertes
+#: GObject-Introspection ausgelegt sind. Aus dem fehlgeschlagenen Lauf vom
+#: 02.09.2026 - jedes davon meldete "Unable to find gir directory", und bei
+#: Gio brach der Build ab.
+#
+#: "gi" selbst steht ABSICHTLICH nicht in der Liste: dessen Hook sammelt die
+#: Python-Overrides von PyGObject, die zur Laufzeit gebraucht werden. Nur die
+#: Hooks der einzelnen Bibliotheken suchen an Systemorten.
+GI_MODULE = (
+    "gi.repository.GLib", "gi.repository.GObject", "gi.repository.GModule",
+    "gi.repository.Gio", "gi.repository.Gst", "gi.repository.GstBase",
+    "gi.repository.GstApp", "gi.repository.GstAudio", "gi.repository.GstVideo",
+    "gi.repository.GstController", "gi.repository.GstPbutils",
+    "gi.repository.GstGL", "gi.repository.GstNet", "gi.repository.GstTag",
+    "gi.repository.GstRtp", "gi.repository.GstSdp", "gi.repository.GstCheck",
+    "gi.repository.GES",
+)
+
+
+def hooks_verzeichnis_anlegen():
+    """Ein Hook-Verzeichnis, das die eingebauten gi-Hooks stilllegt.
+
+    Warum das noetig ist: PyInstaller bringt fuer jedes gi.repository-Modul
+    einen Hook mit, der die Bibliothek ueber den SYSTEMWEITEN Weg sucht -
+    share/gir-1.0 und die dylibs an den ueblichen Orten. Bei uns kommt
+    GStreamer aus den Wheels: die Typelibs liegen in
+    gstreamer_libs/lib/girepository-1.0, ein gir-Verzeichnis gibt es gar
+    nicht. Unter Windows faellt das nicht auf, weil die .pth-Datei den PATH
+    setzt und die DLLs dort gefunden werden. Auf macOS brach der Lauf ab mit
+    "Could not resolve any shared library of Gio 2.0".
+
+    Die eigenen Hooks sind leer. Sie sammeln nichts, sie suchen nichts - was
+    gebraucht wird, holen die --collect-all der gstreamer-Pakete ohnehin
+    heran, samt der Typelibs.
+
+    PyInstaller durchsucht die zusaetzlichen Verzeichnisse vor den eigenen;
+    ein gleichnamiger Hook hier ersetzt also den eingebauten.
+    """
+    ordner = os.path.join(BASE_DIR, "build", "hooks_macos")
+    if os.path.isdir(ordner):
+        shutil.rmtree(ordner)
+    os.makedirs(ordner)
+    for modul in GI_MODULE:
+        pfad = os.path.join(ordner, "hook-%s.py" % modul)
+        with open(pfad, "w", encoding="utf-8") as f:
+            f.write("# Erzeugt von build_macos.py - siehe dort die Begruendung.\n")
+            f.write("# Legt den eingebauten Hook fuer %s still.\n" % modul)
+            f.write("hiddenimports = []\n")
+            f.write("datas = []\n")
+            f.write("binaries = []\n")
+            f.write("excludedimports = []\n")
+    print("[INFO] %d eigene gi-Hooks in %s" % (len(GI_MODULE), ordner))
+    return ordner
+
+
+def vorhandene_gstreamer_pakete():
+    """Welche der GStreamer-Pakete auf DIESEM Rechner installiert sind.
+
+    --collect-all fuer ein Paket, das es nicht gibt, laesst PyInstaller sofort
+    abbrechen. Unter Windows liegen alle elf im Wheel; ob das auf macOS ebenso
+    ist, entscheidet das dortige Wheel und nicht diese Liste. Deshalb wird
+    gefragt statt angenommen - und was fehlt, steht im Log, damit man sieht,
+    womit gebaut wurde.
+    """
+    da, fehlt = [], []
+    for paket in GSTREAMER_PAKETE:
+        if importlib.util.find_spec(paket) is not None:
+            da.append(paket)
+        else:
+            fehlt.append(paket)
+    print("[INFO] GStreamer-Pakete installiert: %d von %d"
+          % (len(da), len(GSTREAMER_PAKETE)))
+    for p in fehlt:
+        print("   nicht installiert:", p)
+    if not da:
+        raise SystemExit("[ABBRUCH] Kein einziges GStreamer-Paket gefunden - "
+                         "ohne die Laufzeit hat ein Buendel keinen Sinn. "
+                         "Wurde requirements.txt installiert?")
+    return da
+
+
 def buendel_bauen(ziel_ordner):
     """PyInstaller aufrufen. Rueckgabe: Pfad des .app-Buendels."""
     symbol = os.path.join(BASE_DIR, "MyIcon.icns")
@@ -93,8 +175,10 @@ def buendel_bauen(ziel_ordner):
     ]
     if os.path.isfile(symbol):
         befehl.append("--icon=" + symbol)
-    # GStreamer muss ausdruecklich mit - dieselben Pakete wie unter Windows.
-    befehl += ["--collect-all=" + paket for paket in GSTREAMER_PAKETE]
+    befehl.append("--additional-hooks-dir=" + hooks_verzeichnis_anlegen())
+    # GStreamer muss ausdruecklich mit, aber nur was da ist: ein --collect-all
+    # auf ein fehlendes Paket bricht PyInstaller sofort ab.
+    befehl += ["--collect-all=" + paket for paket in vorhandene_gstreamer_pakete()]
     befehl.append("KVRouite.py")
     lauf(befehl)
 
@@ -171,14 +255,15 @@ def gstreamer_pruefen(buendel):
     im ganzen Buendel, weil PyInstaller auf macOS anders einsortiert als unter
     Windows - Contents/Frameworks statt _internal.
     """
+    erwartet = vorhandene_gstreamer_pakete()
     gefunden = set()
     for _wurzel, ordner, _dateien in os.walk(buendel):
         for name in ordner:
-            if name in GSTREAMER_PAKETE:
+            if name in erwartet:
                 gefunden.add(name)
-    fehlend = [p for p in GSTREAMER_PAKETE if p not in gefunden]
-    print("[LIZENZ] GStreamer im Buendel: %d von %d Paketen."
-          % (len(gefunden), len(GSTREAMER_PAKETE)))
+    fehlend = [p for p in erwartet if p not in gefunden]
+    print("[LIZENZ] GStreamer im Buendel: %d von %d installierten Paketen."
+          % (len(gefunden), len(erwartet)))
     for p in sorted(gefunden):
         print("   vorhanden:", p)
     for p in fehlend:
