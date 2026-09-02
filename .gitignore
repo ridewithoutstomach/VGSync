@@ -72,3 +72,11 @@ GPL_Compliance_Notice_Kinomap.md
 CORRESPONDING_SOURCE_PLAN.md
 AUFBEWAHRUNG_FRISTEN.md
 
+# Testvideos und Testprojekte - Arbeitsmaterial, gehoert nicht ins Repo.
+*.mp4
+*.mov
+*.mkv
+*.KVRouiteproj
+
+# Vorlagen fuer die Release-Beschreibung auf GitHub - nur lokal gebraucht.
+RELEASE*.md
