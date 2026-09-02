@@ -26,6 +26,7 @@ Die Farbtafel steht bewusst an EINER Stelle. Wer spaeter die Stylesheets in
 den Widgets darauf umstellt, aendert Farben dann hier und nicht an 42 Stellen.
 """
 
+import os
 import sys
 
 from PySide6.QtCore import QEvent, QObject, QSettings, QTimer
@@ -378,6 +379,12 @@ def icon(pfad: str) -> QIcon:
     Der Weg ueber eine Funktion statt zweier Dateisaetze: die Symbole liegen
     nur einmal im Projekt, und ein neues Symbol zieht von selbst mit.
     """
+    # Ein relativer Pfad wuerde gegen das ARBEITSVERZEICHNIS aufgeloest. Beim
+    # Doppelklick auf ein macOS-Buendel ist das "/", und dann fehlt jedes
+    # Symbol. Deshalb ueber config.finde_datei().
+    if not os.path.isabs(pfad):
+        from config import finde_datei
+        pfad = finde_datei(*pfad.replace("\\", "/").split("/"))
     schluessel = (pfad, ist_dunkel())
     fertig = _icon_merker.get(schluessel)
     if fertig is not None:

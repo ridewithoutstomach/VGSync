@@ -41,6 +41,61 @@ APP_VERSION = "6.02"
 # 2) Hilfsfunktionen/Pfade
 ##############################################################################
 
+def programm_ordner() -> str:
+    """Der Ordner, in dem das laufende Programm liegt.
+
+    Gepackt ist das der Ordner der ausfuehrbaren Datei - unter Windows der mit
+    KVRouite.exe, im macOS-Buendel Contents/MacOS. Ungepackt das
+    Projektverzeichnis. Bewusst NICHT sys._MEIPASS: das ist bei einem
+    onedir-Build der Unterordner _internal, und die Symbole liegen daneben,
+    nicht darin.
+    """
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def datenordner_liste():
+    """Alle Orte, an denen mitgelieferte Dateien liegen koennen.
+
+    Es sind mehrere, und das hat einen Grund: die beiden Builds legen nicht
+    alles am selben Ort ab. Symbole und die Kartenseite liegen NEBEN dem
+    Programm, das Kinomap-Logo und die PDF unter Windows in _internal (also
+    sys._MEIPASS), im macOS-Buendel dagegen in Contents/Resources. Statt einen
+    der Builds umzustellen und dabei den anderen zu brechen, wird hier
+    gesucht - in dieser Reihenfolge.
+    """
+    orte = [programm_ordner()]
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        orte.append(meipass)
+    if getattr(sys, "frozen", False):
+        # macOS-Buendel: Contents/MacOS -> Contents/Resources
+        contents = os.path.dirname(programm_ordner())
+        orte.append(os.path.join(contents, "Resources"))
+    orte.append(os.path.dirname(os.path.abspath(__file__)))
+    # Reihenfolge behalten, Doppelte raus
+    gesehen, sauber = set(), []
+    for o in orte:
+        if o and o not in gesehen:
+            gesehen.add(o)
+            sauber.append(o)
+    return sauber
+
+
+def finde_datei(*teile) -> str:
+    """Eine mitgelieferte Datei suchen. Rueckgabe: der gefundene Pfad.
+
+    Wird nichts gefunden, kommt der Pfad im ersten Ort zurueck - dann zeigt
+    eine Fehlermeldung wenigstens dorthin, wo die Datei erwartet wurde.
+    """
+    for wurzel in datenordner_liste():
+        kandidat = os.path.join(wurzel, *teile)
+        if os.path.exists(kandidat):
+            return kandidat
+    return os.path.join(datenordner_liste()[0], *teile)
+
+
 def _get_app_base_dir() -> str:
     """
     Gibt den Verzeichnis-Pfad zurück, in dem deine *laufende* Executable liegt.

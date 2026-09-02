@@ -84,6 +84,23 @@ jobs:
           /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$BUENDEL/Contents/Info.plist" || true
           /usr/libexec/PlistBuddy -c "Print :CFBundleName" "$BUENDEL/Contents/Info.plist" || true
 
+      - name: Selbsttest im gebauten Buendel
+        timeout-minutes: 15
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          BUENDEL=$(find dist -maxdepth 2 -name "KVRouite.app" -type d | head -1)
+          PROG="$BUENDEL/Contents/MacOS/KVRouite"
+          echo "Der eigentliche Test: das Buendel prueft sich selbst."
+          echo "Es findet seine Dateien, laedt die Symbole, liest und schreibt"
+          echo "GPX und schneidet ein Video - siehe selftest.py."
+          echo
+          # Aus einem FREMDEN Ordner starten. Beim Doppelklick auf ein Buendel
+          # ist das Arbeitsverzeichnis nicht der Programmordner, und genau
+          # daran sind die Symbole zuerst gescheitert.
+          cd /
+          "$OLDPWD/$PROG" --selftest
+
       - name: Startet das gebaute Buendel?
         timeout-minutes: 5
         env:

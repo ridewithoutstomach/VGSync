@@ -80,8 +80,8 @@ class MapWidget(QWidget):
         self.view.page().setWebChannel(self._channel)
 
         # map_page.html laden
-        base_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
-        html_path = os.path.join(base_dir, "map_page.html")
+        from config import finde_datei
+        html_path = finde_datei("map_page.html")
         self._html_url = QUrl.fromLocalFile(html_path)
         self.view.load(QUrl.fromLocalFile(html_path))
 

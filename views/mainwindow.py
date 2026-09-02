@@ -1667,8 +1667,11 @@ class MainWindow(QMainWindow):
 
     def _on_show_documentation(self):
         # Pfad zum PDF ermitteln
-        base_dir = os.path.dirname(os.path.dirname(__file__))
-        pdf_path = os.path.join(base_dir, "doc", "Documentation.pdf")
+        # Ueber config.finde_datei(), weil die PDF je nach Build woanders
+        # liegt: unter Windows in _internal/doc, im macOS-Buendel in
+        # Contents/Resources/doc.
+        from config import finde_datei
+        pdf_path = finde_datei("doc", "Documentation.pdf")
 
         if not os.path.isfile(pdf_path):
             QMessageBox.warning(self, "Not found", f"File not found: {pdf_path}")
@@ -4536,10 +4539,9 @@ class MainWindow(QMainWindow):
         msg = QMessageBox(self)
         msg.setWindowTitle("Copyright")
     
-        # Korrekter Logo-Pfad
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        project_dir = os.path.dirname(base_dir)
-        logo_path = os.path.join(project_dir, "doc", "Kinomap_Logo.png")
+        # Ueber config.finde_datei() - siehe dort, warum mehrere Orte.
+        from config import finde_datei
+        logo_path = finde_datei("doc", "Kinomap_Logo.png")
     
         # Logo als Base64 kodieren für direkte Einbettung in HTML
         logo_base64 = ""

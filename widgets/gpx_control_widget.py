@@ -351,9 +351,8 @@ class GPXControlWidget(QWidget):
         #self._info_layout.insertStretch(0)  # links
         self._info_layout.addStretch()      # rechts
         # ===== Rechts: großes Kinomap-Logo über volle Höhe =====
-        base_dir    = os.path.dirname(os.path.abspath(__file__))
-        project_dir = os.path.dirname(base_dir)
-        logo_path   = os.path.join(project_dir, "doc", "Kinomap_Logo.png")  # dein Logo-Pfad
+        from config import finde_datei
+        logo_path = finde_datei("doc", "Kinomap_Logo.png")
        
         self._kinomap_big = QLabel(self)
         self._kinomap_big.setToolTip("Open Kinomap")

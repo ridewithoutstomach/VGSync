@@ -66,6 +66,11 @@ def _is_verbose():
     a = " ".join(sys.argv).lower()
     if " -v" in a or " --verbose" in a:
         return True
+    # Beim Selbsttest muss die Ausgabe sichtbar bleiben - sie IST das
+    # Ergebnis. Ohne das laeuft er zwar, sagt aber nichts, und ein
+    # Rueckgabewert allein hilft bei der Fehlersuche nicht weiter.
+    if "--selftest" in sys.argv:
+        return True
     try:
         from PySide6.QtCore import QSettings
         if QSettings("KVRouite","KVRouite").value("app/debug", False, type=bool):
@@ -345,6 +350,20 @@ def _file_arg_from_cli(argv):
 
 
 def main():
+    # Selbsttest statt Oberflaeche: prueft, ob die Anwendung wirklich
+    # arbeitet - Dateien finden, Symbole laden, GPX lesen und schreiben, ein
+    # Video schneiden und ausgeben. Gedacht fuer das FERTIGE Programm:
+    #
+    #     KVRouite.exe --selftest
+    #     KVRouite.app/Contents/MacOS/KVRouite --selftest
+    #
+    # Ein Startversuch beweist nur, dass nichts abstuerzt. Ob ein gepacktes
+    # Programm seine mitgelieferten Dateien findet, zeigt erst dieser Weg -
+    # und genau daran ist das macOS-Buendel zuerst gescheitert.
+    if "--selftest" in sys.argv:
+        import selftest
+        sys.exit(selftest.alles_pruefen())
+
     # Workaround bei manchen Grafikkarten
     
     
