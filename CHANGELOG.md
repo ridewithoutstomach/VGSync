@@ -8,6 +8,356 @@ Versions up to and including 5.0 are documented in the GitHub releases only.
 
 ---
 
+## 6.03 - 2026-09-03
+
+Two strands. Taking a cut back arrived in 6.02 and only half worked. It was gone
+after every *Open Project*, it produced a silently wrong track if cuts were
+taken back in the wrong order, and it existed for middle cuts only. All three
+are fixed, and the first and the last cut can now be taken back as well.
+
+The second strand comes from two user reports. One found that the macOS bundle
+had been changed after signing; the other could select his GPU in the encoder
+setup and never export with it. Both were real, both are fixed - and both got
+away because nothing was checking. The build plan now proves what it used to
+assume, down to a counter-test that damages a copy on purpose to show that the
+check has teeth.
+
+### Fixed
+
+**Undo Cut survives Open Project**
+
+What a cut removed from the GPX track was recorded beside the cut list - but
+only in memory. `save_project()` never wrote it and `process_open_project()`
+never read it, so a loaded project started with an empty record and the first
+check in `ruecknahme_moeglich()` greyed out every single cut. The message it
+showed was written for older project files and said so, but it fired for every
+file, including one saved a minute earlier.
+
+The record now goes into the project file as `cut_points`. As a list and not as
+a dict, because the key is a pair of numbers and JSON only has text keys; start
+and end sit inside each entry and the key is rebuilt from them when loading.
+Times travel as text (`json.dump(default=str)`) and come back with
+`datetime.fromisoformat()` - the same route `gpx_data` has always taken.
+Measured: `2025-01-01 12:00:00.123456` returns to the microsecond. Entries
+without a start or without removed points are not taken over at all; they would
+offer something in the menu that cannot deliver.
+
+Older project files have no such key and behave exactly as before - and the
+message about a project saved before this function existed is finally true for
+them.
+
+**The fingerprint of the track is saved, not recomputed**
+
+This is the part that decides whether the record above may be trusted, and it is
+easy to get wrong in the obvious way. Computing the fingerprint from the track
+that was just loaded would always match, and every record would be released
+unchecked - including in a project where `chT`, *Close Gaps* or *Resample* ran
+between the last cut and saving. What is saved is therefore the fingerprint of
+the last own action (`gpx_fingerabdruck`). If the loaded track does not match
+it, the existing blocks in `ruecknahme_moeglich()` do their work, exactly as in
+the session the cut was made in.
+
+A check against the track itself was built first and then thrown out again: the
+idea was that every middle cut leaves a seam at its start, so a missing point at
+`beginn_dt` would betray shifted times. Measured, it does not - after a shift by
+whole seconds a *different* point sits on the seam and the check passes. The
+fingerprint from the file catches that case; see `check_cut_undo.py`.
+
+**Cuts can be taken back in any order**
+
+A record stands in the time frame the track had when the cut was made. Take an
+earlier cut back and everything behind it moves - the records of the later cuts
+then point into the void, and the track comes back silently wrong. Measured on a
+track of 60 points with two cuts: taking the front one back first left 11 of 60
+points off, with no complaint anywhere.
+
+`aufzeichnungen_nachfuehren()` now moves the records that lie behind a change by
+the same amount. It runs in three places: after a cut is taken back, after a new
+cut is made in front of existing records, and after a start cut - which moves
+the whole axis and therefore moves every record, not only those behind it. The
+one exception is a start cut's own record: it lives in the frame from *before*
+its rebasing and must stay put when a cut behind it is taken back, otherwise its
+`beginn_dt` no longer points at the seam.
+
+**AutoCutVideo+GPX is remembered**
+
+Two causes, and they hid each other. The state was never saved; it was derived
+when loading from whether a GPX/video shift stood in the file. That missed two
+cases - switched on without a shift, and switched off with one, where loading
+even turned it back on. And the derivation ran too early: it stood about fifty
+lines ahead of the point where the edit mode is restored, and
+`enableVideoGpxSync()` asks the edit mode:
+
+    self._on_auto_sync_video_toggled(enable and self._edit_mode != "off")
+
+At program start `_edit_mode` is `"off"`, so the wanted `True` became `False` -
+the switch was not merely left alone, it was actively turned off. Loading a
+project into a running session that was already in encode mode worked, which is
+why it looked erratic. The state is now saved as `auto_sync` and restored behind
+the edit mode. Older files fall back to the old derivation.
+
+**The macOS bundle broke its own signature - twice**
+
+A user analysed the 6.02 bundle and reported `a sealed resource is missing or
+invalid`, followed by a list of files. The list was, line for line, our own copy
+list: `build_macos.py` let PyInstaller build and sign the bundle and only
+afterwards copied `ol.css`, `map_page.html`, `icon/` and the licence texts into
+it. Everything that arrives after signing is outside the seal.
+
+It went unnoticed because a build server cannot see it. Gatekeeper only looks at
+files carrying `com.apple.quarantine`, which a browser sets while downloading -
+a bundle built and started on the same machine has no such mark. And a broken
+resource seal does not prevent starting: macOS checks the signature of the main
+executable, which was untouched. The run was green and the bundle was broken.
+
+Signing is now the last step that touches the bundle, followed immediately by
+`codesign --verify --deep --strict`.
+
+The second cause only showed up because of the new check: GStreamer wrote its
+plugin list into `Contents/Frameworks/registry.bin` on first start, so the
+bundle destroyed its own seal at the first double-click. Nobody in this project
+asked for that path - PyInstaller does, in its own start-up script
+`PyInstaller/hooks/rthooks/pyi_rth_gstreamer.py`:
+
+    os.environ['GST_REGISTRY'] = os.path.join(sys._MEIPASS, 'registry.bin')
+
+`sys._MEIPASS` is `Contents/Frameworks` in a macOS bundle. The first attempt at
+a fix changed nothing, because it kept an existing value out of respect for the
+user - and that value came from PyInstaller. A value now stands only if it does
+*not* point into the program itself; the plugin list goes to the user's cache
+directory (`~/Library/Caches/KVRouite`, `~/.cache/KVRouite`,
+`%LOCALAPPDATA%\KVRouite`), where a cache belongs.
+
+Windows was affected as well, and there the change fixed a second thing:
+`GST_REGISTRY` and `GST_REGISTRY_1_0` held different values afterwards, because
+the GStreamer wheel overwrites the second one. In that state the built EXE wrote
+no plugin list at all and rebuilt it at every start. Measured on the 6.03 EXE:
+before, no file anywhere; after, 1.69 MB in `%LOCALAPPDATA%\KVRouite`.
+
+**GPU encoders were offered and could not be used**
+
+A user with a VAAPI card reported `[ERROR] Render settings were rejected` -
+before a single frame had run. *Detect HW* had offered `vaapi_h264`, and the
+export refused it.
+
+Both are right, and that is the point. Our detection builds a pipeline by hand
+and names the element (`videotestsrc ! videoconvert ! vah264enc ! fakesink`);
+naming an element ignores its rank. The export hands an encoding profile to
+`encodebin`, and encodebin picks its elements from the registry, considering
+only those from rank *marginal* (64) upwards. The VA elements ship with rank
+*none* - deliberately, so that no software grabs a GPU unasked (Igalia, the
+plugin's authors, on release 1.20: "GstVA elements are ranked NONE"). Our name
+then acts as a filter on a list the element is not on, and the whole profile is
+rejected.
+
+Measured on 03.09.2026 with GStreamer 1.28.6, no GPU involved, by setting the
+rank by hand:
+
+    encoder        rank as shipped   rank 0      rank 64
+    x264enc        256  -> works     rejected    works
+    openh264enc     64  -> works     rejected    works
+    x265enc        256  -> works     rejected    works
+
+"rejected" is word for word the message the user reported. With ffmpeg this
+could not happen: `-c:v h264_vaapi` is the choice, and there is no second way.
+The chosen encoder is therefore registered before the profile is handed over -
+raised to *marginal* for this program run only, nothing is stored. Verified on
+an NVIDIA card put artificially into the same position: without the step the
+export aborts, with it the same file comes out as with the original rank, byte
+for byte (42815 bytes).
+
+That also covers `d3d12h264enc`, `nvd3d11h264enc` and `nvautogpuh264enc`, which
+carry rank 0 on an ordinary Windows machine.
+
+**Detect HW tested a route the export does not take**
+
+The gap above was possible because the two used different mechanisms. In the
+ffmpeg era that could not drift apart. *Detect HW* now runs through
+`_profil()` and `_rendern()` - the same two functions every export uses - and
+writes half a second into a real MP4 file. What passes the test can export.
+A GES test clip serves as material, so no source file is needed: 1.10 s for all
+eight candidates (the hand-built pipeline took 0.65 s, the old ffmpeg test
+6.90 s).
+
+**No silent fall back to the CPU**
+
+If the GPU encoder set in the encoder setup is missing, the export used to
+switch to the CPU and say so only in the log. Whoever chooses a GPU wants the
+GPU; a half-speed export behind the user's back is not a service. Since the
+detection really exports, a missing element can only mean the machine changed -
+card removed, driver gone, package uninstalled. That now produces a clear
+message and no file.
+
+**Why a profile was rejected is now readable**
+
+`set_render_settings()` returns nothing but true or false. On failure the
+encoder window now lists what the registry says about the three requirements:
+target sink, muxer, and every encoder that can produce the wanted format, with
+its rank, the selected one marked. The reason also travels in the error message
+itself. This is what `gst-inspect-1.0` would show - without a terminal, and
+without the `gstreamer1.0-tools` package, which Linux users are not asked to
+install.
+
+**Failed to load module: giolibproxy**
+
+Printed at every start, on every platform. No file is missing; a search path is:
+`giolibproxy.dll` needs `proxy-1.dll` (in `bin/`, found) which needs
+`pxbackend-1.0.dll` in `lib/libproxy/`, and that subdirectory is not on the
+search path. Two otherwise identical processes: without that directory error
+126, with it the module loads. A packaging fault of the GStreamer wheels, not
+ours - and the module is not needed, it reads the system proxy settings for
+network access through GIO, while KVRouite reads local files and the map has its
+own network stack. It is left out of the build now. Its neighbour `gioopenssl`
+stays; that one loads fine.
+
+**The Linux setup instructions were wrong**
+
+`README.md` showed `python3 -m venv venv` as the active line and the correct
+`--system-site-packages` variant commented out beside it - while three other
+places in the project call that flag mandatory. Without it `import gi` fails and
+the application does not start at all.
+
+Also missing everywhere: `pip install --upgrade pip setuptools`. Python 3.12
+removed `distutils` from its standard library, `fitparse` still needs it while
+being installed, and since 3.12 `venv` no longer places setuptools in a new
+environment. Debian-derived systems additionally ship a setuptools patched to
+use the stdlib distutils - which no longer exists. Reproduced in a throwaway
+environment with Python 3.12.0: without setuptools the install aborts; with
+`SETUPTOOLS_USE_DISTUTILS=stdlib` it produces exactly the reported
+`ModuleNotFoundError: No module named 'distutils'`; with a fresh setuptools it
+runs through. The line is now in all five setup blocks.
+
+### Added
+
+**The first and the last cut can be taken back as well**
+
+Both branches now record what they remove. The end cut was the small case: it
+shifts nothing, it only cuts off the tail, so with `dauer_s = 0` the existing
+`spur_ohne_schnitt()` handles it unchanged. One detail did need care - if the
+cut falls exactly on an existing point, the seam point created there is a copy
+of it and the track ends with two identical times. Undoing removes every point
+on the seam, so the existing one has to be recorded too, or it is missing
+afterwards. Both positions are checked separately.
+
+The start cut needed two more fields, because it does two things more than the
+others: it rebases the whole time axis onto the track's old starting timestamp
+(`achsen_versatz_s`) and it sets the GPX/video shift to zero
+(`video_shift_vorher`). Both are undone when the cut is taken back; without the
+second the track would sit beside the video by the old shift.
+
+Until now the start cut deliberately did not renew the fingerprint, which
+blocked every undo afterwards - that was the safeguard against the shifted axis
+producing silently wrong results. The shift is now compensated for, so the
+safeguard could be replaced by the compensation.
+
+**check_cut_undo.py**
+
+Runs without a window and without video:
+
+    python3 check_cut_undo.py
+
+The question it answers is not "does something crash" but "does the GPX track
+come back exactly as it was". That cannot be settled by looking: a track off by
+fractions of a second looks right in the chart and only shows up when video and
+track drift apart in the export. Twenty checks over five areas - order of undo,
+the way through the project file, the block after changed times, the end cut and
+the start cut.
+
+Real is everything that matters: the recording, the undo, the following-up, the
+reading and writing of the project file and the release check. Rebuilt are the
+things that need Qt and a loaded video - applying the three kinds of cut to the
+track, and the places where the program calls the following-up. Each of those
+carries a note saying so.
+
+**The build plan proves the macOS bundle instead of assuming it**
+
+Everything below runs against the *unzipped shipping archive*, not against the
+build directory - so the order cannot be wrong by accident: signed last, packed
+after that, and only the unpacked result is touched.
+
+  * the signature and the completeness of the seal, as a hard stop
+  * a counter-test: a copy is deliberately damaged the way it happened to us -
+    a file added afterwards. If `codesign` does not report that, the run stops,
+    because then the check above proves nothing
+  * what Gatekeeper will say to a user: the quarantine mark is set by hand and
+    `spctl` is asked. Without notarisation it says no - the point is *what* it
+    says
+  * the self-test in the shipped bundle
+  * three proof pictures of the running window
+  * whether running changed the bundle - the check that found the plugin list
+
+**--screenshot: three pictures of the running program**
+
+The build plan could show two things: that the self-test passes, and that the
+process is still alive after 25 seconds. Neither says whether a window stands or
+whether anything moves.
+
+`nachweis.py` now does what a user does: load a GPX track and a video, press
+play, and take three pictures two seconds apart. Side by side, the ball in the
+test video and the playhead show that playback really ran; a single still could
+be a frozen window. The pictures are taken by Qt itself (`QWidget.grab()`), not
+by a screen recorder, so they also work with `QT_QPA_PLATFORM=offscreen` where
+there is no screen at all. That only works because the application paints the
+video itself - GStreamer delivers the frames through appsink.
+
+Two obstacles on the way. Loading a video asks three questions (edit mode,
+output frame rate, video/GPX sync), each with `exec()` waiting for a click.
+Rebuilding the steps around them was tried and dropped - the second question
+sits one level deeper, and every rebuild moves the proof away from the route a
+user actually takes. The real route is taken now and the questions are answered
+automatically, "Edit video" explicitly with *Encode*.
+
+And the window: without a screen Qt reports a tiny virtual display, and the
+application sizes its window from it - 796x428 on the build server, at which the
+grid squeezes everything together and the map gets no room at all. The pictures
+looked like a broken program when only the window was too small. The proof mode
+sets 1920x1200, which produces the same picture as on a normal machine. This
+affects the proof mode only.
+
+**The self-test really uses the hardware encoders**
+
+Step 6 sends every encoder that *Detect HW* reports through `ges_xfade_main()`
+once and measures the result. Until now only `hardware_encode: "none"` ever ran
+there - the user's route was never tested.
+
+### Changed
+
+**Derived values no longer go into the project file**
+
+`recalc_gpx_data()` writes `delta_m`, `speed_kmh` and `gradient` for every point
+unconditionally and reads none of them, so in the record they are lost bytes.
+Measured on `maptest2.KVRouiteproj`: the records shrink from 3384 kB to 1922 kB,
+43 percent. The track itself is untouched - this is only about the recorded
+points.
+
+**Call options take one dash or two**
+
+`-v` has been there from the start, `--selftest` came later; whoever got used to
+one should not trip over the other. `-v`, `--v`, `-verbose`, `--verbose` are now
+the same, as are `-selftest` and `--selftest`. The previous check searched the
+whole command line for the text `" -v"`, so `-verbose` slipped through
+unnoticed.
+
+An unknown option is now reported with the list of known ones and return code 2,
+instead of being swallowed while the program starts normally - a typo like
+`--seftest` used to open the window and say nothing.
+
+**The encoder table exists once**
+
+`_HW_ENCODER` in `managers/ges_encoder_manager.py` was a word-for-word copy of
+`GST_HW_ENCODER` in `core/hardware_detect.py`, while the comment on the latter
+claimed it was the only one. Exactly the kind of duplication where the two sides
+drift apart and the detection ends up checking something other than the export.
+
+**English in the self-test and in the encoder window**
+
+`selftest.py` printed German throughout - it is the output of
+`KVRouite --selftest`, which reaches users. Four more German fragments in the
+encoder window are gone as well: `... bei 1920x1080`, `noch ca. 12s`,
+`Fertig in 41.2s` and `Encoder x265enc fehlt. Unter Linux: ...`.
+
+---
+
 ## 6.02 - 2026-09-02
 
 The window was rebuilt. Until 6.01 the layout was fixed: video and map on the
@@ -308,8 +658,10 @@ What this still does NOT establish: nobody has operated the application by hand
 on a Mac. The runs are headless (`QT_QPA_PLATFORM=offscreen`), so the map, copy
 mode and every mouse interaction remain untested. The bundle is also neither
 signed nor notarised - Apple charges a yearly fee for that, and KVRouite is
-free. Gatekeeper will call it unverifiable; opening it goes through
-right-click, then Open.
+free. Gatekeeper will call it unverifiable; opening it goes through System
+Settings, then Privacy & Security, then *Open Anyway* - the right-click route
+was removed in macOS 15 (Sequoia). Since 6.03 the bundle is ad-hoc signed with
+a complete seal; the unknown-developer warning is what remains.
 
 Defects found and fixed on this path: the ffmpeg menu wrote to a key the search
 never read; the help windows asked for fonts that exist on Windows only; the

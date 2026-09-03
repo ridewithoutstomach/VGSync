@@ -1178,6 +1178,13 @@ class MainWindow(QMainWindow):
         self.timeline.overlayRemoveRequested.connect(self._on_timeline_overlay_remove)
         self.timeline.cutHardToggleRequested.connect(self._on_cut_hard_toggle)
         self.timeline.cutMenuRequested.connect(self._on_cut_menu)
+        self.timeline.cutMoveRequested.connect(self._on_cut_move)
+        # Zwei Auskuenfte, die nur hier zu geben sind: in welchem Bereich ein
+        # Schnitt liegen darf und ob er ueberhaupt umziehen darf. Die
+        # Zeitleiste holt sie sich darueber, statt die Bedingungen ein zweites
+        # Mal zu fuehren - siehe die Erlaeuterung dort.
+        self.timeline.grenzen_geber = self._verschiebe_grenzen
+        self.timeline.umzug_pruefer = self._verschieben_moeglich
 
         # ---- Bildstreifen in der Zeitleiste --------------------------------
         # Die Bilder werden im Hintergrund geholt (core/thumb_cache.py). Beim
@@ -2327,9 +2334,34 @@ class MainWindow(QMainWindow):
         # CutEnd hat den Fehler nicht, siehe EndManager.go_to_end() - dort
         # wird derselbe Wert direkt als globale Zeit genommen.
         global_video_s = self.video_editor.get_current_position_s()
+        self._startschnitt_setzen(global_video_s)
+
+    def _startschnitt_setzen(self, global_video_s, nachfragen=True):
+        """Den Anfangsschnitt an einer bestimmten Stelle setzen.
+
+        Herausgeloest aus on_set_begin_clicked(), damit das VERSCHIEBEN eines
+        Startschnitts denselben Weg nehmen kann: erst zuruecknehmen, dann hier
+        neu setzen. Es gibt damit keinen zweiten Rechenweg fuer den
+        Startschnitt, der neben dem ersten veralten koennte.
+
+        Der Startschnitt ist der einzige, der nicht nur Punkte entfernt: er
+        setzt die ganze Zeitachse auf den alten Anfangszeitstempel zurueck und
+        stellt den Video/GPX-Versatz auf 0. Beides wird aufgezeichnet, sonst
+        waere er nicht umkehrbar.
+
+        Rueckgabe False, wenn nichts geaendert wurde.
+        """
+        # Rueckfrage und Erfolgsmeldung entfallen beim Verschieben - dort hat
+        # der Nutzer laengst entschieden, und ein Meldungsfenster mitten im
+        # Umzug waere nur im Weg. Als Ersatzfunktionen statt als Verzweigung,
+        # damit der Rumpf darunter Zeile fuer Zeile derselbe bleibt.
+        fragen = (QMessageBox.question if nachfragen
+                  else (lambda *a, **k: QMessageBox.Yes))
+        melden = (QMessageBox.information if nachfragen
+                  else (lambda *a, **k: None))
 
         if self._autoSyncVideoEnabled:
-            ret = QMessageBox.question(
+            ret = fragen(
                 self,
                 "Confirm Cut Begin",
                 f"Cut gpx and video before {global_video_s}s?\n"
@@ -2338,7 +2370,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.No
             )
         else:
-            ret = QMessageBox.question(
+            ret = fragen(
                 self,
                 "Confirm Cut Begin",
                 f"Cut video before {global_video_s}s?\n"
@@ -2348,7 +2380,7 @@ class MainWindow(QMainWindow):
             )
 
         if ret != QMessageBox.Yes:
-            return
+            return False
 
         if global_video_s < 0:
             global_video_s = 0.0
@@ -2377,7 +2409,7 @@ class MainWindow(QMainWindow):
     
                 if base_dt is None:
                     print("[DEBUG] on_set_begin_clicked: GPX base time missing, skipping GPX cut.")
-                    return
+                    return False
     
                 # Gewünschte absolute GPX-Datetime für den Schnitt
                 desired_cut_dt = base_dt + timedelta(seconds=(final_s - video_shift))
@@ -2508,7 +2540,7 @@ class MainWindow(QMainWindow):
     
         # Video-Cut durchführen (0 bis global_video_s)
         if global_video_s <= 0.01:
-            QMessageBox.information(
+            melden(
                 self, "Set Begin",
                 "Video near 0s => no cut.\n"
                 "GPX cut at the point.\n"
@@ -2548,13 +2580,14 @@ class MainWindow(QMainWindow):
             msg = "Video"
             if self._autoSyncVideoEnabled and self._edit_mode in ("copy", "encode"):
                 msg += " and GPX"
-            QMessageBox.information(
+            melden(
                 self, "Set Begin",
                 f"{msg} cut at {global_video_s:.2f}s.\n"
                 "Undo possible."
             )
     
         print("[DEBUG] on_set_begin_clicked => done.")
+        return True
         
     
     
@@ -3972,6 +4005,11 @@ class MainWindow(QMainWindow):
         a_weg.setEnabled(moeglich)
         a_weg.setToolTip(grund or warnung)
 
+        v_moeglich, v_grund = self._verschieben_moeglich(start_s, end_s)
+        a_move = menue.addAction("Move Cut …")
+        a_move.setEnabled(v_moeglich)
+        a_move.setToolTip(v_grund)
+
         gewaehlt = menue.exec(global_pos)
         if gewaehlt is None:
             return
@@ -3980,6 +4018,8 @@ class MainWindow(QMainWindow):
                 self._on_cut_hard_toggle(start_s, end_s)
         elif gewaehlt is a_weg:
             self._schnitt_zuruecknehmen(start_s, end_s)
+        elif gewaehlt is a_move:
+            self._verschiebe_dialog(start_s, end_s)
 
     @staticmethod
     def _sek_kurz(s: float) -> str:
@@ -3993,8 +4033,6 @@ class MainWindow(QMainWindow):
         Video-Seite nehmen. Schlaegt das Zurueckrechnen fehl, bleibt alles
         wie es war.
         """
-        from core.gpx_parser import recalc_gpx_data
-
         moeglich, grund, warnung = self.cut_manager.ruecknahme_moeglich(
             start_s, end_s, self._gpx_data)
         if not moeglich:
@@ -4008,14 +4046,32 @@ class MainWindow(QMainWindow):
             if antwort != QMessageBox.Yes:
                 return
 
+        # Beides zusammen ist EIN Schritt fuer Strg+Z.
+        self.register_gpx_undo_snapshot()
+        self.register_video_undo_snapshot(True)
+
+        if not self._ruecknahme_ausfuehren(start_s, end_s):
+            QMessageBox.warning(self, "Undo failed",
+                                "The GPX track could not be restored. "
+                                "Nothing was changed.")
+
+    def _ruecknahme_ausfuehren(self, start_s, end_s) -> bool:
+        """Die Ruecknahme selbst - ohne Rueckfragen, ohne Schnappschuesse.
+
+        Getrennt vom Pruefteil, weil das Verschieben eines Schnitts denselben
+        Weg geht: erst zuruecknehmen, dann an der neuen Stelle neu schneiden.
+        Beide Aufrufer bringen ihre eigenen Rueckfragen und ihren eigenen
+        Strg+Z-Schritt mit.
+
+        Rueckgabe False, wenn nichts geaendert wurde.
+        """
+        from core.gpx_parser import recalc_gpx_data
+
         vorher_n = len(self._gpx_data or [])
         neue_spur = self.cut_manager.spur_ohne_schnitt(
             start_s, end_s, self._gpx_data)
         if not neue_spur or len(neue_spur) < 2:
-            QMessageBox.warning(self, "Undo failed",
-                                "The GPX track could not be restored. "
-                                "Nothing was changed.")
-            return
+            return False
 
         # Anfang und Dauer merken, BEVOR schnitt_entfernen() die Aufzeichnung
         # wegwirft - beides wird gleich zum Nachfuehren gebraucht.
@@ -4027,13 +4083,9 @@ class MainWindow(QMainWindow):
         nachfuehr_achse = float(aufz.get("achsen_versatz_s") or 0.0)
         shift_vorher = aufz.get("video_shift_vorher")
 
-        # Beides zusammen ist EIN Schritt fuer Strg+Z.
-        self.register_gpx_undo_snapshot()
-        self.register_video_undo_snapshot(True)
-
         if not self.cut_manager.schnitt_entfernen(start_s, end_s):
             print("[CUT-UNDO] Schnitt war nicht mehr vorhanden, Abbruch")
-            return
+            return False
 
         # Alles hinter dem zurueckgenommenen Schnitt liegt jetzt wieder um
         # dessen Dauer spaeter. Die Aufzeichnungen der dahinterliegenden
@@ -4064,7 +4116,13 @@ class MainWindow(QMainWindow):
             # den alten Versatz neben dem Video. Gleiches Muster wie in
             # register_gpx_undo_snapshot(): None heisst "gar nicht gesetzt".
             set_gpx_video_shift(shift_vorher)
-            self.enableVideoGpxSync(is_gpx_video_shift_set())
+            if not is_gpx_video_shift_set():
+                # Nur dann umschalten. enableVideoGpxSync(True) geht ueber
+                # _on_autocut_toggle_clicked(), und das SCHALTET UM - bei
+                # bereits eingeschaltetem AutoCut haette es ihn ausgemacht.
+                # Dieselbe Bedingung wie in register_gpx_undo_snapshot().
+                self.enableVideoGpxSync(False)
+            self.video_control.activate_controls()
             print(f"[CUT-UNDO] Video/GPX-Versatz zurueck auf {shift_vorher}")
 
         # Eigene Aktion: den Zustand der Spur neu festhalten, sonst waeren
@@ -4076,6 +4134,293 @@ class MainWindow(QMainWindow):
         print(f"[CUT-UNDO] Schnitt {start_s:.3f}-{end_s:.3f} zurueckgenommen, "
               f"Spur {vorher_n} -> {len(neue_spur)}, "
               f"{nachgefuehrt} Aufzeichnung(en) nachgefuehrt")
+        return True
+
+
+    # ------------------------------------------------------------------
+    # Schnitte verschieben
+    # ------------------------------------------------------------------
+    #: Abstand, den ein Mittelschnitt von 0 und vom Videoende haelt. Derselbe
+    #: Wert, mit dem is_end_cut() einen Endschnitt erkennt - waere er kleiner,
+    #: koennte ein verschobener Mittelschnitt in die Endschnitt-Erkennung
+    #: rutschen und beim naechsten Mal ganz anders behandelt werden.
+    _VERSCHIEBE_EPS = 0.1
+
+    def _ist_startschnitt(self, start_s, end_s) -> bool:
+        """Stammt dieser Schnitt von "Set Begin"?
+
+        Erkannt am Achsenversatz in der Aufzeichnung und nicht daran, dass er
+        bei 0 beginnt: ein Mittelschnitt kann ebenfalls bei 0 anfangen, wenn
+        MarkB dort gesetzt wurde. Der Unterschied ist nicht die Lage, sondern
+        was der Schnitt getan hat - nur "Set Begin" verschiebt die Zeitachse.
+        """
+        aufz = self.cut_manager.aufzeichnung(start_s, end_s) or {}
+        return bool(aufz.get("achsen_versatz_s"))
+
+    def _verschiebe_grenzen(self, start_s, end_s):
+        """In welchem Bereich darf dieser Schnitt liegen?
+
+        Rueckgabe (links, rechts, art) mit art aus "anfang", "ende",
+        "mitte". Anschlag sind die Nachbarschnitte und die Videogrenzen.
+
+        Ein Schnitt behaelt dabei seine Art. Zoege man einen Mittelschnitt bis
+        ans Videoende, waere er beim naechsten Mal ein Endschnitt - der wird
+        vor dem Zusammenfuegen weggetrimmt, hat nie eine Blende und behandelt
+        die GPX-Spur anders. Diese Verwandlung soll nicht beilaeufig durch
+        Ziehen passieren, deshalb der Abstand von _VERSCHIEBE_EPS.
+        """
+        gesamt = float(getattr(self, "real_total_duration", 0.0) or 0.0)
+        eps = self._VERSCHIEBE_EPS
+        links, rechts = 0.0, gesamt
+
+        for (a, b) in self.cut_manager._cut_intervals:
+            if abs(a - start_s) < 1e-9 and abs(b - end_s) < 1e-9:
+                continue
+            if b <= start_s + 1e-9:
+                links = max(links, float(b))
+            elif a >= end_s - 1e-9:
+                rechts = min(rechts, float(a))
+
+        # Die Art entscheidet die LAGE, nicht die Aufzeichnung: ein Schnitt
+        # bei 0 wird auch vom Export als Anfangsschnitt behandelt
+        # (skip_array-Wert -2), unabhaengig davon, wie er entstanden ist.
+        if start_s < eps:
+            art = "anfang"
+        elif gesamt > 0 and abs(end_s - gesamt) < eps:
+            art = "ende"
+        else:
+            art = "mitte"
+
+        if art != "ende":
+            rechts = min(rechts, max(0.0, gesamt - eps))
+        if art != "anfang":
+            links = max(links, eps)
+        return links, rechts, art
+
+    def _verschieben_moeglich(self, start_s, end_s):
+        """Darf dieser Schnitt umziehen? Rueckgabe (moeglich, grund).
+
+        Verschieben IST Zuruecknehmen plus Neuschneiden, es gelten deshalb
+        dieselben Bedingungen wie fuers Zuruecknehmen. Ohne GPX-Spur gibt es
+        nichts zurueckzurechnen - dann ist es ein reiner Video-Umzug.
+        """
+        links, rechts, _art = self._verschiebe_grenzen(start_s, end_s)
+        if rechts - links < 0.02:
+            return False, ("There is no room between the neighbouring cuts.")
+
+        if not self._gpx_data:
+            return True, ""
+
+        # Ein Schnitt, der die Spur mitgeschnitten hat, darf nur umziehen,
+        # solange AutoCutVideo+GPX an ist. Sonst kaeme die Spur zurueck, aber
+        # nur der Video-Schnitt zoege um - danach haette das Video weniger
+        # Material als die Spur.
+        do_gpx = (self._autoSyncVideoEnabled
+                  and self._edit_mode in ("copy", "encode"))
+        if self.cut_manager.hat_aufzeichnung(start_s, end_s) and not do_gpx:
+            return False, ("This cut removed points from the GPX track. Moving "
+                           "it would put the track back but move only the video "
+                           "cut. Switch AutoCutVideo+GPX on first.")
+
+        moeglich, grund, _warnung = self.cut_manager.ruecknahme_moeglich(
+            start_s, end_s, self._gpx_data)
+        if not moeglich:
+            return False, grund
+        return True, ""
+
+    def _schnitt_verschieben(self, alt_start, alt_ende, neu_start, neu_ende):
+        """Einen Schnitt an eine andere Stelle setzen.
+
+        Der Weg ist genau der, den man von Hand ginge: den alten Schnitt
+        zuruecknehmen und an der neuen Stelle neu schneiden. Beides laeuft
+        durch dieselben Funktionen wie sonst auch - das Zuruecknehmen durch
+        _ruecknahme_ausfuehren(), das Schneiden durch on_cut_clicked_video().
+        Es gibt damit KEINEN zweiten Rechenweg fuer einen Schnitt, der neben
+        dem ersten veralten koennte; jede Verbesserung am Schneiden gilt
+        automatisch auch fuer den Umzug.
+
+        Waehrend der beiden Teilschritte steht _verschiebe_schritt. Das haelt
+        zweierlei zurueck: die Schnappschuesse (fuer Strg+Z ist der Umzug EIN
+        Schritt) und den Aufbau der Vorschau (fuer den Zwischenzustand
+        wuerden Blenden gerendert, die niemand sieht).
+
+        Rueckgabe True, wenn der Umzug ausgefuehrt wurde.
+        """
+        moeglich, grund = self._verschieben_moeglich(alt_start, alt_ende)
+        if not moeglich:
+            QMessageBox.information(self, "Move not possible", grund)
+            return False
+
+        if self._gpx_data:
+            _m, _g, warnung = self.cut_manager.ruecknahme_moeglich(
+                alt_start, alt_ende, self._gpx_data)
+            if warnung:
+                antwort = QMessageBox.warning(
+                    self, "Track was edited in the meantime", warnung,
+                    QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
+                if antwort != QMessageBox.Yes:
+                    return False
+
+        hat_aufz = self.cut_manager.hat_aufzeichnung(alt_start, alt_ende)
+        # VOR der Ruecknahme merken: sie wirft die Aufzeichnung weg. Nur ein
+        # Schnitt, der die Zeitachse verschoben hat, darf auch wieder ueber
+        # den Startschnitt-Weg gesetzt werden. Ein Schnitt, der bloss bei 0
+        # anfaengt (MarkB auf 0 und Cut), ist ein gewoehnlicher Schnitt und
+        # bleibt einer.
+        mit_achse = self._ist_startschnitt(alt_start, alt_ende)
+
+        # Ein Schritt fuer Strg+Z, angelegt bevor irgendetwas passiert.
+        self.register_gpx_undo_snapshot()
+        self.register_video_undo_snapshot(True)
+
+        self._verschiebe_schritt = True
+        try:
+            if hat_aufz:
+                if not self._ruecknahme_ausfuehren(alt_start, alt_ende):
+                    QMessageBox.warning(
+                        self, "Move failed",
+                        "The GPX track could not be restored. "
+                        "Nothing was changed.")
+                    return False
+            elif not self.cut_manager.schnitt_entfernen(alt_start, alt_ende):
+                print("[CUT-MOVE] Schnitt war nicht mehr vorhanden, Abbruch")
+                return False
+
+            if mit_achse:
+                # Startschnitt: er verschiebt die Zeitachse und stellt den
+                # Video/GPX-Versatz. Ueber den gewoehnlichen Weg gesetzt waere
+                # er anschliessend ein Mittelschnitt bei 0 - gleiche Lage,
+                # andere Wirkung.
+                self._startschnitt_setzen(float(neu_ende), nachfragen=False)
+            else:
+                # Neu schneiden ueber den gewoehnlichen Weg. Die Mark-Zeiten
+                # sind dessen Eingabe; on_cut_clicked() setzt sie
+                # anschliessend selbst wieder zurueck.
+                self.cut_manager.markB_time_s = float(neu_start)
+                self.cut_manager.markE_time_s = float(neu_ende)
+                self.timeline.set_markB_time(float(neu_start))
+                self.timeline.set_markE_time(float(neu_ende))
+                self.on_cut_clicked_video()
+        finally:
+            self._verschiebe_schritt = False
+
+        self._refresh_preview_timeline()
+        self.timeline.update()
+        print(f"[CUT-MOVE] Schnitt {alt_start:.3f}-{alt_ende:.3f} -> "
+              f"{neu_start:.3f}-{neu_ende:.3f} "
+              f"({'mit' if hat_aufz else 'ohne'} GPX-Aufzeichnung)")
+
+        # Overlays koennen durch den Umzug in einen Schnitt geraten oder den
+        # Platz fuer ihre Blende verlieren. Die Pruefung dafuer gibt es schon.
+        self._validate_overlays_after_xfade_change()
+        return True
+
+    #: Wie viel Vorlauf nach einem Umzug vor der neuen Kante gezeigt wird.
+    _UMZUG_VORLAUF_S = 2.0
+
+    def _on_cut_move(self, alt_start, alt_ende, neu_start, neu_ende):
+        """Ein Schnitt wurde in der Zeitleiste gezogen.
+
+        Danach wird gleich vor die neue Kante gesprungen, damit man die
+        Stelle nur noch abspielen muss, um sie zu beurteilen. Von selbst
+        losspielen tut es nicht: der Umzug ist ein Bearbeitungsschritt, und
+        eine Bearbeitung soll die Wiedergabe nicht an sich reissen.
+        """
+        if not self._schnitt_verschieben(alt_start, alt_ende,
+                                         neu_start, neu_ende):
+            return
+        self._umzug_vorfuehren(neu_start)
+
+    def _umzug_vorfuehren(self, neu_start):
+        """Kurz vor die neue Schnittkante springen - ohne abzuspielen."""
+        ziel = max(0.0, float(neu_start) - self._UMZUG_VORLAUF_S)
+
+        # Nicht in einen anderen Schnitt hinein zuruecksetzen - dort gibt es
+        # kein Bild. Das Ende des davorliegenden Schnitts ist die Grenze.
+        for (a, bb) in self.cut_manager._cut_intervals:
+            if bb <= neu_start + 1e-9 and bb > ziel:
+                ziel = float(bb)
+
+        try:
+            self.video_editor.seek_global(ziel)
+            self.timeline.set_marker_position(ziel)
+        except Exception as e:
+            print(f"[WARN] Sprung nach dem Umzug: {e}")
+
+    def _verschiebe_dialog(self, start_s, end_s):
+        """Anfang und Ende des Schnitts als Zahlen eingeben.
+
+        Der Vorlaeufer zum Ziehen mit der Maus: dieselbe Rechnung dahinter,
+        nur ohne Zeigegeraet - und damit ohne die Frage, ob man die richtige
+        Kante erwischt hat.
+        """
+        from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QDoubleSpinBox,
+                                       QFormLayout, QLabel, QVBoxLayout)
+
+        links, rechts, art = self._verschiebe_grenzen(start_s, end_s)
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Move Cut")
+        aussen = QVBoxLayout(dlg)
+        form = QFormLayout()
+
+        def _feld(wert):
+            sb = QDoubleSpinBox(dlg)
+            sb.setDecimals(3)
+            sb.setSingleStep(0.5)
+            sb.setRange(links, rechts)
+            sb.setValue(float(wert))
+            sb.setSuffix(" s")
+            return sb
+
+        sb_start = _feld(start_s)
+        if art == "anfang":
+            # Ein Anfangsschnitt beginnt per Definition bei 0. Nur sein Ende
+            # laesst sich verschieben.
+            sb_start.setEnabled(False)
+        form.addRow("Start", sb_start)
+        sb_ende = _feld(end_s)
+        if art == "ende":
+            # Ein Endschnitt reicht per Definition bis ans Videoende. Nur sein
+            # Anfang laesst sich verschieben - waere das Ende frei, waere er
+            # beim naechsten Mal ein Mittelschnitt.
+            sb_ende.setEnabled(False)
+        form.addRow("End", sb_ende)
+        aussen.addLayout(form)
+
+        hinweis = QLabel(dlg)
+        hinweis.setWordWrap(True)
+        aussen.addWidget(hinweis)
+
+        knoepfe = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel, parent=dlg)
+        aussen.addWidget(knoepfe)
+        knoepfe.accepted.connect(dlg.accept)
+        knoepfe.rejected.connect(dlg.reject)
+
+        def _pruefen():
+            laenge = sb_ende.value() - sb_start.value()
+            ok = laenge >= 0.01
+            text = (f"Length {laenge:.3f} s\n"
+                    f"Allowed range {links:.3f} – {rechts:.3f} s"
+                    + (f"\nWas {start_s:.3f} – {end_s:.3f} s"))
+            if not ok:
+                text += "\nThe end must lie behind the start."
+            hinweis.setText(text)
+            knoepfe.button(QDialogButtonBox.Ok).setEnabled(ok)
+
+        sb_start.valueChanged.connect(_pruefen)
+        sb_ende.valueChanged.connect(_pruefen)
+        _pruefen()
+
+        if dlg.exec() != QDialog.Accepted:
+            return
+        neu_start = round(sb_start.value(), 3)
+        neu_ende = round(sb_ende.value(), 3)
+        if abs(neu_start - start_s) < 0.001 and abs(neu_ende - end_s) < 0.001:
+            print("[CUT-MOVE] unveraendert, nichts zu tun")
+            return
+        self._schnitt_verschieben(start_s, end_s, neu_start, neu_ende)
 
     def _ruecknahme_probe(self, start_s, end_s, spur_jetzt, spur_vorher):
         """Selbsttest: wuerde die Ruecknahme dieses Schnitts exakt zurueckfuehren?
@@ -5827,6 +6172,13 @@ class MainWindow(QMainWindow):
         # reiht dafuer ohnehin einen Aufruf ein.
         if getattr(self, "_loading_project", False):
             print("[DEBUG] preview-cuts: Projekt wird geladen => spaeter")
+            return
+        if getattr(self, "_verschiebe_schritt", False):
+            # Mitten im Umzug stuenden hier die Schnitte eines
+            # Zwischenzustands. Die Blenden dazu waeren umsonst gerendert -
+            # und das kostet Sekunden, nicht Millisekunden. Der Umzug ruft
+            # am Ende selbst herein.
+            print("[DEBUG] preview-cuts: Umzug laeuft => spaeter")
             return
         if not self.video_editor.supports_preview_cuts():
             print("[DEBUG] preview-cuts: Player kann das nicht "
@@ -7696,6 +8048,12 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self,"Undo ignored","Undo stack is empty.")    
     
     def register_gpx_undo_snapshot(self):
+        # Waehrend eines Umzugs legt der Umzug selbst EINEN Schnappschuss an.
+        # Die beiden Teilschritte duerfen keine eigenen dazulegen, sonst
+        # braeuchte Strg+Z drei Anlaeufe fuer eine Aktion.
+        if getattr(self, "_verschiebe_schritt", False):
+            return
+
         gpx_snapshot = copy.deepcopy(self.gpx_widget.gpx_list._gpx_data)
         curr_gpx_video_shift = get_gpx_video_shift() if is_gpx_video_shift_set() else None
 
@@ -7715,6 +8073,12 @@ class MainWindow(QMainWindow):
         self._undo_stack.append(undo)
 
     def register_video_undo_snapshot(self,appendToLast: bool = False):
+        # Waehrend eines Umzugs legt der Umzug selbst EINEN Schnappschuss an.
+        # Die beiden Teilschritte duerfen keine eigenen dazulegen, sonst
+        # braeuchte Strg+Z drei Anlaeufe fuer eine Aktion.
+        if getattr(self, "_verschiebe_schritt", False):
+            return
+
         snapshot = copy.deepcopy(self.cut_manager._cut_intervals)
         # Die Markierungen 'harte Kante' gehoeren zum selben Zustand wie die
         # Schnitte selbst und muessen mit zurueckgeholt werden.

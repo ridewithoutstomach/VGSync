@@ -53,6 +53,12 @@ class VideoTimelineWidget(QWidget):
     #: davon gibt es acht, und eine uebersehene waere ein Streifen, der
     #: gelegentlich nicht nachzieht.
     ansichtGeaendert = Signal()
+    #: Ein Schnitt wurde mit der Maus verschoben: (alt_start, alt_ende,
+    #: neu_start, neu_ende). Gemeldet wird erst beim Loslassen - waehrend des
+    #: Ziehens wird nur gezeichnet. Ein Umzug kostet das Neurechnen der
+    #: GPX-Spur und womoeglich eine neu gerenderte Blende; das je Pixel zu tun
+    #: waere nicht zu bedienen.
+    cutMoveRequested = Signal(float, float, float, float)
     #: Rechtsklick auf einen Schnitt: das Fenster soll das Menue dazu zeigen.
     #: Was darin moeglich ist, weiss nur das MainWindow - ob es eine
     #: Aufzeichnung gibt, ob die GPX-Spur zwischenzeitlich bearbeitet wurde.
@@ -95,6 +101,28 @@ class VideoTimelineWidget(QWidget):
         # Siehe set_overlays_wirksam: im Copy-Mode nur Rahmen statt Fuellung.
         self._overlays_wirksam = True
         self.setContextMenuPolicy(Qt.DefaultContextMenu)
+
+        # ---- Schnitte mit der Maus verschieben --------------------------
+        # Der laufende Umzug: welcher Schnitt, welche Kante, wo er gerade
+        # laege. Solange _zieh_schnitt steht, wird nur gezeichnet.
+        self._zieh_schnitt = None      # (start_s, ende_s) des Originals
+        self._zieh_art = None          # "links", "rechts" oder "block"
+        self._zieh_zeit_start = 0.0    # Zeit unter dem Zeiger beim Zugriff
+        self._zieh_grenzen = (0.0, 0.0)
+        self._zieh_neu = None          # (start_s, ende_s) der neuen Lage
+        self._zeiger_form = None
+
+        # Zwei Auskuenfte, die nur das MainWindow geben kann: in welchem
+        # Bereich ein Schnitt liegen darf und ob er ueberhaupt umziehen darf.
+        # Bewusst als schlichte Rueckrufe und nicht als eigene Regeln hier:
+        # sonst staenden dieselben Bedingungen an zwei Stellen und wuerden
+        # auseinanderlaufen. Gesetzt werden sie im MainWindow.
+        self.grenzen_geber = None      # (start, ende) -> (links, rechts, art)
+        self.umzug_pruefer = None      # (start, ende) -> (moeglich, grund)
+
+        # Ohne das kommt mouseMoveEvent nur bei gedrueckter Taste - die
+        # Zeigerform ueber einer Kante braucht es aber vorher.
+        self.setMouseTracking(True)
         
     def clear_all_cuts(self):
         """
@@ -223,8 +251,204 @@ class VideoTimelineWidget(QWidget):
             self._cut_intervals.pop()
             self.update()
 
+    # ------------------------------------------------------------------
+    # Schnitte mit der Maus verschieben
+    # ------------------------------------------------------------------
+    #: Wie nah der Zeiger an einer Kante sein muss, um sie zu fassen.
+    _KANTE_PX = 5
+    #: Kuerzer darf ein Schnitt beim Ziehen nicht werden. on_cut_clicked()
+    #: weist alles unter 0.01 s ohnehin ab; hier etwas mehr Luft, damit ein
+    #: Schnitt nicht versehentlich auf Pixelbreite zusammenfaellt.
+    _MIN_LAENGE_S = 0.05
+
+    def _zeit_bei_x(self, x_mouse):
+        """Bildschirm-x zu Rohzeit, oder None ausserhalb der Zeitleiste."""
+        w = self.width()
+        if w <= 0 or self.total_duration <= 0:
+            return None
+        breite = w * self._zoom_factor
+        if breite <= 0:
+            return None
+        x = x_mouse + self._horizontal_offset
+        x = max(0.0, min(float(x), breite))
+        return (x / breite) * self.total_duration
+
+    def _x_bei_zeit(self, zeit_s):
+        """Rohzeit zu Bildschirm-x. Gegenstueck zu _zeit_bei_x()."""
+        w = self.width()
+        if w <= 0 or self.total_duration <= 0:
+            return 0.0
+        breite = w * self._zoom_factor
+        return (float(zeit_s) / self.total_duration) * breite \
+            - self._horizontal_offset
+
+    def _kante_unter(self, x_mouse):
+        """Was liegt unter dem Zeiger? ((start, ende), art) oder (None, None).
+
+        art ist "links", "rechts" oder "block". Kanten werden in einem
+        eigenen Durchgang zuerst gesucht: stossen zwei Schnitte aneinander,
+        laege die gemeinsame Kante sonst im Block des einen und waere nicht
+        mehr zu fassen.
+        """
+        for (a, b) in self._cut_intervals:
+            if abs(x_mouse - self._x_bei_zeit(a)) <= self._KANTE_PX:
+                return (a, b), "links"
+            if abs(x_mouse - self._x_bei_zeit(b)) <= self._KANTE_PX:
+                return (a, b), "rechts"
+        for (a, b) in self._cut_intervals:
+            if self._x_bei_zeit(a) <= x_mouse <= self._x_bei_zeit(b):
+                return (a, b), "block"
+        return None, None
+
+    def _zeiger_setzen(self, form):
+        """Zeigerform nur bei Aenderung setzen - das laeuft bei jeder
+        Mausbewegung durch."""
+        if form == self._zeiger_form:
+            return
+        self._zeiger_form = form
+        if form is None:
+            self.unsetCursor()
+        else:
+            self.setCursor(form)
+
+    def _hinweis(self, global_pos, text):
+        """Kurzer Hinweis am Zeiger, warum gerade nichts passiert.
+
+        Ohne Position - etwa aus einer Pruefung heraus aufgerufen - bleibt es
+        beim Protokoll. QToolTip.showText() wirft bei None.
+        """
+        if global_pos is None:
+            print("[CUT-MOVE] " + text.replace(chr(10), " "))
+            return
+        from PySide6.QtWidgets import QToolTip
+        QToolTip.showText(global_pos, text, self)
+
+    def _umzug_beginnen(self, schnitt, art, x_mouse, global_pos):
+        """Umzug vorbereiten. False heisst: es bleibt beim Marker."""
+        if self.grenzen_geber is None:
+            return False
+        a0, b0 = schnitt
+
+        if self.umzug_pruefer is not None:
+            erlaubt, grund = self.umzug_pruefer(a0, b0)
+            if not erlaubt:
+                # Diese Pruefung rechnet einen Abdruck ueber die ganze
+                # GPX-Spur. Fuer jede Mausbewegung waere das zu teuer, deshalb
+                # steht sie hier beim Zugriff und nicht schon beim Wechsel der
+                # Zeigerform.
+                self._hinweis(global_pos,
+                              grund or "This cut cannot be moved.")
+                return False
+
+        links, rechts, schnittart = self.grenzen_geber(a0, b0)
+
+        # Anfangs- und Endschnitt haben je eine feste Kante. Sie zu loesen
+        # hiesse, die Art des Schnitts zu aendern: der Endschnitt wird vor dem
+        # Zusammenfuegen weggetrimmt, der Anfangsschnitt verschiebt zusaetzlich
+        # die Zeitachse. Beides soll nicht beilaeufig durch Ziehen passieren.
+        if schnittart == "ende" and art in ("rechts", "block"):
+            self._hinweis(
+                global_pos,
+                "The last cut always reaches the end of the video.\n"
+                "Only its beginning can be moved.")
+            return False
+        if schnittart == "anfang" and art in ("links", "block"):
+            self._hinweis(
+                global_pos,
+                "The first cut always starts at the beginning of the video.\n"
+                "Only its end can be moved.")
+            return False
+
+        zeit = self._zeit_bei_x(x_mouse)
+        if zeit is None:
+            return False
+
+        self._zieh_schnitt = (float(a0), float(b0))
+        self._zieh_art = art
+        self._zieh_zeit_start = zeit
+        self._zieh_grenzen = (float(links), float(rechts))
+        self._zieh_neu = (float(a0), float(b0))
+        self._zeiger_setzen(Qt.SizeAllCursor if art == "block"
+                            else Qt.SizeHorCursor)
+        self.update()
+        return True
+
+    def _umzug_aktualisieren(self, x_mouse):
+        """Neue Lage aus der Mausposition. Rechnet nur, zeichnet nur."""
+        zeit = self._zeit_bei_x(x_mouse)
+        if zeit is None or self._zieh_schnitt is None:
+            return
+        a0, b0 = self._zieh_schnitt
+        links, rechts = self._zieh_grenzen
+        delta = zeit - self._zieh_zeit_start
+        mind = self._MIN_LAENGE_S
+
+        if self._zieh_art == "links":
+            a = min(max(a0 + delta, links), b0 - mind)
+            b = b0
+        elif self._zieh_art == "rechts":
+            a = a0
+            b = max(min(b0 + delta, rechts), a0 + mind)
+        else:
+            laenge = b0 - a0
+            a = min(max(a0 + delta, links), rechts - laenge)
+            b = a + laenge
+
+        neu = (a, b)
+        if neu != self._zieh_neu:
+            self._zieh_neu = neu
+            self.update()
+
+    @staticmethod
+    def _zeit_kurz(sekunden):
+        s = max(0.0, float(sekunden))
+        return "%d:%04.1f" % (int(s // 60), s % 60)
+
+    def _draw_umzug(self, painter, w, h):
+        """Die neue Lage waehrend des Ziehens: Rahmen und Zeiten.
+
+        Der schwarze Block bleibt derweil an seiner alten Stelle stehen. So
+        ist beim Ziehen zu sehen, WOHIN es geht und woher es kam - ein
+        mitwanderender Block zeigte nur noch das eine.
+        """
+        if self._zieh_neu is None or self.total_duration <= 0:
+            return
+        a, b = self._zieh_neu
+        x0 = self._x_bei_zeit(a)
+        x1 = self._x_bei_zeit(b)
+        if x1 < 0 or x0 > w:
+            return
+
+        painter.save()
+        try:
+            farbe = QColor("#ffcc00")
+            painter.setPen(QPen(farbe, 2))
+            painter.setBrush(QColor(255, 204, 0, 45))
+            painter.drawRect(QRectF(x0, 0, max(1.0, x1 - x0), h - 1))
+
+            text = "%s - %s  (%.1fs)" % (self._zeit_kurz(a),
+                                         self._zeit_kurz(b), b - a)
+            breite_text = painter.fontMetrics().horizontalAdvance(text) + 8
+            x_text = x0 + 4
+            if x_text + breite_text > w:
+                x_text = max(0.0, w - breite_text)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(0, 0, 0, 170))
+            painter.drawRect(QRectF(x_text - 4, 2, breite_text, 16))
+            painter.setPen(farbe)
+            painter.drawText(QPointF(x_text, 14), text)
+        finally:
+            painter.restore()
+
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
+            # Zuerst die Schnitte fragen: liegt der Zeiger auf einer Kante
+            # oder in einem Block, wird gezogen statt der Marker gesetzt.
+            schnitt, art = self._kante_unter(event.pos().x())
+            if schnitt is not None and self._umzug_beginnen(
+                    schnitt, art, event.pos().x(), event.globalPos()):
+                event.accept()
+                return
             self._dragging_marker = True
             self._update_marker_by_mouse_x(event.pos().x())
             event.accept()
@@ -244,6 +468,20 @@ class VideoTimelineWidget(QWidget):
             event.ignore()
 
     def mouseMoveEvent(self, event):
+        if self._zieh_schnitt is not None:
+            self._umzug_aktualisieren(event.pos().x())
+            event.accept()
+            return
+        if not (self._dragging_marker or self._dragging_timeline):
+            # Ohne gedrueckte Taste nur die Zeigerform. Rein geometrisch -
+            # ob der Schnitt umziehen DARF, wird erst beim Zugriff geprueft.
+            _s, art = self._kante_unter(event.pos().x())
+            if art in ("links", "rechts"):
+                self._zeiger_setzen(Qt.SizeHorCursor)
+            elif art == "block":
+                self._zeiger_setzen(Qt.SizeAllCursor)
+            else:
+                self._zeiger_setzen(None)
         if self._dragging_marker:
             self._update_marker_by_mouse_x(event.pos().x())
             event.accept()
@@ -268,6 +506,23 @@ class VideoTimelineWidget(QWidget):
             event.ignore()
 
     def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton and self._zieh_schnitt is not None:
+            a0, b0 = self._zieh_schnitt
+            a, b = self._zieh_neu or (a0, b0)
+            unveraendert = abs(a - a0) < 0.001 and abs(b - b0) < 0.001
+            self._zieh_schnitt = None
+            self._zieh_neu = None
+            self._zieh_art = None
+            self._zeiger_setzen(None)
+            self.update()
+            if unveraendert:
+                # Nur geklickt, nicht gezogen - dann war der Marker gemeint.
+                # Ohne das waere ein Klick in einen Schnitt wirkungslos.
+                self._update_marker_by_mouse_x(event.pos().x())
+            else:
+                self.cutMoveRequested.emit(a0, b0, round(a, 3), round(b, 3))
+            event.accept()
+            return
         if event.button() == Qt.LeftButton and self._dragging_marker:
             self._dragging_marker = False
             event.accept()
@@ -343,6 +598,7 @@ class VideoTimelineWidget(QWidget):
         self._draw_vorschaubilder(painter, w, h, timeline_real_width)
         self._draw_time_ticks(painter, w, h, timeline_real_width)
         self._draw_boundaries_and_markers(painter, w, h, timeline_real_width)
+        self._draw_umzug(painter, w, h)
 
     # ------------------------------------------------------------------
     # Bildstreifen

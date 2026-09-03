@@ -30,6 +30,10 @@ WAS GEPRUEFT WIRD
                  uebrigen Aufzeichnungen muessen die Achse mitmachen - seine
                  eigene aber gerade nicht, wenn ein Schnitt DAHINTER
                  zurueckgenommen wird.
+6. Verschieben   Ein Umzug ist Ruecknahme plus Neuschnitt. Die Zusage lautet:
+                 danach sieht die Spur genauso aus, als haette man gleich an
+                 der neuen Stelle geschnitten. Geprueft wird sie, indem beide
+                 Wege gegeneinander gerechnet werden.
 
 WAS ECHT IST UND WAS NACHGEBAUT
 -------------------------------
@@ -554,12 +558,118 @@ def pruefe_startschnitt():
     return ergebnisse
 
 
+def pruefe_verschieben():
+    """Ein Umzug muss dasselbe ergeben wie ein Schnitt gleich an der neuen Stelle.
+
+    Das ist die eigentliche Zusage des Verschiebens. Sie laesst sich pruefen,
+    ohne den Umzug selbst nachzubauen: er ist Ruecknahme plus Neuschnitt, und
+    genau das steht hier - zweimal derselbe Endzustand, auf zwei Wegen
+    erreicht.
+    """
+    ergebnisse = []
+
+    # Mittelschnitt 10-15 zieht auf 12-18 um, ein zweiter Schnitt liegt
+    # dahinter und darf davon unberuehrt bleiben.
+    umzug = Werkbank()
+    umzug.schnitt(10.0, 15.0)
+    umzug.schnitt(30.0, 36.0)
+    umzug.ruecknahme(10.0, 15.0)
+    umzug.schnitt(12.0, 18.0)
+
+    direkt = Werkbank()
+    direkt.schnitt(12.0, 18.0)
+    direkt.schnitt(30.0, 36.0)
+
+    ok, text = gleich(umzug.gpx, direkt.gpx)
+    ergebnisse.append((ok, "Mittelschnitt 10-15 -> 12-18: " + text))
+
+    # Und danach muss sich alles wieder vollstaendig zuruecknehmen lassen.
+    umzug.ruecknahme(30.0, 36.0)
+    umzug.ruecknahme(12.0, 18.0)
+    ok, text = gleich(umzug.gpx, spur())
+    ergebnisse.append((ok, "nach dem Umzug alles zurueck: " + text))
+
+    # Umzug ueber einen dahinterliegenden Schnitt hinweg waere ein
+    # Ueberlappen - das laesst die Oberflaeche nicht zu. Geprueft wird
+    # deshalb der Fall davor: der hintere Schnitt zieht weiter nach hinten.
+    umzug = Werkbank()
+    umzug.schnitt(10.0, 15.0)
+    umzug.schnitt(30.0, 36.0)
+    umzug.ruecknahme(30.0, 36.0)
+    umzug.schnitt(40.0, 44.0)
+
+    direkt = Werkbank()
+    direkt.schnitt(10.0, 15.0)
+    direkt.schnitt(40.0, 44.0)
+    ok, text = gleich(umzug.gpx, direkt.gpx)
+    ergebnisse.append((ok, "hinterer Schnitt 30-36 -> 40-44: " + text))
+
+    # Endschnitt verschieben - hier kommt der Schwanz zurueck und wird an
+    # anderer Stelle neu abgeschnitten.
+    umzug = Werkbank()
+    umzug.schnitt(10.0, 15.0)
+    umzug.endschnitt(45.0)
+    umzug.ruecknahme(45.0, 60.0)
+    umzug.endschnitt(50.0)
+
+    direkt = Werkbank()
+    direkt.schnitt(10.0, 15.0)
+    direkt.endschnitt(50.0)
+    ok, text = gleich(umzug.gpx, direkt.gpx)
+    ergebnisse.append((ok, "Endschnitt 45 -> 50: " + text))
+
+    # Endschnitt nach VORNE holen, also mehr Video behalten - der Fall, der
+    # ohne Aufzeichnung des Endschnitts gar nicht ginge.
+    umzug = Werkbank()
+    umzug.endschnitt(45.0)
+    umzug.ruecknahme(45.0, 60.0)
+    umzug.endschnitt(52.0)
+
+    direkt = Werkbank()
+    direkt.endschnitt(52.0)
+    ok, text = gleich(umzug.gpx, direkt.gpx)
+    ergebnisse.append((ok, "Endschnitt 45 -> 52 (mehr Video): " + text))
+
+    # Startschnitt verschieben. Der schwierigste Fall: seine Ruecknahme dreht
+    # die ganze Zeitachse zurueck, und die Aufzeichnung des Schnitts dahinter
+    # muss das mitmachen, bevor an der neuen Stelle neu geschnitten wird.
+    umzug = Werkbank()
+    umzug.startschnitt(10.5)
+    umzug.schnitt(20.0, 25.0)
+    umzug.ruecknahme(0.0, 10.5)
+    umzug.startschnitt(14.5)
+
+    direkt = Werkbank()
+    direkt.startschnitt(14.5)
+    direkt.schnitt(20.0, 25.0)
+    ok, text = gleich(umzug.gpx, direkt.gpx)
+    ergebnisse.append((ok, "Startschnitt 10,5 -> 14,5: " + text))
+
+    # Und zurueck nach vorn, also mehr Video behalten.
+    umzug = Werkbank()
+    vorher = copy.deepcopy(umzug.gpx)
+    umzug.startschnitt(14.5)
+    umzug.ruecknahme(0.0, 14.5)
+    umzug.startschnitt(6.5)
+
+    direkt = Werkbank()
+    direkt.startschnitt(6.5)
+    ok, text = gleich(umzug.gpx, direkt.gpx)
+    ergebnisse.append((ok, "Startschnitt 14,5 -> 6,5 (mehr Video): " + text))
+
+    umzug.ruecknahme(0.0, 6.5)
+    ok, text = gleich(umzug.gpx, vorher)
+    ergebnisse.append((ok, "danach vollstaendig zurueck: " + text))
+    return ergebnisse
+
+
 def main():
     schritte = [("Reihenfolge der Ruecknahme", pruefe_reihenfolge),
                 ("Weg durch die Projektdatei", pruefe_projektdatei),
                 ("Sperre bei veraenderten Zeiten", pruefe_verschobene_spur),
                 ("End-Schnitt", pruefe_endschnitt),
-                ("Start-Schnitt", pruefe_startschnitt)]
+                ("Start-Schnitt", pruefe_startschnitt),
+                ("Verschieben", pruefe_verschieben)]
     fehler = 0
     for titel, fn in schritte:
         print(titel)
