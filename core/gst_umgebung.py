@@ -102,17 +102,52 @@ def _registry_datei():
                         % (platform.machine() or "unknown"))
 
 
+def _im_programm(pfad):
+    """Liegt der Pfad im Programmordner - also im Buendel selbst?"""
+    if not pfad:
+        return False
+    try:
+        pfad = os.path.abspath(pfad)
+    except Exception:
+        return False
+    orte = [getattr(sys, "_MEIPASS", None),
+            os.path.dirname(os.path.abspath(sys.executable))]
+    for ort in orte:
+        if not ort:
+            continue
+        ort = os.path.abspath(ort)
+        if pfad == ort or pfad.startswith(ort + os.sep):
+            return True
+    return False
+
+
 def registry_festlegen():
     """Den Ort der Plugin-Liste setzen. Rueckgabe: der Pfad oder None.
 
     Bewusst eine eigene Funktion und nicht Teil von umgebung_aufbauen(): die
     laeuft nur als Notweg, wenn der Weg ueber das Wheel scheitert
     (KVRouite.py). Der Ort der Plugin-Liste muss aber IMMER stehen, bevor
-    GStreamer geladen wird - sonst sucht es sich selbst einen aus.
+    GStreamer geladen wird.
 
-    Ein von aussen gesetzter Wert gilt und wird nicht angefasst.
+    Ein von aussen gesetzter Wert gilt - ABER NICHT, wenn er ins Programm
+    selbst zeigt. Genau das tut PyInstaller ungefragt, in seinem eigenen
+    Startskript PyInstaller/hooks/rthooks/pyi_rth_gstreamer.py:
+
+        # Prevent permission issues on Windows
+        os.environ['GST_REGISTRY'] = os.path.join(sys._MEIPASS, 'registry.bin')
+
+    sys._MEIPASS ist im macOS-Buendel Contents/Frameworks, und dieses
+    Startskript laeuft VOR unserem Code. Der erste Versuch am 03.09.2026 hat
+    deshalb nichts bewirkt: er sah einen gesetzten Wert und liess ihn stehen -
+    der Bauplan meldete weiter "file added: Contents/Frameworks/registry.bin".
+
+    Fuer Windows mag der Ort taugen, fuer ein signiertes macOS-Buendel nicht:
+    jede Datei, die nach dem Signieren dazukommt, macht das Siegel ungueltig,
+    und das Buendel beschaedigt sich beim ersten Start selbst.
     """
-    if os.environ.get("GST_REGISTRY_1_0") or os.environ.get("GST_REGISTRY"):
+    vorher = (os.environ.get("GST_REGISTRY_1_0")
+              or os.environ.get("GST_REGISTRY"))
+    if vorher and not _im_programm(vorher):
         return None
     datei = _registry_datei()
     if not datei:
