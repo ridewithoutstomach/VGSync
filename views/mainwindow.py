@@ -1179,6 +1179,10 @@ class MainWindow(QMainWindow):
         self.timeline.cutHardToggleRequested.connect(self._on_cut_hard_toggle)
         self.timeline.cutMenuRequested.connect(self._on_cut_menu)
         self.timeline.cutMoveRequested.connect(self._on_cut_move)
+        # Entf auf einem ausgewaehlten Schnitt geht denselben Weg wie der
+        # Menuepunkt "Undo Cut" - mit denselben Pruefungen und derselben
+        # Rueckfrage. Die Taste ist nur ein zweiter Zugang dorthin.
+        self.timeline.cutDeleteRequested.connect(self._schnitt_zuruecknehmen)
         # Zwei Auskuenfte, die nur hier zu geben sind: in welchem Bereich ein
         # Schnitt liegen darf und ob er ueberhaupt umziehen darf. Die
         # Zeitleiste holt sie sich darueber, statt die Bedingungen ein zweites
@@ -4000,8 +4004,11 @@ class MainWindow(QMainWindow):
 
         moeglich, grund, warnung = self.cut_manager.ruecknahme_moeglich(
             start_s, end_s, self._gpx_data)
+        # Der Tastenhinweis steht hinter einem Tabulator - Qt setzt ihn
+        # dadurch rechtsbuendig, wie bei jedem anderen Menuepunkt mit Kuerzel.
         a_weg = menue.addAction("Undo Cut"
-                                + (" …" if warnung else ""))
+                                + (" …" if warnung else "")
+                                + "\tDel")
         a_weg.setEnabled(moeglich)
         a_weg.setToolTip(grund or warnung)
 

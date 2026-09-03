@@ -59,6 +59,10 @@ class VideoTimelineWidget(QWidget):
     #: GPX-Spur und womoeglich eine neu gerenderte Blende; das je Pixel zu tun
     #: waere nicht zu bedienen.
     cutMoveRequested = Signal(float, float, float, float)
+    #: Der ausgewaehlte Schnitt soll weg (Entf-Taste). Geloescht wird hier
+    #: nicht: ob sich ein Schnitt zuruecknehmen laesst und was dabei mit der
+    #: GPX-Spur geschieht, weiss nur das Fenster.
+    cutDeleteRequested = Signal(float, float)
     #: Rechtsklick auf einen Schnitt: das Fenster soll das Menue dazu zeigen.
     #: Was darin moeglich ist, weiss nur das MainWindow - ob es eine
     #: Aufzeichnung gibt, ob die GPX-Spur zwischenzeitlich bearbeitet wurde.
@@ -112,6 +116,12 @@ class VideoTimelineWidget(QWidget):
         self._zieh_neu = None          # (start_s, ende_s) der neuen Lage
         self._zeiger_form = None
 
+        # Der ausgewaehlte Schnitt, (start_s, ende_s) oder None. Angeklickt
+        # wird er, Entf nimmt ihn zurueck. Bewusst getrennt von
+        # _markierter_bereich: der zeigt nur, welcher Schnitt gerade ein
+        # Menue offen hat, und verschwindet sofort wieder.
+        self._gewaehlter_schnitt = None
+
         # Zwei Auskuenfte, die nur das MainWindow geben kann: in welchem
         # Bereich ein Schnitt liegen darf und ob er ueberhaupt umziehen darf.
         # Bewusst als schlichte Rueckrufe und nicht als eigene Regeln hier:
@@ -123,6 +133,8 @@ class VideoTimelineWidget(QWidget):
         # Ohne das kommt mouseMoveEvent nur bei gedrueckter Taste - die
         # Zeigerform ueber einer Kante braucht es aber vorher.
         self.setMouseTracking(True)
+        # Ohne Fokus keine Tastatur: Entf kaeme nie hier an.
+        self.setFocusPolicy(Qt.StrongFocus)
         
     def clear_all_cuts(self):
         """
@@ -130,6 +142,11 @@ class VideoTimelineWidget(QWidget):
         """
         self._cut_intervals = []
         self._hard_cut_keys = set()
+        # Die Auswahl zeigte auf einen Schnitt, den es gleich nicht mehr gibt.
+        # Jede Aenderung an den Schnitten laeuft hier durch - Zuruecknehmen,
+        # Verschieben, Laden -, damit kann keine veraltete Auswahl stehen
+        # bleiben.
+        self._gewaehlter_schnitt = None
         self.update()
 
     def set_hard_cut_keys(self, keys):
@@ -300,6 +317,13 @@ class VideoTimelineWidget(QWidget):
                 return (a, b), "block"
         return None, None
 
+    def _schnitt_waehlen(self, schnitt):
+        """Auswahl setzen oder mit None aufheben."""
+        if schnitt == self._gewaehlter_schnitt:
+            return
+        self._gewaehlter_schnitt = schnitt
+        self.update()
+
     def _zeiger_setzen(self, form):
         """Zeigerform nur bei Aenderung setzen - das laeuft bei jeder
         Mausbewegung durch."""
@@ -445,6 +469,10 @@ class VideoTimelineWidget(QWidget):
             # Zuerst die Schnitte fragen: liegt der Zeiger auf einer Kante
             # oder in einem Block, wird gezogen statt der Marker gesetzt.
             schnitt, art = self._kante_unter(event.pos().x())
+            # Auswaehlen unabhaengig davon, ob ein Umzug daraus wird: ein
+            # Schnitt kann zurueckzunehmen sein, ohne verschiebbar zu sein.
+            # Auf freier Flaeche hebt der Klick die Auswahl auf.
+            self._schnitt_waehlen(schnitt)
             if schnitt is not None and self._umzug_beginnen(
                     schnitt, art, event.pos().x(), event.globalPos()):
                 event.accept()
@@ -531,6 +559,27 @@ class VideoTimelineWidget(QWidget):
             event.accept()
         else:
             event.ignore()
+
+    def keyPressEvent(self, event):
+        """Entf nimmt den ausgewaehlten Schnitt zurueck, Esc hebt die Auswahl auf.
+
+        Zurueckgenommen wird nicht hier. Ob ein Schnitt sich ueberhaupt
+        zuruecknehmen laesst und was dabei mit der GPX-Spur geschieht, weiss
+        nur das Fenster - die Taste ist derselbe Weg wie der Menuepunkt, nur
+        ein zweiter Zugang dorthin.
+        """
+        if event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
+            if self._gewaehlter_schnitt is not None:
+                a, b = self._gewaehlter_schnitt
+                self.cutDeleteRequested.emit(float(a), float(b))
+                event.accept()
+                return
+        elif event.key() == Qt.Key_Escape:
+            if self._gewaehlter_schnitt is not None:
+                self._schnitt_waehlen(None)
+                event.accept()
+                return
+        super().keyPressEvent(event)
 
     def wheelEvent(self, event: QWheelEvent):
         delta = event.angleDelta().y()
@@ -902,6 +951,19 @@ class VideoTimelineWidget(QWidget):
                 if rect_w < 2:
                     rect_w = 2
                 painter.drawRect(x_start, 0, rect_w, h)
+
+        # Der ausgewaehlte Schnitt: nur ein Rahmen, keine Fuellung. Der Block
+        # ist schwarz; eine Fuellung wuerde ihn aufhellen und dabei aussehen
+        # wie die Hervorhebung des Menues darunter.
+        if self._gewaehlter_schnitt and self.total_duration > 0:
+            g_start, g_end = self._gewaehlter_schnitt
+            gx0 = (max(0.0, g_start) / self.total_duration
+                   ) * timeline_real_width - self._horizontal_offset
+            gx1 = (min(self.total_duration, g_end) / self.total_duration
+                   ) * timeline_real_width - self._horizontal_offset
+            painter.setPen(QPen(QColor("#ffcc00"), 2))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRect(QRectF(gx0, 1, max(2.0, gx1 - gx0), h - 3))
 
         # Der angeklickte Bereich, solange sein Menue offen ist. Zuletzt
         # gezeichnet, damit er ueber Schnitt und Overlay liegt.
