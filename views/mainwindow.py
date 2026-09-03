@@ -1176,6 +1176,12 @@ class MainWindow(QMainWindow):
         #    Sie rechnet durchgehend mit self.width(), der Umzug allein macht
         #    sie also feiner aufloesend - aus rund 920 px werden gut 1900.
         self.timeline.overlayRemoveRequested.connect(self._on_timeline_overlay_remove)
+        self.timeline.overlayMoveRequested.connect(self._on_overlay_move)
+        self.timeline.overlayMenuRequested.connect(self._on_overlay_menu)
+        self.timeline.overlayDeleteRequested.connect(self._on_overlay_delete)
+        # Wo ein Overlay liegen darf, weiss der OverlayManager: es muss in EIN
+        # Keep-Segment passen und den Platz der Blenden freilassen.
+        self.timeline.overlay_grenzen_geber = self._overlay_grenzen
         self.timeline.cutHardToggleRequested.connect(self._on_cut_hard_toggle)
         self.timeline.cutMenuRequested.connect(self._on_cut_menu)
         self.timeline.cutMoveRequested.connect(self._on_cut_move)
@@ -1465,6 +1471,8 @@ class MainWindow(QMainWindow):
         # wie die Blenden, sondern live auf die oberste Ebene gelegt -
         # es fehlte nur der Anstoss, dass sich etwas geaendert hat.
         self._overlay_manager.overlaysChanged.connect(self._overlays_an_vorschau)
+        self._overlay_manager.overlaysChanged.connect(
+            self._overlay_blenden_an_timeline)
         # Overlay-Aenderungen landen im selben Strg+Z wie Schnitte und GPX.
         self._overlay_manager.vorAenderung.connect(self._overlay_undo_merken)
         
@@ -6224,6 +6232,230 @@ class MainWindow(QMainWindow):
             self.video_editor.seek_global(ziel)
             self._marker_zug_timer.start(self.MARKER_ZUG_MS)
         
+    # ------------------------------------------------------------------
+    # Overlays: verschieben, Laenge, Ein- und Ausblendung
+    # ------------------------------------------------------------------
+    def _overlay_blenden_an_timeline(self):
+        """Der Zeitleiste die Ein- und Ausblendlaengen der Overlays geben."""
+        try:
+            self.timeline.set_overlay_blenden(
+                [(float(o.get("start", 0.0)), float(o.get("end", 0.0)),
+                  float(o.get("fade_in", 0) or 0),
+                  float(o.get("fade_out", 0) or 0))
+                 for o in self._overlay_manager.get_all_overlays()])
+        except Exception as e:
+            print(f"[WARN] Overlay-Blenden an die Zeitleiste: {e}")
+
+    def _overlay_grenzen(self, start_s, end_s):
+        """(frueh, spaet) fuer die Anschlaege beim Ziehen."""
+        try:
+            return self._overlay_manager.grenzen_fuer(start_s, end_s)
+        except Exception as e:
+            print(f"[WARN] Overlay-Grenzen: {e}")
+            return float(start_s), float(end_s)
+
+    def _on_overlay_move(self, alt_start, alt_ende, neu_start, neu_ende):
+        """Ein Overlay wurde in der Zeitleiste gezogen."""
+        ok, grund = self._overlay_manager.overlay_verschieben(
+            alt_start, alt_ende, neu_start, neu_ende)
+        if not ok:
+            QMessageBox.warning(self, "Overlay not possible", grund)
+            return
+        self.timeline.update()
+
+    def _on_overlay_delete(self, start_s, end_s):
+        """Entf auf einem ausgewaehlten Overlay.
+
+        Mit Rueckfrage, wie im Menue auch: ein Overlay ist schnell wieder
+        angelegt, aber Bild, Groesse und Lage waeren neu einzustellen.
+        """
+        antwort = QMessageBox.question(
+            self, "Remove Overlay?",
+            "Remove the overlay from %.1fs to %.1fs?" % (start_s, end_s),
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if antwort == QMessageBox.Yes:
+            self._overlay_manager.remove_overlay_interval(start_s, end_s)
+
+    def _on_overlay_menu(self, start_s, end_s, global_pos):
+        """Rechtsklick auf ein Overlay.
+
+        Bis 6.03 kam hier sofort die Frage "Remove Overlay?". Seit sich ein
+        Overlay auch verschieben laesst und eigene Blendenlaengen hat, ist
+        Loeschen nur noch eine von mehreren Moeglichkeiten.
+        """
+        from PySide6.QtWidgets import QMenu
+
+        ovl = self._overlay_suchen(start_s, end_s)
+        ein = float((ovl or {}).get("fade_in", 0) or 0)
+        aus = float((ovl or {}).get("fade_out", 0) or 0)
+
+        menue = QMenu(self)
+        titel = menue.addAction(
+            "Overlay %s - %s  (%.1fs)"
+            % (self._sek_kurz(start_s), self._sek_kurz(end_s),
+               end_s - start_s))
+        titel.setEnabled(False)
+        menue.addSeparator()
+
+        a_blenden = menue.addAction("Fade in %.1f s / out %.1f s …" % (ein, aus))
+        a_zeit = menue.addAction("Start and end …")
+        menue.addSeparator()
+        a_weg = menue.addAction("Remove Overlay\tDel")
+
+        gewaehlt = menue.exec(global_pos)
+        if gewaehlt is None:
+            return
+        if gewaehlt is a_weg:
+            antwort = QMessageBox.question(
+                self, "Remove Overlay?",
+                "Remove the overlay from %.1fs to %.1fs?" % (start_s, end_s),
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if antwort == QMessageBox.Yes:
+                self._overlay_manager.remove_overlay_interval(start_s, end_s)
+        elif gewaehlt is a_blenden:
+            self._overlay_blenden_dialog(start_s, end_s)
+        elif gewaehlt is a_zeit:
+            self._overlay_zeit_dialog(start_s, end_s)
+
+    def _overlay_suchen(self, start_s, end_s):
+        """Das Overlay mit diesen Zeiten, oder None."""
+        for ovl in self._overlay_manager.get_all_overlays():
+            if (abs(float(ovl.get("start", 0.0)) - start_s) < 0.001
+                    and abs(float(ovl.get("end", 0.0)) - end_s) < 0.001):
+                return ovl
+        return None
+
+    def _overlay_blenden_dialog(self, start_s, end_s):
+        """Ein- und Ausblendlaenge eines Overlays einstellen.
+
+        Beide liegen INNERHALB des Overlays: es blendet an seinem eigenen
+        Anfang ein und an seinem Ende aus. Zusammen duerfen sie deshalb nicht
+        laenger sein als das Overlay selbst.
+        """
+        from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QDoubleSpinBox,
+                                       QFormLayout, QLabel, QVBoxLayout)
+
+        ovl = self._overlay_suchen(start_s, end_s)
+        if ovl is None:
+            return
+        dauer = float(end_s) - float(start_s)
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Overlay fade")
+        aussen = QVBoxLayout(dlg)
+        form = QFormLayout()
+
+        def _feld(wert):
+            sb = QDoubleSpinBox(dlg)
+            sb.setDecimals(1)
+            sb.setSingleStep(0.5)
+            sb.setRange(0.0, max(0.0, dauer))
+            sb.setValue(float(wert or 0))
+            sb.setSuffix(" s")
+            return sb
+
+        sb_ein = _feld(ovl.get("fade_in", 0))
+        sb_aus = _feld(ovl.get("fade_out", 0))
+        form.addRow("Fade in", sb_ein)
+        form.addRow("Fade out", sb_aus)
+        aussen.addLayout(form)
+
+        hinweis = QLabel(dlg)
+        hinweis.setWordWrap(True)
+        aussen.addWidget(hinweis)
+
+        knoepfe = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel, parent=dlg)
+        aussen.addWidget(knoepfe)
+        knoepfe.accepted.connect(dlg.accept)
+        knoepfe.rejected.connect(dlg.reject)
+
+        def _pruefen():
+            summe = sb_ein.value() + sb_aus.value()
+            passt = summe <= dauer + 1e-9
+            hinweis.setText(
+                "The overlay is %.1f s long. Fade in and fade out lie inside "
+                "it, so together they cannot be longer than that.\n"
+                "Used: %.1f s of %.1f s." % (dauer, summe, dauer)
+                + ("" if passt else "\nToo long."))
+            knoepfe.button(QDialogButtonBox.Ok).setEnabled(passt)
+
+        sb_ein.valueChanged.connect(_pruefen)
+        sb_aus.valueChanged.connect(_pruefen)
+        _pruefen()
+
+        if dlg.exec() != QDialog.Accepted:
+            return
+        ok, grund = self._overlay_manager.blenden_setzen(
+            start_s, end_s, round(sb_ein.value(), 1), round(sb_aus.value(), 1))
+        if not ok:
+            QMessageBox.warning(self, "Overlay fade", grund)
+            return
+        self.timeline.update()
+
+    def _overlay_zeit_dialog(self, start_s, end_s):
+        """Anfang und Ende eines Overlays als Zahlen eingeben.
+
+        Dasselbe wie das Ziehen in der Zeitleiste, nur ohne Zeigegeraet -
+        und mit denselben Anschlaegen.
+        """
+        from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QDoubleSpinBox,
+                                       QFormLayout, QLabel, QVBoxLayout)
+
+        frueh, spaet = self._overlay_grenzen(start_s, end_s)
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Overlay start and end")
+        aussen = QVBoxLayout(dlg)
+        form = QFormLayout()
+
+        def _feld(wert):
+            sb = QDoubleSpinBox(dlg)
+            sb.setDecimals(3)
+            sb.setSingleStep(0.5)
+            sb.setRange(float(frueh), float(spaet))
+            sb.setValue(float(wert))
+            sb.setSuffix(" s")
+            return sb
+
+        sb_a = _feld(start_s)
+        sb_b = _feld(end_s)
+        form.addRow("Start", sb_a)
+        form.addRow("End", sb_b)
+        aussen.addLayout(form)
+
+        hinweis = QLabel(dlg)
+        hinweis.setWordWrap(True)
+        aussen.addWidget(hinweis)
+
+        knoepfe = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel, parent=dlg)
+        aussen.addWidget(knoepfe)
+        knoepfe.accepted.connect(dlg.accept)
+        knoepfe.rejected.connect(dlg.reject)
+
+        def _pruefen():
+            laenge = sb_b.value() - sb_a.value()
+            ok = laenge >= 0.1
+            hinweis.setText(
+                "Length %.3f s\nAllowed here %.3f s - %.3f s: the overlay has "
+                "to stay inside one kept segment and leave room for the "
+                "crossfades next to it."
+                % (laenge, frueh, spaet)
+                + ("" if ok else "\nThe end must lie behind the start."))
+            knoepfe.button(QDialogButtonBox.Ok).setEnabled(ok)
+
+        sb_a.valueChanged.connect(_pruefen)
+        sb_b.valueChanged.connect(_pruefen)
+        _pruefen()
+
+        if dlg.exec() != QDialog.Accepted:
+            return
+        neu_a, neu_b = round(sb_a.value(), 3), round(sb_b.value(), 3)
+        if abs(neu_a - start_s) < 0.001 and abs(neu_b - end_s) < 0.001:
+            return
+        self._on_overlay_move(start_s, end_s, neu_a, neu_b)
+
     def _on_timeline_overlay_remove(self, start_s, end_s):
         self._overlay_manager.remove_overlay_interval(start_s, end_s)    
 

@@ -63,6 +63,16 @@ class VideoTimelineWidget(QWidget):
     #: nicht: ob sich ein Schnitt zuruecknehmen laesst und was dabei mit der
     #: GPX-Spur geschieht, weiss nur das Fenster.
     cutDeleteRequested = Signal(float, float)
+    #: Ein Overlay wurde gezogen: (alt_start, alt_ende, neu_start, neu_ende).
+    #: Wie beim Schnitt erst beim Loslassen - waehrend des Ziehens wird nur
+    #: gezeichnet.
+    overlayMoveRequested = Signal(float, float, float, float)
+    #: Rechtsklick auf ein Overlay. Frueher kam hier sofort die Frage
+    #: "Remove Overlay?"; seit es mehr als eine Moeglichkeit gibt, stellt das
+    #: Fenster ein Menue zusammen - so wie beim Schnitt auch.
+    overlayMenuRequested = Signal(float, float, object)
+    #: Das ausgewaehlte Overlay soll weg (Entf-Taste).
+    overlayDeleteRequested = Signal(float, float)
     #: Rechtsklick auf einen Schnitt: das Fenster soll das Menue dazu zeigen.
     #: Was darin moeglich ist, weiss nur das MainWindow - ob es eine
     #: Aufzeichnung gibt, ob die GPX-Spur zwischenzeitlich bearbeitet wurde.
@@ -107,6 +117,9 @@ class VideoTimelineWidget(QWidget):
         self._scroll_speed_px = 50
         self.setStyleSheet("background-color: #333333;")
         self._overlay_intervals = []
+        # Ein- und Ausblendlaenge je Overlay, in Sekunden, unter dem
+        # Schluessel (start, ende). Beide liegen INNERHALB des Overlays.
+        self._overlay_blenden = {}
         # Siehe set_overlays_wirksam: im Copy-Mode nur Rahmen statt Fuellung.
         self._overlays_wirksam = True
         self.setContextMenuPolicy(Qt.DefaultContextMenu)
@@ -119,6 +132,7 @@ class VideoTimelineWidget(QWidget):
         self._zieh_zeit_start = 0.0    # Zeit unter dem Zeiger beim Zugriff
         self._zieh_grenzen = (0.0, 0.0)
         self._zieh_neu = None          # (start_s, ende_s) der neuen Lage
+        self._zieh_typ = "schnitt"     # "schnitt" oder "overlay"
         self._zeiger_form = None
 
         # Der ausgewaehlte Schnitt, (start_s, ende_s) oder None. Angeklickt
@@ -126,6 +140,10 @@ class VideoTimelineWidget(QWidget):
         # _markierter_bereich: der zeigt nur, welcher Schnitt gerade ein
         # Menue offen hat, und verschwindet sofort wieder.
         self._gewaehlter_schnitt = None
+        # Dasselbe fuer Overlays. Ausgewaehlt ist immer nur EINES von beiden:
+        # Entf muss eindeutig sein, sonst weiss niemand, was gleich
+        # verschwindet.
+        self._gewaehltes_overlay = None
 
         # Zwei Auskuenfte, die nur das MainWindow geben kann: in welchem
         # Bereich ein Schnitt liegen darf und ob er ueberhaupt umziehen darf.
@@ -134,6 +152,10 @@ class VideoTimelineWidget(QWidget):
         # auseinanderlaufen. Gesetzt werden sie im MainWindow.
         self.grenzen_geber = None      # (start, ende) -> (links, rechts, art)
         self.umzug_pruefer = None      # (start, ende) -> (moeglich, grund)
+        #: (start, ende) -> (frueh, spaet). Wo ein Overlay liegen darf,
+        #: entscheidet der OverlayManager: es muss in EIN Keep-Segment passen
+        #: und den Platz der Blenden freilassen.
+        self.overlay_grenzen_geber = None
 
         # Ohne das kommt mouseMoveEvent nur bei gedrueckter Taste - die
         # Zeigerform ueber einer Kante braucht es aber vorher.
@@ -203,7 +225,31 @@ class VideoTimelineWidget(QWidget):
 
     def clear_overlay_intervals(self):
         self._overlay_intervals.clear()
+        self._overlay_blenden = {}
+        # Die Auswahl zeigte auf ein Overlay, das es gleich nicht mehr gibt.
+        self._gewaehltes_overlay = None
         self.update()
+
+    def set_overlay_blenden(self, eintraege):
+        """Ein- und Ausblendlaenge je Overlay: [(start, ende, ein, aus), ...].
+
+        Anders als bei einem Schnitt liegen diese Blenden INNERHALB des
+        Balkens: ein Overlay blendet an seinem eigenen Anfang ein und an
+        seinem Ende aus. Gezeichnet werden sie deshalb als Rampen im Balken
+        und nicht als Fluegel daneben.
+        """
+        neu = {}
+        for eintrag in (eintraege or []):
+            try:
+                a, b = eintrag[0], eintrag[1]
+                ein, aus = float(eintrag[2] or 0), float(eintrag[3] or 0)
+            except (TypeError, IndexError, ValueError):
+                continue
+            if ein > 0 or aus > 0:
+                neu[self._cut_key(a, b)] = (ein, aus)
+        if neu != self._overlay_blenden:
+            self._overlay_blenden = neu
+            self.update()
 
     def set_overlays_wirksam(self, wirksam: bool):
         """Ob die Overlays im aktuellen Modus ueberhaupt im Export landen.
@@ -349,11 +395,37 @@ class VideoTimelineWidget(QWidget):
         return None, None
 
     def _schnitt_waehlen(self, schnitt):
-        """Auswahl setzen oder mit None aufheben."""
-        if schnitt == self._gewaehlter_schnitt:
+        """Schnitt auswaehlen oder mit None abwaehlen. Hebt eine
+        Overlay-Auswahl auf - es ist immer nur eines ausgewaehlt."""
+        if schnitt == self._gewaehlter_schnitt and (
+                schnitt is None or self._gewaehltes_overlay is None):
             return
         self._gewaehlter_schnitt = schnitt
+        if schnitt is not None:
+            self._gewaehltes_overlay = None
         self.update()
+
+    def _overlay_waehlen(self, overlay):
+        """Overlay auswaehlen oder mit None abwaehlen."""
+        if overlay == self._gewaehltes_overlay and (
+                overlay is None or self._gewaehlter_schnitt is None):
+            return
+        self._gewaehltes_overlay = overlay
+        if overlay is not None:
+            self._gewaehlter_schnitt = None
+        self.update()
+
+    def _overlay_unter(self, x_mouse):
+        """Wie _kante_unter(), nur fuer die blauen Overlay-Balken."""
+        for (a, b) in self._overlay_intervals:
+            if abs(x_mouse - self._x_bei_zeit(a)) <= self._KANTE_PX:
+                return (a, b), "links"
+            if abs(x_mouse - self._x_bei_zeit(b)) <= self._KANTE_PX:
+                return (a, b), "rechts"
+        for (a, b) in self._overlay_intervals:
+            if self._x_bei_zeit(a) <= x_mouse <= self._x_bei_zeit(b):
+                return (a, b), "block"
+        return None, None
 
     def _zeiger_setzen(self, form):
         """Zeigerform nur bei Aenderung setzen - das laeuft bei jeder
@@ -378,11 +450,41 @@ class VideoTimelineWidget(QWidget):
         from PySide6.QtWidgets import QToolTip
         QToolTip.showText(global_pos, text, self)
 
-    def _umzug_beginnen(self, schnitt, art, x_mouse, global_pos):
-        """Umzug vorbereiten. False heisst: es bleibt beim Marker."""
+    def _umzug_beginnen(self, schnitt, art, x_mouse, global_pos,
+                        typ="schnitt"):
+        """Umzug vorbereiten. False heisst: es bleibt beim Marker.
+
+        Schnitt und Overlay teilen sich diese Mechanik. Verschieden sind nur
+        die Anschlaege und die Frage, ob eine Kante festliegt: ein Overlay hat
+        keine feste Kante, es muss nur in sein Keep-Segment passen.
+        """
+        a0, b0 = schnitt
+
+        if typ == "overlay":
+            if self.overlay_grenzen_geber is None:
+                return False
+            frueh, spaet = self.overlay_grenzen_geber(a0, b0)
+            if spaet - frueh < self._MIN_LAENGE_S:
+                self._hinweis(global_pos,
+                              "There is no room to move this overlay: the "
+                              "crossfades take up the space next to it.")
+                return False
+            zeit = self._zeit_bei_x(x_mouse)
+            if zeit is None:
+                return False
+            self._zieh_typ = "overlay"
+            self._zieh_schnitt = (float(a0), float(b0))
+            self._zieh_art = art
+            self._zieh_zeit_start = zeit
+            self._zieh_grenzen = (float(frueh), float(spaet))
+            self._zieh_neu = (float(a0), float(b0))
+            self._zeiger_setzen(Qt.SizeAllCursor if art == "block"
+                                else Qt.SizeHorCursor)
+            self.update()
+            return True
+
         if self.grenzen_geber is None:
             return False
-        a0, b0 = schnitt
 
         if self.umzug_pruefer is not None:
             erlaubt, grund = self.umzug_pruefer(a0, b0)
@@ -418,6 +520,7 @@ class VideoTimelineWidget(QWidget):
         if zeit is None:
             return False
 
+        self._zieh_typ = "schnitt"
         self._zieh_schnitt = (float(a0), float(b0))
         self._zieh_art = art
         self._zieh_zeit_start = zeit
@@ -508,6 +611,18 @@ class VideoTimelineWidget(QWidget):
                     schnitt, art, event.pos().x(), event.globalPos()):
                 event.accept()
                 return
+            # Schnitte haben Vorrang: wo ein Schnitt liegt, ist kein Bild, und
+            # ein Overlay dort waere ohnehin nicht erlaubt.
+            overlay, o_art = self._overlay_unter(event.pos().x())
+            # Auswaehlen unabhaengig davon, ob ein Umzug daraus wird - genau
+            # wie beim Schnitt. Auf freier Flaeche faellt beides weg.
+            if schnitt is None:
+                self._overlay_waehlen(overlay)
+            if overlay is not None and self._umzug_beginnen(
+                    overlay, o_art, event.pos().x(), event.globalPos(),
+                    typ="overlay"):
+                event.accept()
+                return
             self._dragging_marker = True
             self._update_marker_by_mouse_x(event.pos().x())
             event.accept()
@@ -535,6 +650,8 @@ class VideoTimelineWidget(QWidget):
             # Ohne gedrueckte Taste nur die Zeigerform. Rein geometrisch -
             # ob der Schnitt umziehen DARF, wird erst beim Zugriff geprueft.
             _s, art = self._kante_unter(event.pos().x())
+            if art is None:
+                _o, art = self._overlay_unter(event.pos().x())
             if art in ("links", "rechts"):
                 self._zeiger_setzen(Qt.SizeHorCursor)
             elif art == "block":
@@ -568,6 +685,7 @@ class VideoTimelineWidget(QWidget):
         if event.button() == Qt.LeftButton and self._zieh_schnitt is not None:
             a0, b0 = self._zieh_schnitt
             a, b = self._zieh_neu or (a0, b0)
+            typ = self._zieh_typ
             unveraendert = abs(a - a0) < 0.001 and abs(b - b0) < 0.001
             self._zieh_schnitt = None
             self._zieh_neu = None
@@ -578,6 +696,8 @@ class VideoTimelineWidget(QWidget):
                 # Nur geklickt, nicht gezogen - dann war der Marker gemeint.
                 # Ohne das waere ein Klick in einen Schnitt wirkungslos.
                 self._update_marker_by_mouse_x(event.pos().x())
+            elif typ == "overlay":
+                self.overlayMoveRequested.emit(a0, b0, round(a, 3), round(b, 3))
             else:
                 self.cutMoveRequested.emit(a0, b0, round(a, 3), round(b, 3))
             event.accept()
@@ -605,9 +725,16 @@ class VideoTimelineWidget(QWidget):
                 self.cutDeleteRequested.emit(float(a), float(b))
                 event.accept()
                 return
+            if self._gewaehltes_overlay is not None:
+                a, b = self._gewaehltes_overlay
+                self.overlayDeleteRequested.emit(float(a), float(b))
+                event.accept()
+                return
         elif event.key() == Qt.Key_Escape:
-            if self._gewaehlter_schnitt is not None:
+            if (self._gewaehlter_schnitt is not None
+                    or self._gewaehltes_overlay is not None):
                 self._schnitt_waehlen(None)
+                self._overlay_waehlen(None)
                 event.accept()
                 return
         super().keyPressEvent(event)
@@ -838,6 +965,44 @@ class VideoTimelineWidget(QWidget):
                 painter.drawLine(QPointF(x, h), QPointF(x + h, 0.0))
             x += abstand
         painter.restore()
+
+    def _draw_overlay_blenden(self, painter, start_s, end_s, x_start, x_end, h):
+        """Die Ein- und Ausblendung als Rampen im Overlay-Balken.
+
+        Die Rampe steigt ueber die Einblendlaenge von unten nach oben und
+        faellt am Ende wieder ab - so, wie das Bild kommt und geht. Damit ist
+        auf einen Blick zu sehen, wie viel des Overlays ueberhaupt voll
+        sichtbar ist; bei einem kurzen Overlay mit langen Blenden ist das
+        ueberraschend wenig.
+        """
+        from PySide6.QtGui import QPolygonF
+
+        ein, aus = self._overlay_blenden.get(
+            self._cut_key(start_s, end_s), (0.0, 0.0))
+        if (ein <= 0 and aus <= 0) or self.total_duration <= 0:
+            return
+        je_sekunde = (x_end - x_start) / max(1e-9, (end_s - start_s))
+
+        painter.save()
+        try:
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(120, 170, 255, 110))
+            if ein > 0:
+                breite = min(ein * je_sekunde, x_end - x_start)
+                if breite >= 1:
+                    painter.drawPolygon(QPolygonF([
+                        QPointF(x_start, h),
+                        QPointF(x_start + breite, 0.0),
+                        QPointF(x_start + breite, h)]))
+            if aus > 0:
+                breite = min(aus * je_sekunde, x_end - x_start)
+                if breite >= 1:
+                    painter.drawPolygon(QPolygonF([
+                        QPointF(x_end - breite, 0.0),
+                        QPointF(x_end, h),
+                        QPointF(x_end - breite, h)]))
+        finally:
+            painter.restore()
 
     def _draw_blendenfluegel(self, painter, x_start, x_end, halb_px, h, w):
         """Die Ueberblendung, die links und rechts ins Videobild hineinreicht.
@@ -1070,12 +1235,17 @@ class VideoTimelineWidget(QWidget):
                 if rect_w < 2:
                     rect_w = 2
                 painter.drawRect(x_start, 0, rect_w, h)
+                self._draw_overlay_blenden(painter, start_s, end_s,
+                                           x_start, x_end, h)
 
-        # Der ausgewaehlte Schnitt: nur ein Rahmen, keine Fuellung. Der Block
+        # Das Ausgewaehlte: nur ein Rahmen, keine Fuellung. Der Schnittblock
         # ist schwarz; eine Fuellung wuerde ihn aufhellen und dabei aussehen
-        # wie die Hervorhebung des Menues darunter.
-        if self._gewaehlter_schnitt and self.total_duration > 0:
-            g_start, g_end = self._gewaehlter_schnitt
+        # wie die Hervorhebung des Menues darunter. Dieselbe Farbe fuer
+        # Schnitt und Overlay - Gelb heisst hier "ausgewaehlt", und mehr als
+        # eines ist es nie.
+        gewaehlt = self._gewaehlter_schnitt or self._gewaehltes_overlay
+        if gewaehlt and self.total_duration > 0:
+            g_start, g_end = gewaehlt
             gx0 = (max(0.0, g_start) / self.total_duration
                    ) * timeline_real_width - self._horizontal_offset
             gx1 = (min(self.total_duration, g_end) / self.total_duration
@@ -1137,23 +1307,17 @@ class VideoTimelineWidget(QWidget):
         for (start_s, end_s) in self._overlay_intervals:
             if start_s <= time_clicked <= end_s:
                 found_any = True
-
-                # Erst hervorheben, dann fragen: die Rueckfrage startet ihre
-                # eigene Ereignisschleife, das Neuzeichnen kommt also noch
-                # rechtzeitig an.
+                # Frueher kam hier sofort "Remove Overlay?". Seit sich ein
+                # Overlay auch verschieben laesst und eigene Blendenlaengen
+                # hat, ist Loeschen nur noch eine von mehreren
+                # Moeglichkeiten - deshalb ein Menue, wie beim Schnitt.
+                # Zusammengestellt wird es im Fenster.
                 self._markieren(start_s, end_s)
                 try:
-                    reply = QMessageBox.question(
-                        None,
-                        "Remove Overlay?",
-                        f"Remove Overlay from {start_s:.1f}s to {end_s:.1f}s?",
-                        QMessageBox.Yes | QMessageBox.No,
-                        QMessageBox.No
-                    )
+                    self.overlayMenuRequested.emit(start_s, end_s,
+                                                   event.globalPos())
                 finally:
                     self._markieren(None)
-                if reply == QMessageBox.Yes:
-                    self.overlayRemoveRequested.emit(start_s, end_s)
                 break
         # 3) Sonst pruefen, ob der Klick in einem Schnitt liegt
         #

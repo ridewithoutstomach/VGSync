@@ -74,77 +74,15 @@ class OverlayManager(QObject):
         """
         start_s = float(ovl_dict.get("start", 0.0))
         end_s   = float(ovl_dict.get("end", 0.0))
-        if end_s <= start_s:
-            print("[WARN] add_overlay => end <= start => ignoring.")
-            return
 
-        # --- Kontext besorgen (MainWindow & Settings) ---
         mw = self.parent()  # OverlayManager wurde mit parent=MainWindow erzeugt
         if mw is None:
             print("[ERR] add_overlay => missing MainWindow parent; abort.")
             return
 
-        # XFade ausschließlich aus dem Setup (NICHT aus Dialogen!)
-        s = QSettings("KVRouite", "KVRouite")
-        try:
-            xfade = float(s.value("encoder/xfade", 2, type=int))
-        except Exception:
-            xfade = 2.0
-        if xfade < 0:
-            xfade = 0.0
-
-        # --- Videolänge & Cuts ---
-        total = float(getattr(mw, "real_total_duration", 0.0))
-        if total <= 0.0:
-            QMessageBox.warning(mw, "Overlay not possible", "No video loaded.")
-            return
-
-        try:
-            cuts = list(mw.cut_manager.get_cut_intervals())  # [(start,end), ...]
-        except Exception:
-            cuts = []
-
-        # --- Keep-Segmente aus MainWindow nutzen (keine neuen defs!) ---
-        try:
-            keep_list = mw._compute_keep_intervals(cuts, total)  # [(ks,ke), ...]
-        except Exception as e:
-            print("[ERR] add_overlay => _compute_keep_intervals() failed:", e)
-            QMessageBox.warning(mw, "Overlay not possible",
-                                "Internal error while computing keep intervals.")
-            return
-
-        # --- 1) Komplette Überdeckung prüfen: [start,end] muss in EINEM Keep liegen ---
-        containing = None
-        for (ks, ke) in keep_list:
-            if start_s >= ks and end_s <= ke:
-                containing = (ks, ke)
-                break
-
-        if containing is None:
-            # Overlay würde Cut/Video-Grenzen überschreiten -> Abbruch
-            QMessageBox.warning(
-                mw,
-                "Overlay exceeds free segment",
-                (f"The overlay [{start_s:.2f}s … {end_s:.2f}s] crosses a cut or video boundary.\n"
-                 "Move it or shorten it.")
-            )
-            return
-
-        # --- 2) xfade-Rand an beiden Seiten einhalten ---
-        ks, ke = containing
-        allowed_start_min = ks + xfade
-        allowed_end_max   = ke - xfade
-
-        if start_s < allowed_start_min or end_s > allowed_end_max:
-            max_len_here = max(0.0, allowed_end_max - max(start_s, allowed_start_min))
-            QMessageBox.warning(
-                mw,
-                "Not enough space for crossfade",
-                (f"You must keep {xfade:.2f}s free before and after the overlay.\n\n"
-                 f"Allowed here: {allowed_start_min:.2f}s … {allowed_end_max:.2f}s\n"
-                 f"Your attempt: {start_s:.2f}s … {end_s:.2f}s (L={end_s-start_s:.2f}s)\n"
-                 f"Max. length at this position: {max_len_here:.2f}s.")
-            )
+        ok, grund = self.zeiten_pruefen(start_s, end_s)
+        if not ok:
+            QMessageBox.warning(mw, "Overlay not possible", grund)
             return
 
         # --- Alles gut -> speichern + Timeline markieren ---
@@ -155,6 +93,177 @@ class OverlayManager(QObject):
         self.overlaysChanged.emit()
         print("[OverlayManager] => Overlay ADDED:", ovl_dict)
 
+
+    # ------------------------------------------------------------------
+    # Zeiten: pruefen, Grenzen, verschieben
+    # ------------------------------------------------------------------
+    def _blendenrand(self, mw, zeit_s) -> float:
+        """Wie viel Platz die Blende an dieser Keep-Grenze braucht.
+
+        Seit 6.03 kann jeder Schnitt seine eigene Blendenlaenge haben; der
+        Rand haengt deshalb am jeweiligen Schnitt und nicht mehr an einem
+        globalen Wert. _blende_am_rand() im Fenster weiss das. Der Rueckfall
+        auf encoder/xfade gilt nur, falls die Funktion einmal fehlt.
+        """
+        holen = getattr(mw, "_blende_am_rand", None)
+        if callable(holen):
+            try:
+                return float(holen(zeit_s))
+            except Exception as e:
+                print(f"[WARN] Blendenrand: {e}")
+        try:
+            wert = float(QSettings("KVRouite", "KVRouite").value(
+                "encoder/xfade", 2, type=int))
+        except Exception:
+            wert = 2.0
+        return max(0.0, wert)
+
+    def _keep_fuer(self, mw, start_s, end_s):
+        """Das Keep-Segment, das [start, end] vollstaendig enthaelt, oder None."""
+        total = float(getattr(mw, "real_total_duration", 0.0))
+        if total <= 0.0:
+            return None
+        try:
+            cuts = list(mw.cut_manager.get_cut_intervals())
+            keeps = mw._compute_keep_intervals(cuts, total)
+        except Exception as e:
+            print(f"[ERR] Keep-Segmente: {e}")
+            return None
+        for (ks, ke) in keeps:
+            if start_s >= ks - 1e-9 and end_s <= ke + 1e-9:
+                return (float(ks), float(ke))
+        return None
+
+    def zeiten_pruefen(self, start_s, end_s):
+        """Duerfen Anfang und Ende so liegen? Rueckgabe (ok, grund).
+
+        Herausgeloest aus add_overlay(), weil jetzt auch das Verschieben und
+        das Ziehen an den Raendern durch dieselbe Pruefung muessen. Zwei
+        Regeln, und beide sind hart:
+
+          1. Das Overlay muss vollstaendig in EINEM Keep-Segment liegen. Ueber
+             einen Schnitt hinweg gibt es kein durchgehendes Bild.
+          2. Zu beiden Enden des Segments muss der Platz der dortigen Blende
+             frei bleiben. Sonst laege das Overlay im ueberblendeten Bereich.
+        """
+        mw = self.parent()
+        if mw is None:
+            return False, "Internal error: no main window."
+        start_s, end_s = float(start_s), float(end_s)
+        if end_s <= start_s:
+            return False, "The overlay must end after it starts."
+
+        total = float(getattr(mw, "real_total_duration", 0.0))
+        if total <= 0.0:
+            return False, "No video loaded."
+
+        keep = self._keep_fuer(mw, start_s, end_s)
+        if keep is None:
+            return False, (f"The overlay [{start_s:.2f}s - {end_s:.2f}s] crosses "
+                           "a cut or a video boundary.\nMove it or shorten it.")
+
+        ks, ke = keep
+        rand_links = self._blendenrand(mw, ks)
+        rand_rechts = self._blendenrand(mw, ke)
+        frueh = ks + rand_links
+        spaet = ke - rand_rechts
+        if start_s < frueh - 1e-9 or end_s > spaet + 1e-9:
+            moeglich = max(0.0, spaet - frueh)
+            return False, (
+                f"The crossfades next to this segment need "
+                f"{rand_links:.1f}s at its start and {rand_rechts:.1f}s at its "
+                f"end.\n\n"
+                f"Allowed here: {frueh:.2f}s - {spaet:.2f}s "
+                f"(at most {moeglich:.2f}s long)\n"
+                f"Your overlay:  {start_s:.2f}s - {end_s:.2f}s "
+                f"({end_s - start_s:.2f}s long)")
+        return True, ""
+
+    def grenzen_fuer(self, start_s, end_s):
+        """In welchem Bereich darf dieses Overlay liegen? (frueh, spaet).
+
+        Fuer die Anschlaege beim Ziehen. Gibt (start, end) zurueck, wenn sich
+        kein passendes Keep-Segment finden laesst - dann bewegt sich nichts.
+        """
+        mw = self.parent()
+        keep = None if mw is None else self._keep_fuer(mw, start_s, end_s)
+        if keep is None:
+            return float(start_s), float(end_s)
+        ks, ke = keep
+        return (ks + self._blendenrand(mw, ks),
+                ke - self._blendenrand(mw, ke))
+
+    def _finde(self, start_s, end_s):
+        """Platz des Overlays mit diesen Zeiten, oder -1."""
+        for i, ovl in enumerate(self._overlays):
+            if (abs(float(ovl.get("start", 0.0)) - start_s) < 0.001
+                    and abs(float(ovl.get("end", 0.0)) - end_s) < 0.001):
+                return i
+        return -1
+
+    def overlay_verschieben(self, alt_start, alt_ende, neu_start, neu_ende):
+        """Anfang und Ende eines Overlays aendern. Rueckgabe (ok, grund).
+
+        Der einzige Weg, auf dem sich die Zeiten aendern - update_overlay()
+        laesst sie bewusst nicht zu, weil es die Pruefung nicht leisten kann.
+
+        Die Blendenlaengen werden mitgezogen, wenn das Overlay kuerzer wird
+        als sie: eine Einblendung, die laenger dauert als das Overlay, waere
+        im Export nicht darstellbar.
+        """
+        i = self._finde(float(alt_start), float(alt_ende))
+        if i < 0:
+            return False, "This overlay no longer exists."
+
+        ok, grund = self.zeiten_pruefen(neu_start, neu_ende)
+        if not ok:
+            return False, grund
+
+        self.vorAenderung.emit(copy.deepcopy(self._overlays))
+        ovl = self._overlays[i]
+        ovl["start"] = float(neu_start)
+        ovl["end"] = float(neu_ende)
+        dauer = float(neu_ende) - float(neu_start)
+        ein = float(ovl.get("fade_in", 0) or 0)
+        aus = float(ovl.get("fade_out", 0) or 0)
+        if ein + aus > dauer:
+            faktor = dauer / (ein + aus) if (ein + aus) > 0 else 0.0
+            ovl["fade_in"] = round(ein * faktor, 2)
+            ovl["fade_out"] = round(aus * faktor, 2)
+            print(f"[OverlayManager] Blenden mitgekuerzt: "
+                  f"{ein:.2f}/{aus:.2f} -> {ovl['fade_in']:.2f}/"
+                  f"{ovl['fade_out']:.2f}")
+        self._timeline_neu()
+        self.overlaysChanged.emit()
+        print(f"[OverlayManager] verschoben: {alt_start:.2f}-{alt_ende:.2f} "
+              f"-> {neu_start:.2f}-{neu_ende:.2f}")
+        return True, ""
+
+    def blenden_setzen(self, start_s, end_s, fade_in, fade_out):
+        """Ein- und Ausblendlaenge eines Overlays setzen. Rueckgabe (ok, grund)."""
+        i = self._finde(float(start_s), float(end_s))
+        if i < 0:
+            return False, "This overlay no longer exists."
+        ein = max(0.0, float(fade_in))
+        aus = max(0.0, float(fade_out))
+        dauer = float(end_s) - float(start_s)
+        if ein + aus > dauer + 1e-9:
+            return False, (f"Fade in and fade out together ({ein + aus:.2f}s) "
+                           f"do not fit into the overlay ({dauer:.2f}s).")
+
+        self.vorAenderung.emit(copy.deepcopy(self._overlays))
+        self._overlays[i]["fade_in"] = ein
+        self._overlays[i]["fade_out"] = aus
+        self.overlaysChanged.emit()
+        print(f"[OverlayManager] Blenden {start_s:.2f}-{end_s:.2f}: "
+              f"ein {ein:.2f}s, aus {aus:.2f}s")
+        return True, ""
+
+    def _timeline_neu(self):
+        """Die blauen Balken neu setzen - nach jeder Zeitaenderung noetig."""
+        self.timeline.clear_overlay_intervals()
+        for ovl in self._overlays:
+            self.timeline.add_overlay_interval(ovl["start"], ovl["end"])
 
     def clear_overlays(self):
         self._overlays.clear()
