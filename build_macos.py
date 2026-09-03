@@ -58,6 +58,7 @@ from build_with_pyinstaller import (      # noqa: E402
     GSTREAMER_PAKETE,
     check_ffmpeg_frei,
     check_mpv_frei,
+    gio_module_entfernen,
     copy_only_pdfs,
     copy_tree_all,
     load_app_version,
@@ -423,6 +424,10 @@ def build_macos():
     ressourcen_einlegen(buendel)
     fehlende_rechtstexte = rechtstexte_einlegen(buendel)
     fehlende_gstreamer = gstreamer_pruefen(buendel)
+
+    # Das GIO-Proxy-Modul heraus - VOR dem Signieren, sonst waere das Siegel
+    # sofort wieder ungueltig.
+    gio_module_entfernen(buendel)
 
     # Die Gegenproben ganz zum Schluss, wenn nichts mehr dazukommt.
     if check_mpv_frei(buendel):

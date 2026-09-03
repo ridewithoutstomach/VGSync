@@ -158,6 +158,63 @@ def cli_werkzeuge_entfernen(internal_dir):
     return entfernt
 
 
+#: GIO-Module, die wir nicht brauchen und die beim Start eine Fehlermeldung
+#: erzeugen. Der Name steht ohne Endung da, damit dieselbe Liste unter Windows
+#: (giolibproxy.dll) und macOS (libgiolibproxy.so) greift.
+UNNOETIGE_GIO_MODULE = ("giolibproxy",)
+
+
+def gio_module_entfernen(ziel_ordner):
+    """Den Proxy-Aufloeser von GIO aus dem fertigen Ordner nehmen.
+
+    Beim Start meldet das Programm sonst jedes Mal:
+
+        Failed to load module: .../lib/gio/modules/giolibproxy.dll
+
+    Am 03.09.2026 nachgestellt: es fehlt keine Datei, es fehlt ein Suchpfad.
+    Die Kette ist giolibproxy.dll -> proxy-1.dll (liegt in bin/, wird
+    gefunden) -> pxbackend-1.0.dll (liegt in lib/libproxy/, und dieser
+    Unterordner steht nicht im Suchpfad). Windows meldet dann Fehler 126.
+    Zwei sonst gleiche Prozesse, einmal mit und einmal ohne diesen Ordner im
+    Suchpfad: ohne Fehler 126, mit geladen.
+
+    Das ist ein Verpackungsfehler der GStreamer-Wheels, nicht unserer. Repariert
+    wird er hier trotzdem nicht, denn gebraucht wird das Modul nicht: es liest
+    die Proxy-Einstellungen des Systems fuer Netzwerkzugriffe ueber GIO.
+    KVRouite liest oertliche Dateien, und die Karte hat ihre eigene
+    Netzwerkschicht (QtWebEngine). Also kommt das Modul gar nicht erst mit -
+    kein Modul, kein Ladeversuch, keine Meldung.
+
+    Das Nachbarmodul gioopenssl bleibt ausdruecklich drin: es laedt fehlerfrei,
+    seine Abhaengigkeiten liegen alle in bin/.
+
+    ACHTUNG bei macOS: das muss VOR dem Signieren passieren. Alles, was danach
+    am Buendel geaendert wird, macht das Siegel ungueltig.
+
+    Rueckgabe: die entfernten Dateien, relativ zum Zielordner.
+    """
+    entfernt = []
+    for wurzel, _dirs, dateien in os.walk(ziel_ordner):
+        teile = wurzel.replace("\\", "/").lower().split("/")
+        if teile[-2:] != ["gio", "modules"]:
+            continue
+        for name in dateien:
+            if any(m in name.lower() for m in UNNOETIGE_GIO_MODULE):
+                voll = os.path.join(wurzel, name)
+                try:
+                    os.remove(voll)
+                except OSError as fehler:
+                    print("[WARN] %s liess sich nicht entfernen: %s"
+                          % (name, fehler))
+                    continue
+                entfernt.append(os.path.relpath(voll, ziel_ordner))
+    for eintrag in entfernt:
+        print("[CLEAN GIO] entfernt:", eintrag)
+    if not entfernt:
+        print("[INFO] Kein ueberfluessiges GIO-Modul gefunden - nichts zu tun.")
+    return entfernt
+
+
 def check_ffmpeg_frei(target_dir):
     """
     Gegenprobe: der GPL-Vollbuild von ffmpeg darf nicht im Build liegen.
@@ -540,6 +597,10 @@ def build_windows(build_setup: bool = False):
 
     print(f"[INFO] PyInstaller-Struktur OK: {os.path.abspath(target_dir)}")
     print("[INFO] Enthält: KVRouite.exe, ol.css, ol.js, map_page.html, icon/, _internal/…")
+
+    # Das GIO-Proxy-Modul heraus, bevor gepackt wird - siehe
+    # gio_module_entfernen(). Danach kommt nichts mehr dazu.
+    gio_module_entfernen(target_dir)
 
     # Letzte Gegenprobe, wenn nichts mehr dazukommt: kein mpv im Bundle.
     # Findet sich doch welches, wird hier abgebrochen - ein ZIP oder ein
