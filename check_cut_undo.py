@@ -9,8 +9,8 @@ sich nicht durch Hinsehen entscheiden: eine um Sekundenbruchteile verschobene
 Spur sieht im Chart richtig aus und faellt erst auf, wenn Video und Spur im
 Export auseinanderlaufen.
 
-DREI FRAGEN
------------
+WAS GEPRUEFT WIRD
+-----------------
 1. Reihenfolge   Nimmt man bei zwei Schnitten den VORDEREN zuerst zurueck,
                  verschiebt sich die Spur unter der Aufzeichnung des hinteren
                  weg. Ohne Nachfuehren weichen dabei Punkte ab, ohne dass es
@@ -19,22 +19,31 @@ DREI FRAGEN
                  6.03 standen sie nur im Speicher - nach jedem "Open Project"
                  war "Undo Cut" grau.
 3. Verschobene   Eine Spur, deren Zeiten nachtraeglich veraendert wurden, darf
-   Spur          NICHT zurueckgenommen werden. Der Fingerabdruck allein kann
-                 das nach dem Laden nicht mehr entscheiden, weil er dabei
-                 zwangslaeufig neu gerechnet wird - dafuer gibt es
-                 naht_stimmt().
+   Spur          NICHT zurueckgenommen werden. Entscheidend ist, dass der
+                 Fingerabdruck AUS DER DATEI kommt: neu gerechnet passte er
+                 immer und gaebe jede Aufzeichnung ungeprueft frei.
+4. End-Schnitt   Er verschiebt nichts, schneidet nur hinten ab. Faellt seine
+                 Naht genau auf einen vorhandenen Punkt, steht der doppelt in
+                 der Spur - beide Lagen werden geprueft.
+5. Start-Schnitt Der einzige, der die GANZE Zeitachse verschiebt und den
+                 Video/GPX-Versatz auf 0 setzt. Beides muss zurueck, und die
+                 uebrigen Aufzeichnungen muessen die Achse mitmachen - seine
+                 eigene aber gerade nicht, wenn ein Schnitt DAHINTER
+                 zurueckgenommen wird.
 
 WAS ECHT IST UND WAS NACHGEBAUT
 -------------------------------
 Echt ist alles, worum es geht: aufzeichnung_merken(), spur_ohne_schnitt(),
-aufzeichnungen_nachfuehren(), naht_stimmt(), get_cut_points()/set_cut_points()
-und ruecknahme_moeglich() aus managers/cut_manager.py.
+aufzeichnungen_nachfuehren(), get_cut_points()/set_cut_points(),
+get_gpx_abdruck()/set_gpx_abdruck() und ruecknahme_moeglich() aus
+managers/cut_manager.py.
 
-Nachgebaut sind zwei Dinge, die ohne Qt und ohne geladenes Video nicht zu
-haben sind: das Anwenden eines Schnitts auf die Spur (Middle-Cut-Zweig aus
-views/mainwindow.py, on_cut_clicked_video) und die beiden Stellen, an denen
-das Programm aufzeichnungen_nachfuehren() ruft. Aendert sich dort etwas, muss
-es hier mitgezogen werden - deshalb steht an beiden Stellen ein Hinweis.
+Nachgebaut sind die Dinge, die ohne Qt und ohne geladenes Video nicht zu
+haben sind: das Anwenden der drei Schnittarten auf die Spur (aus
+views/mainwindow.py: on_cut_clicked_video mit seinen beiden Zweigen und
+on_set_begin_clicked) und die Stellen, an denen das Programm
+aufzeichnungen_nachfuehren() ruft. Aendert sich dort etwas, muss es hier
+mitgezogen werden - deshalb steht an jeder dieser Stellen ein Hinweis.
 
 Rueckgabe: 0 wenn alles stimmt, 1 wenn etwas abweicht.
 """
@@ -145,6 +154,76 @@ def schneiden(gpx_data, start_dt, end_dt):
     return neu, entfernt, verworfen, interpoliert, dauer
 
 
+def schneiden_ende(gpx_data, ziel_dt):
+    """NACHGEBAUT: der End-Cut-Zweig aus on_cut_clicked_video().
+
+    Gibt (neue_spur, entfernt, interpoliert) zurueck. Eine Dauer gibt es
+    nicht - hinter einem End-Schnitt rueckt nichts nach.
+    """
+    n = len(gpx_data)
+    cut_index = -1
+    for i in range(n - 1):
+        if gpx_data[i].get("time") <= ziel_dt <= gpx_data[i + 1].get("time"):
+            cut_index = i
+            break
+
+    neu = []
+    if cut_index >= 0:
+        naht = _interp_point(gpx_data[cut_index], gpx_data[cut_index + 1],
+                             ziel_dt)
+        for i in range(cut_index + 1):
+            neu.append(copy.deepcopy(gpx_data[i]))
+        neu.append(naht)
+        # Faellt die Naht auf einen vorhandenen Punkt, steht der jetzt
+        # doppelt in der Spur - er gehoert mit aufgezeichnet.
+        erster = (cut_index if gpx_data[cut_index].get("time") == ziel_dt
+                  else cut_index + 1)
+        entfernt = [copy.deepcopy(p) for p in gpx_data[erster:]]
+        interpoliert = copy.deepcopy(naht)
+    else:
+        for pt in gpx_data:
+            if pt.get("time") <= ziel_dt:
+                neu.append(copy.deepcopy(pt))
+        entfernt = [copy.deepcopy(p) for p in gpx_data
+                    if p.get("time") > ziel_dt]
+        interpoliert = None
+    return neu, entfernt, interpoliert
+
+
+def schneiden_anfang(gpx_data, ziel_dt):
+    """NACHGEBAUT: on_set_begin_clicked().
+
+    Der Startschnitt macht zwei Dinge mehr als die anderen: er setzt die
+    ganze Zeitachse auf den alten Anfangszeitstempel zurueck und stellt den
+    Video/GPX-Versatz auf 0. Gibt (neue_spur, entfernt, interpoliert,
+    achsen_versatz_s) zurueck.
+    """
+    n = len(gpx_data)
+    i = 0
+    while i < n and gpx_data[i].get("time") < ziel_dt:
+        i += 1
+
+    neu = []
+    interpoliert = None
+    if i > 0 and i < n and gpx_data[i].get("time") != ziel_dt:
+        vor, nach = gpx_data[i - 1], gpx_data[i]
+        if vor.get("time") < ziel_dt < nach.get("time"):
+            naht = _interp_point(vor, nach, ziel_dt)
+            neu.append(naht)
+            interpoliert = copy.deepcopy(naht)
+    for j in range(i, n):
+        neu.append(copy.deepcopy(gpx_data[j]))
+
+    entfernt = [copy.deepcopy(p) for p in gpx_data[:i]]
+
+    basis = gpx_data[0].get("time")
+    neue_basis = neu[0].get("time")
+    achsen_versatz_s = (neue_basis - basis).total_seconds()
+    for pt in neu:
+        pt["time"] = pt["time"] - neue_basis + basis
+    return neu, entfernt, interpoliert, achsen_versatz_s
+
+
 class Werkbank:
     """Spur und CutManager zusammen, mit den beiden Aktionen des Programms."""
 
@@ -177,16 +256,47 @@ class Werkbank:
                                     interp, dauer, beginn)
         self.cm.fingerabdruck_merken(self.gpx)
 
+    def endschnitt(self, roh_start, gesamt=60.0):
+        """NACHGEBAUT: die Reihenfolge aus dem End-Cut-Zweig."""
+        versatz = self._versatz(roh_start)
+        ziel = BASIS + timedelta(seconds=roh_start - versatz)
+        neu, entfernt, interpoliert = schneiden_ende(self.gpx, ziel)
+        self.gpx = neu
+        self.cm._cut_intervals.append((roh_start, gesamt))
+        self.cm.aufzeichnung_merken(roh_start, gesamt, entfernt, [],
+                                    interpoliert, 0.0, ziel)
+        self.cm.fingerabdruck_merken(self.gpx)
+
+    def startschnitt(self, roh_ende, shift_vorher=12.5):
+        """NACHGEBAUT: die Reihenfolge aus on_set_begin_clicked()."""
+        versatz = self._versatz(roh_ende)
+        ziel = BASIS + timedelta(seconds=roh_ende - versatz)
+        neu, entfernt, interpoliert, achse = schneiden_anfang(self.gpx, ziel)
+        self.gpx = neu
+        self.cm._cut_intervals.append((0.0, roh_ende))
+        # Erst alle uebrigen Aufzeichnungen mit der Achse mitziehen, dann
+        # die eigene ablegen.
+        self.cm.aufzeichnungen_nachfuehren(None, -achse, alle=True)
+        self.cm.aufzeichnung_merken(0.0, roh_ende, entfernt, [], interpoliert,
+                                    0.0, ziel, achsen_versatz_s=achse,
+                                    video_shift_vorher=shift_vorher)
+        self.cm.fingerabdruck_merken(self.gpx)
+
     def ruecknahme(self, roh_start, roh_ende):
         """NACHGEBAUT: die Reihenfolge aus _schnitt_zuruecknehmen()."""
         aufz = self.cm.aufzeichnung(roh_start, roh_ende) or {}
         ab = aufz.get("beginn_dt")
         um = float(aufz.get("dauer_s") or 0.0)
+        achse = float(aufz.get("achsen_versatz_s") or 0.0)
+        self.shift_zurueck = aufz.get("video_shift_vorher")
         neu = self.cm.spur_ohne_schnitt(roh_start, roh_ende, self.gpx)
         if not neu:
             return False
         self.cm.schnitt_entfernen(roh_start, roh_ende)
-        self.cm.aufzeichnungen_nachfuehren(ab, +um)
+        if achse:
+            self.cm.aufzeichnungen_nachfuehren(None, +achse, alle=True)
+        else:
+            self.cm.aufzeichnungen_nachfuehren(ab, +um)
         self.gpx = neu
         self.cm.fingerabdruck_merken(self.gpx)
         return True
@@ -315,10 +425,141 @@ def pruefe_verschobene_spur():
     return ergebnisse
 
 
+def pruefe_endschnitt():
+    """Auch der End-Schnitt muss exakt zurueckfuehren."""
+    ergebnisse = []
+
+    # Zwei Lagen: die Naht faellt auf einen vorhandenen Punkt (dann steht der
+    # doppelt in der Spur) oder zwischen zwei Punkte.
+    for stelle, name in ((45.0, "Naht auf einem Punkt"),
+                         (45.5, "Naht zwischen zwei Punkten")):
+        w = Werkbank()
+        vorher = copy.deepcopy(w.gpx)
+        w.endschnitt(stelle)
+        gekuerzt = len(w.gpx)
+        w.ruecknahme(stelle, 60.0)
+        ok, text = gleich(w.gpx, vorher)
+        ergebnisse.append((ok, "%s: Spur 60 -> %d -> %s"
+                           % (name, gekuerzt, text)))
+
+    # Mittel- und End-Schnitt zusammen, und der Mittelschnitt zuerst zurueck:
+    # dabei muss die Aufzeichnung des End-Schnitts nachgefuehrt werden.
+    w = Werkbank()
+    vorher = copy.deepcopy(w.gpx)
+    w.schnitt(10.0, 15.0)
+    w.endschnitt(45.0)
+    w.ruecknahme(10.0, 15.0)
+    w.ruecknahme(45.0, 60.0)
+    ok, text = gleich(w.gpx, vorher)
+    ergebnisse.append((ok, "Mittel- und End-Schnitt, Mitte zuerst: " + text))
+
+    # Und derselbe Fall ueber die Projektdatei.
+    w = Werkbank()
+    vorher = copy.deepcopy(w.gpx)
+    w.schnitt(10.0, 15.0)
+    w.endschnitt(45.0)
+    datei = json.loads(json.dumps(
+        {"cut_points": w.cm.get_cut_points(),
+         "gpx_fingerabdruck": w.cm.get_gpx_abdruck(),
+         "cut_intervals": list(w.cm._cut_intervals)}, default=str))
+
+    geladen = VideoCutManager(StummerEditor(), StummeTimeline())
+    geladen.set_video_durations([60.0])
+    geladen._cut_intervals = [tuple(iv) for iv in datei["cut_intervals"]]
+    geladen.set_cut_points(datei["cut_points"])
+    geladen.set_gpx_abdruck(datei["gpx_fingerabdruck"])
+    moeglich, grund, _ = geladen.ruecknahme_moeglich(45.0, 60.0, w.gpx)
+    ergebnisse.append((moeglich, "End-Schnitt nach dem Laden: %s%s"
+                       % ("moeglich" if moeglich else "GESPERRT",
+                          "" if moeglich else " - " + grund)))
+
+    w.cm = geladen
+    w.ruecknahme(10.0, 15.0)
+    w.ruecknahme(45.0, 60.0)
+    ok, text = gleich(w.gpx, vorher)
+    ergebnisse.append((ok, "beide zurueck nach dem Laden: " + text))
+    return ergebnisse
+
+
+def pruefe_startschnitt():
+    """Der Startschnitt verschiebt die ganze Achse - auch das muss zurueck."""
+    ergebnisse = []
+
+    # Naht auf einem Punkt und zwischen zwei Punkten, jeweils allein.
+    for stelle, name in ((10.0, "Naht auf einem Punkt"),
+                         (10.5, "Naht zwischen zwei Punkten")):
+        w = Werkbank()
+        vorher = copy.deepcopy(w.gpx)
+        w.startschnitt(stelle)
+        gekuerzt = len(w.gpx)
+        w.ruecknahme(0.0, stelle)
+        ok, text = gleich(w.gpx, vorher)
+        ergebnisse.append((ok, "%s: Spur 60 -> %d -> %s"
+                           % (name, gekuerzt, text)))
+
+    # Mit einem Mittelschnitt dahinter, in beiden Reihenfolgen. Nimmt man den
+    # Startschnitt zuerst zurueck, muessen ALLE uebrigen Aufzeichnungen die
+    # Achse mitmachen; nimmt man den Mittelschnitt zuerst, darf die
+    # Aufzeichnung des Startschnitts gerade NICHT mitwandern.
+    for reihenfolge, name in ((("start", "mitte"), "Start zuerst"),
+                              (("mitte", "start"), "Mitte zuerst")):
+        w = Werkbank()
+        vorher = copy.deepcopy(w.gpx)
+        w.startschnitt(10.5)
+        w.schnitt(20.0, 25.0)
+        for was in reihenfolge:
+            if was == "start":
+                w.ruecknahme(0.0, 10.5)
+            else:
+                w.ruecknahme(20.0, 25.0)
+        ok, text = gleich(w.gpx, vorher)
+        ergebnisse.append((ok, "Start- und Mittelschnitt, %s: %s"
+                           % (name, text)))
+
+    # Und ueber die Projektdatei, samt Video/GPX-Versatz.
+    w = Werkbank()
+    vorher = copy.deepcopy(w.gpx)
+    w.startschnitt(10.5, shift_vorher=12.5)
+    w.schnitt(20.0, 25.0)
+    datei = json.loads(json.dumps(
+        {"cut_points": w.cm.get_cut_points(),
+         "gpx_fingerabdruck": w.cm.get_gpx_abdruck(),
+         "cut_intervals": list(w.cm._cut_intervals)}, default=str))
+
+    geladen = VideoCutManager(StummerEditor(), StummeTimeline())
+    geladen.set_video_durations([60.0])
+    geladen._cut_intervals = [tuple(iv) for iv in datei["cut_intervals"]]
+    geladen.set_cut_points(datei["cut_points"])
+    geladen.set_gpx_abdruck(datei["gpx_fingerabdruck"])
+
+    moeglich, grund, _ = geladen.ruecknahme_moeglich(0.0, 10.5, w.gpx)
+    ergebnisse.append((moeglich, "Startschnitt nach dem Laden: %s%s"
+                       % ("moeglich" if moeglich else "GESPERRT",
+                          "" if moeglich else " - " + grund)))
+
+    w.cm = geladen
+    w.ruecknahme(0.0, 10.5)
+    ergebnisse.append((w.shift_zurueck == 12.5,
+                       "Video/GPX-Versatz aus der Datei: %r" % (w.shift_zurueck,)))
+    w.ruecknahme(20.0, 25.0)
+    ok, text = gleich(w.gpx, vorher)
+    ergebnisse.append((ok, "beide zurueck nach dem Laden: " + text))
+
+    # Abgeleitete Werte gehoeren nicht in die Datei.
+    punkt = datei["cut_points"][0]["entfernt"][0]
+    fehlen = [k for k in ("delta_m", "speed_kmh", "gradient") if k in punkt]
+    ergebnisse.append((not fehlen,
+                       "abgeleitete Werte nicht in der Datei: %s"
+                       % ("ja" if not fehlen else "NEIN, drin: %s" % fehlen)))
+    return ergebnisse
+
+
 def main():
     schritte = [("Reihenfolge der Ruecknahme", pruefe_reihenfolge),
                 ("Weg durch die Projektdatei", pruefe_projektdatei),
-                ("Sperre bei veraenderten Zeiten", pruefe_verschobene_spur)]
+                ("Sperre bei veraenderten Zeiten", pruefe_verschobene_spur),
+                ("End-Schnitt", pruefe_endschnitt),
+                ("Start-Schnitt", pruefe_startschnitt)]
     fehler = 0
     for titel, fn in schritte:
         print(titel)

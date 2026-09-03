@@ -2416,6 +2416,7 @@ class MainWindow(QMainWindow):
                 while i < n and gpx_data[i].get("time") < desired_cut_dt:
                     i += 1
     
+                interpolierter_punkt = None
                 # Wenn wir nicht genau auf einem Punkt sind, interpolieren
                 if i > 0 and i < n and gpx_data[i].get("time") != desired_cut_dt:
                     prev_pt = gpx_data[i-1]
@@ -2423,6 +2424,7 @@ class MainWindow(QMainWindow):
                     if prev_pt.get("time") < desired_cut_dt < next_pt.get("time"):
                         cut_pt = _interp_point(prev_pt, next_pt, desired_cut_dt)
                         new_gpx.append(cut_pt)
+                        interpolierter_punkt = _cpy.deepcopy(cut_pt)
                 
                 # Restliche Punkte hinzufügen
                 for j in range(i, n):
@@ -2440,6 +2442,16 @@ class MainWindow(QMainWindow):
                     # Zeit relativ zum neuen Startpunkt setzen
                     pt["time"] = pt["time"] - new_base_time + base_dt
     
+                # Fuer die Ruecknahme festhalten, solange es noch da ist:
+                # der weggeschnittene Kopf mit seinen Originalzeiten, um wie
+                # viel die Achse gleich verschoben wird, und der
+                # Video/GPX-Versatz von jetzt. gpx_data selbst bleibt dabei
+                # unberuehrt - new_gpx besteht aus Kopien.
+                entfernte_punkte = [_cpy.deepcopy(p) for p in gpx_data[:i]]
+                achsen_versatz_s = (new_base_time - base_dt).total_seconds()
+                versatz_vorher = (get_gpx_video_shift()
+                                  if is_gpx_video_shift_set() else None)
+
                 # Video-Shift komplett zurücksetzen, da GPX jetzt bei 0 beginnt
                 set_gpx_video_shift(0.0)
     
@@ -2456,6 +2468,39 @@ class MainWindow(QMainWindow):
                 
                 route_geojson = self._build_route_geojson_from_gpx(new_gpx)
                 self.map_widget.loadRoute(route_geojson, do_fit=False)
+
+                # Aufzeichnung fuer die Ruecknahme. Der Startschnitt ist der
+                # einzige, der die ganze Zeitachse verschiebt und den
+                # Video/GPX-Versatz zurueckstellt - beides steht deshalb mit
+                # in der Aufzeichnung, sonst waere er nicht umkehrbar.
+                #
+                # Erst die uebrigen Aufzeichnungen nachfuehren: sie stehen im
+                # alten Zeitrahmen und muessen die Neubasierung mitmachen.
+                # ALLE, nicht nur die dahinter - hier wandert die ganze Achse.
+                self.cut_manager.aufzeichnungen_nachfuehren(
+                    None, -achsen_versatz_s, alle=True)
+                self.cut_manager.aufzeichnung_merken(
+                    0.0, global_video_s,
+                    entfernt=entfernte_punkte,
+                    verworfen=[],
+                    interpoliert=interpolierter_punkt,
+                    dauer_s=0.0,
+                    beginn_dt=desired_cut_dt,
+                    achsen_versatz_s=achsen_versatz_s,
+                    video_shift_vorher=versatz_vorher,
+                )
+                # Bis 6.03 blieb der Fingerabdruck hier absichtlich stehen:
+                # nach einem Startschnitt war jede Ruecknahme gesperrt, weil
+                # die verschobene Achse sonst still falsche Ergebnisse
+                # geliefert haette. Die Verschiebung wird jetzt oben
+                # ausgeglichen, deshalb darf - und muss - der Abdruck nach.
+                self.cut_manager.fingerabdruck_merken(self._gpx_data)
+                print(f"[CUT-REC] Startschnitt 0.000-{global_video_s:.3f}: "
+                      f"{len(entfernte_punkte)} entfernt, Nahtpunkt "
+                      f"{'erzeugt' if interpolierter_punkt else 'keiner'}, "
+                      f"Achse um {achsen_versatz_s:.3f}s verschoben, "
+                      f"Spur {len(gpx_data)} -> {len(new_gpx)}")
+                self._ruecknahme_probe(0.0, global_video_s, new_gpx, gpx_data)
     
         else:
             # Nur Video-Cut (kein AutoSync)
@@ -3461,6 +3506,32 @@ class MainWindow(QMainWindow):
                 
                 print(f"[DEBUG] Einfacher Schnitt: {len(new_gpx)} Punkte übernommen")
     
+            # Was der End-Schnitt aus der Spur nimmt, aufzeichnen - wie beim
+            # Mittelschnitt. Hier rueckt nichts nach vorn, es wird nur hinten
+            # abgeschnitten; dauer_s ist deshalb 0. Damit reicht die
+            # vorhandene spur_ohne_schnitt() ohne Aenderung aus: Punkte vor
+            # der Naht bleiben, die Naht faellt weg, das Aufgezeichnete kommt
+            # zurueck.
+            #
+            # Faellt der Schnittzeitpunkt genau auf einen vorhandenen Punkt,
+            # ist der eben erzeugte Nahtpunkt eine Kopie davon und die Spur
+            # endet mit zwei gleichen Zeiten. spur_ohne_schnitt() entfernt
+            # beim Zuruecknehmen ALLE Punkte auf der Naht - dann muss der
+            # vorhandene mit aufgezeichnet werden, sonst fehlt er nachher.
+            if cut_index >= 0:
+                if gpx_data[cut_index].get("time") == desired_cut_dt:
+                    erster_entfernter = cut_index
+                else:
+                    erster_entfernter = cut_index + 1
+                entfernte_punkte = [copy.deepcopy(p)
+                                    for p in gpx_data[erster_entfernter:]]
+                interpolierter_punkt = copy.deepcopy(interpolated_point)
+            else:
+                entfernte_punkte = [copy.deepcopy(p) for p in gpx_data
+                                    if p.get("time") is not None
+                                    and p.get("time") > desired_cut_dt]
+                interpolierter_punkt = None
+
             if len(new_gpx) < 2:
                 QMessageBox.warning(self, "Truncation", 
                     "After shortening to the video length, no meaningful GPX remains!")
@@ -3485,6 +3556,28 @@ class MainWindow(QMainWindow):
             self.map_widget.loadRoute(route_geojson, do_fit=False)
     
             print(f"[DEBUG] End-Cut abgeschlossen: GPX von {len(gpx_data)} auf {len(new_gpx)} Punkte gekürzt")
+
+            # Aufzeichnung ablegen, damit sich auch der End-Schnitt
+            # zuruecknehmen laesst. Ein Nachfuehren der uebrigen
+            # Aufzeichnungen braucht es hier nicht: hinter einem End-Schnitt
+            # liegt nichts mehr, und davor verschiebt er nichts.
+            self.cut_manager.aufzeichnung_merken(
+                start_global, end_global,
+                entfernt=entfernte_punkte,
+                verworfen=[],
+                interpoliert=interpolierter_punkt,
+                dauer_s=0.0,
+                beginn_dt=desired_cut_dt,
+            )
+            print(f"[CUT-REC] End-Schnitt {start_global:.3f}-{end_global:.3f}: "
+                  f"{len(entfernte_punkte)} entfernt, Nahtpunkt "
+                  f"{'erzeugt' if interpolierter_punkt else 'keiner'}, "
+                  f"Spur {len(gpx_data)} -> {len(new_gpx)}")
+            # Die Probe rechnet die Ruecknahme durch und vergleicht sie mit
+            # dem Stand von vorher. Eine Stueckzahl-Bilanz wie beim
+            # Mittelschnitt taugt hier nicht: faellt die Naht auf einen
+            # vorhandenen Punkt, steht der zweimal in der Rechnung.
+            self._ruecknahme_probe(start_global, end_global, new_gpx, gpx_data)
         ###    
         else:
             # --- NORMALE MIDDLE-CUT LOGIK (existierender Code) ---
@@ -3929,6 +4022,10 @@ class MainWindow(QMainWindow):
         aufz = self.cut_manager.aufzeichnung(start_s, end_s) or {}
         nachfuehr_ab = aufz.get("beginn_dt")
         nachfuehr_um = float(aufz.get("dauer_s") or 0.0)
+        # Der Startschnitt verschiebt zusaetzlich die ganze Zeitachse und
+        # stellt den Video/GPX-Versatz auf 0. Beides gehoert zurueckgedreht.
+        nachfuehr_achse = float(aufz.get("achsen_versatz_s") or 0.0)
+        shift_vorher = aufz.get("video_shift_vorher")
 
         # Beides zusammen ist EIN Schritt fuer Strg+Z.
         self.register_gpx_undo_snapshot()
@@ -3942,8 +4039,14 @@ class MainWindow(QMainWindow):
         # dessen Dauer spaeter. Die Aufzeichnungen der dahinterliegenden
         # Schnitte muessen das mitmachen, sonst zeigen sie ins Leere und die
         # Spur kaeme dort still falsch zurueck.
-        nachgefuehrt = self.cut_manager.aufzeichnungen_nachfuehren(
-            nachfuehr_ab, +nachfuehr_um)
+        if nachfuehr_achse:
+            # Startschnitt: die ganze Achse kommt zurueck, also muessen ALLE
+            # uebrigen Aufzeichnungen mit - nicht nur die dahinter.
+            nachgefuehrt = self.cut_manager.aufzeichnungen_nachfuehren(
+                None, +nachfuehr_achse, alle=True)
+        else:
+            nachgefuehrt = self.cut_manager.aufzeichnungen_nachfuehren(
+                nachfuehr_ab, +nachfuehr_um)
 
         recalc_gpx_data(neue_spur)
         self.gpx_widget.set_gpx_data(neue_spur)
@@ -3954,6 +4057,15 @@ class MainWindow(QMainWindow):
             self.mini_chart_widget.set_gpx_data(neue_spur)
         self.map_widget.loadRoute(
             self._build_route_geojson_from_gpx(neue_spur), do_fit=False)
+
+        if nachfuehr_achse:
+            # Der Startschnitt hatte den Video/GPX-Versatz auf 0 gesetzt.
+            # Ohne das Zurueckstellen laege die Spur nach der Ruecknahme um
+            # den alten Versatz neben dem Video. Gleiches Muster wie in
+            # register_gpx_undo_snapshot(): None heisst "gar nicht gesetzt".
+            set_gpx_video_shift(shift_vorher)
+            self.enableVideoGpxSync(is_gpx_video_shift_set())
+            print(f"[CUT-UNDO] Video/GPX-Versatz zurueck auf {shift_vorher}")
 
         # Eigene Aktion: den Zustand der Spur neu festhalten, sonst waeren
         # alle uebrigen Schnitte danach faelschlich gesperrt.
@@ -7692,6 +7804,11 @@ class MainWindow(QMainWindow):
             },
             "overlays": self._overlay_manager.get_all_overlays(),
             "edit_mode": self._edit_mode,
+            # AutoCutVideo+GPX. Bisher wurde der Zustand nicht gespeichert,
+            # sondern beim Laden daraus abgeleitet, ob ein Video/GPX-Versatz
+            # in der Datei stand. Das traf zwei Faelle nicht: eingeschaltet
+            # ohne gesetzten Versatz, und ausgeschaltet mit gesetztem Versatz.
+            "auto_sync": bool(self._autoSyncVideoEnabled),
             "view360": self._blick360_export_cfg()
         }
         
@@ -7892,8 +8009,9 @@ class MainWindow(QMainWindow):
 
             # GPX/Video shift (s)
             set_gpx_video_shift(project_data.get("gpx_video_shift", None))
-            if(is_gpx_video_shift_set()):
-                self.enableVideoGpxSync(True)
+            # AutoCutVideo+GPX wird hier NICHT mehr eingeschaltet - das
+            # passiert weiter unten, direkt hinter dem Edit-Mode. Warum,
+            # steht dort.
 
             ladefenster.schritt("Loading overlays…")
             # 5. Overlays laden
@@ -7944,6 +8062,32 @@ class MainWindow(QMainWindow):
                 self._set_edit_mode(mode)        # jetzt OFF -> copy/encode => Frage erscheint
             except Exception as _e:
                 print(f"[WARN] Could not restore edit_mode '{mode}': {_e}")    
+
+            # AutoCutVideo+GPX wiederherstellen - erst JETZT, hinter dem
+            # Edit-Mode.
+            #
+            # Zwei Gruende, warum der Schalter bisher nach jedem Laden aus
+            # war. Erstens wurde er gar nicht gespeichert, sondern daraus
+            # abgeleitet, ob ein Video/GPX-Versatz in der Datei stand.
+            # Zweitens lief das Einschalten oben, VOR dieser Stelle - und
+            # enableVideoGpxSync() prueft self._edit_mode, der bis hierher
+            # noch auf dem Stand von vor dem Laden steht. Beim Programmstart
+            # ist das "off", und damit machte
+            #     self._on_auto_sync_video_toggled(
+            #         enable and self._edit_mode != "off")
+            # aus dem gewuenschten True ein False. Wer ein Projekt in eine
+            # bereits laufende Sitzung im Encode-Mode lud, sah es deshalb
+            # gelegentlich funktionieren - beim Start nie.
+            #
+            # Aeltere Projektdateien kennen "auto_sync" nicht. Fuer die gilt
+            # weiter die alte Ableitung: ein gespeicherter Versatz heisst an.
+            auto_sync = bool(project_data.get("auto_sync",
+                                              is_gpx_video_shift_set()))
+            if auto_sync and self._edit_mode != "off":
+                self.enableVideoGpxSync(True)
+            print(f"[DEBUG] AutoCutVideo+GPX aus dem Projekt: "
+                  f"{'an' if self._autoSyncVideoEnabled else 'aus'} "
+                  f"(gespeichert {auto_sync}, edit_mode {self._edit_mode})")
 
             ladefenster.schritt("Building the display…")
             # 7. GPX Widgets neu aufbauen

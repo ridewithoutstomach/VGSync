@@ -57,7 +57,18 @@ class VideoCutManager(QObject):
         #   "interpoliert"  der an der Naht neu erzeugte Punkt, falls es einen
         #                   gab - beim Zurueckholen muss er wieder weg
         #   "dauer_s"       um wie viel alles danach nach vorn gerueckt ist
-        #   "fingerabdruck" Zustand der Spur direkt nach diesem Schnitt
+        #   "achsen_versatz_s"   nur beim Startschnitt: um wie viel die GANZE
+        #                   Zeitachse verschoben wurde. Er setzt die Spur auf
+        #                   ihren alten Anfangszeitstempel zurueck, damit
+        #                   verschiebt sich alles - nicht nur das dahinter.
+        #   "video_shift_vorher" ebenfalls nur beim Startschnitt: der
+        #                   Video/GPX-Versatz, den er auf 0 gesetzt hat
+        #
+        # Ein Abdruck JE SCHNITT stand hier urspruenglich auch - den gibt es
+        # nicht und kann es nicht geben: er waere schon nach dem naechsten
+        # Schnitt ueberholt. Ob eine Aufzeichnung noch gilt, entscheidet der
+        # EINE Abdruck der Spur unten, und der geht seit 6.03 mit in die
+        # Projektdatei (get_gpx_abdruck).
         self._cut_points = {}
 
         # Fingerabdruck der GPX-Spur nach der letzten EIGENEN Aktion. Weicht
@@ -246,7 +257,8 @@ class VideoCutManager(QObject):
                 and self.werte_unveraendert(gpx_data))
 
     def aufzeichnung_merken(self, start_s, end_s, entfernt, verworfen,
-                            interpoliert, dauer_s, beginn_dt=None):
+                            interpoliert, dauer_s, beginn_dt=None,
+                            achsen_versatz_s=0.0, video_shift_vorher=None):
         """Was ein Schnitt aus der GPX-Spur genommen hat, beim Schnitt ablegen.
 
         beginn_dt ist der Schnittanfang in GPX-Zeit und muss mitgegeben
@@ -262,6 +274,8 @@ class VideoCutManager(QObject):
             "interpoliert": interpoliert,
             "dauer_s": float(dauer_s or 0.0),
             "beginn_dt": beginn_dt,
+            "achsen_versatz_s": float(achsen_versatz_s or 0.0),
+            "video_shift_vorher": video_shift_vorher,
         }
 
     def aufzeichnung(self, start_s, end_s):
@@ -281,7 +295,7 @@ class VideoCutManager(QObject):
         for key in [k for k in self._cut_points if k not in alive]:
             del self._cut_points[key]
 
-    def aufzeichnungen_nachfuehren(self, ab_dt, delta_s):
+    def aufzeichnungen_nachfuehren(self, ab_dt, delta_s, alle=False):
         """Aufzeichnungen hinter ab_dt um delta_s in der Zeit verschieben.
 
         Eine Aufzeichnung steht in dem Zeitrahmen, den die Spur HATTE, als der
@@ -297,18 +311,35 @@ class VideoCutManager(QObject):
         11 von 60 Punkten ab; mit dem Nachfuehren sind es null. Nachzustellen
         mit check_cut_undo.py.
 
+        alle=True verschiebt jede Aufzeichnung, unabhaengig von ab_dt. Das
+        braucht der Startschnitt: er setzt die ganze Zeitachse zurueck, da
+        wandert auch, was VOR ihm aufgezeichnet wurde. Ein Zeitpunkt "ganz
+        frueh" als ab_dt waere dafuer die schlechtere Loesung - GPX-Zeiten
+        koennen mit oder ohne Zeitzone vorliegen, und der Vergleich zweier
+        solcher Werte wirft.
+
         Rueckgabe: Anzahl der nachgefuehrten Aufzeichnungen.
         """
         from datetime import timedelta
 
-        if ab_dt is None or not delta_s:
+        if not delta_s:
+            return 0
+        if not alle and ab_dt is None:
             return 0
         d = timedelta(seconds=float(delta_s))
         anzahl = 0
         for aufz in self._cut_points.values():
             beginn = aufz.get("beginn_dt")
-            if beginn is None or beginn < ab_dt:
-                continue
+            if not alle:
+                if beginn is None or beginn < ab_dt:
+                    continue
+                if aufz.get("achsen_versatz_s"):
+                    # Aufzeichnung eines Startschnitts. Sie steht im
+                    # Zeitrahmen VOR seiner Neubasierung; ein Schnitt dahinter
+                    # beruehrt sie nicht. Ihr beginn_dt sieht nur zufaellig
+                    # aus wie eine Zeit im jetzigen Rahmen - mitgeschoben
+                    # zeigte es anschliessend nicht mehr auf die Naht.
+                    continue
             aufz["beginn_dt"] = beginn + d
             for feld in ("entfernt", "verworfen"):
                 for pt in aufz.get(feld) or []:
@@ -368,6 +399,19 @@ class VideoCutManager(QObject):
         self._gpx_fingerabdruck = (str(zeiten), str(werte))
         return True
 
+    #: delta_m, speed_kmh und gradient rechnet recalc_gpx_data() beim
+    #: Zuruecknehmen ohnehin aus Lage, Hoehe und Zeit neu - sie schreibt sie
+    #: fuer JEDEN Punkt unbedingt. In der Projektdatei sind sie deshalb
+    #: verlorene Bytes. Gemessen an maptest2.KVRouiteproj: die
+    #: Aufzeichnungen schrumpfen von 3384 kB auf 1922 kB, 43 Prozent.
+    _ABGELEITET = ("delta_m", "speed_kmh", "gradient")
+
+    @classmethod
+    def _punkt_schlank(cls, pt):
+        if not pt:
+            return pt
+        return {k: v for k, v in pt.items() if k not in cls._ABGELEITET}
+
     def get_cut_points(self) -> list:
         """Fuer die Projektdatei: Liste von Datensaetzen."""
         self.prune_cut_points()
@@ -376,6 +420,12 @@ class VideoCutManager(QObject):
             eintrag = dict(aufz)
             eintrag["start"] = start_s
             eintrag["end"] = end_s
+            for feld in ("entfernt", "verworfen"):
+                eintrag[feld] = [self._punkt_schlank(p)
+                                 for p in (aufz.get(feld) or [])]
+            if aufz.get("interpoliert"):
+                eintrag["interpoliert"] = self._punkt_schlank(
+                    aufz["interpoliert"])
             raus.append(eintrag)
         return raus
 
@@ -418,6 +468,9 @@ class VideoCutManager(QObject):
                                  if eintrag.get("interpoliert") else None),
                 "dauer_s": float(eintrag.get("dauer_s") or 0.0),
                 "beginn_dt": self._zeit_lesen(eintrag.get("beginn_dt")),
+                "achsen_versatz_s": float(
+                    eintrag.get("achsen_versatz_s") or 0.0),
+                "video_shift_vorher": eintrag.get("video_shift_vorher"),
             }
             for feld in ("entfernt", "verworfen"):
                 for pt in aufz[feld]:
@@ -472,8 +525,22 @@ class VideoCutManager(QObject):
         if beginn is None:
             return None
 
+        # Beim Startschnitt ist die ganze Zeitachse verschoben worden.
+        # Sie muss zuerst zurueck; danach passt beginn_dt wieder, und der
+        # Rest der Rechnung ist derselbe wie beim Mittelschnitt.
+        versatz = float(aufz.get("achsen_versatz_s") or 0.0)
+        if versatz:
+            quelle = []
+            for pt in (gpx_data or []):
+                p = copy.deepcopy(pt)
+                if p.get("time") is not None:
+                    p["time"] = p["time"] + timedelta(seconds=versatz)
+                quelle.append(p)
+        else:
+            quelle = gpx_data or []
+
         neu = []
-        for pt in (gpx_data or []):
+        for pt in quelle:
             t = pt.get("time")
             if t is None:
                 neu.append(copy.deepcopy(pt))
@@ -680,6 +747,11 @@ class VideoCutManager(QObject):
             self._cut_intervals.remove(iv)
         print(f"[DEBUG] vorhandene End-Cuts ersetzt: {removed}")
 
+        # Auch die Aufzeichnung des ersetzten End-Schnitts faellt weg. Sonst
+        # erbte der neue End-Schnitt sie, falls er auf denselben Schluessel
+        # faellt - und was der alte weggenommen hat, ist ohnehin nicht mehr
+        # zurueckzuholen: der neue schneidet auf der bereits gekuerzten Spur.
+        self.prune_cut_points()
         self.prune_hard_cuts()
         self.timeline.clear_all_cuts()
         for (a, b) in self._cut_intervals:
