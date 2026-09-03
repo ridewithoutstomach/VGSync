@@ -39,6 +39,34 @@ If you just want to run KVRouite, "requirements.txt" is all you need.
 -------------------------------------------------------------------------------
 ## 🔧 Installation & Usage (Linux, Windows & macOS)
 
+### No signed binaries - and what your alternatives are
+
+**This applies to the Windows builds and to the macOS bundle alike.** Neither is
+signed, and both will therefore be questioned by the operating system the first
+time you start them: SmartScreen warns about an unknown publisher on Windows,
+Gatekeeper refuses the first double-click on macOS.
+
+The reason is the same on both, and it is the only one: signing costs money
+every year. macOS needs a paid Apple Developer membership, Windows a
+code-signing certificate, both renewed annually. **KVRouite is a non-profit
+hobby project, given away for free, and I am not going to buy a licence in order
+to hand it out.** There is nothing hidden behind that.
+
+**Nobody has to click past those warnings.** They are an offer, not a
+requirement, and if you would rather not - a perfectly reasonable position -
+there are two other ways, both fully supported:
+
+- **Run from source.** Download the source code, follow the instructions for
+  your platform below, and start KVRouite with Python. Nothing is signed there
+  either, but nothing is opaque: you run the files you can read. This is the
+  only route on Linux anyway, and it is a first-class one - it is what
+  development happens on.
+- **Check the code before you run it.** The whole source is in this repository.
+  Read it, or have an AI read it for you and say whether it does anything it
+  should not. That takes minutes today, and it works just as well for the
+  packages listed in `requirements.txt`. Nothing here is obfuscated, minified or
+  precompiled - what you see is what runs.
+
 ---
 
 ### 🐧 Linux
@@ -124,6 +152,13 @@ python KVRouite.py
 
 ### 🪟 Windows
 
+The ready-made builds from the
+[Releases page](https://github.com/ridewithoutstomach/KVRouite/releases)
+are not signed, so SmartScreen warns about an unknown publisher on the first
+start: **More info > Run anyway**. Why that is, and what you can do instead,
+is at the top of this chapter:
+[No signed binaries](#no-signed-binaries---and-what-your-alternatives-are).
+The instructions below are that other way - running from source.
 
 #### Setup and Run
 
@@ -186,29 +221,9 @@ and macOS therefore refuses a plain double-click once.
 
 After that it starts by double-click like anything else.
 
-#### Why there are no signed binaries, and what your alternatives are
-
-Signing and notarising an application for macOS requires a paid Apple Developer
-membership, renewed every year. **KVRouite is a non-profit hobby project, given
-away for free, and I am not going to buy a licence from Apple in order to hand
-it out.** That is the whole reason. There is nothing hidden behind it.
-
-**Nobody has to walk past Gatekeeper.** The step above is an offer, not a
-requirement. If you would rather not do it - and that is a perfectly reasonable
-position - you have two other ways, and both are fully supported:
-
-- **Run from source.** Download the source code, follow the instructions further
-  down in this section, and start KVRouite with Python. Nothing is signed there
-  either, but nothing is opaque: you are running the files you can read.
-- **Check the code before you run it.** The whole source is in this repository.
-  Read it, or have an AI read it for you and tell you whether it does anything
-  it should not - that takes minutes today, and it works just as well for the
-  packages listed in `requirements.txt`. Nothing here is obfuscated, minified or
-  precompiled.
-
-The same applies to the Windows builds, which are unsigned for the same reason:
-a code-signing certificate costs money every year, and this project has no
-income.
+Why the extra step exists, and what your alternatives are, is explained once
+for all platforms at the top of this chapter:
+[No signed binaries](#no-signed-binaries---and-what-your-alternatives-are).
 
 #### Requirements
 
