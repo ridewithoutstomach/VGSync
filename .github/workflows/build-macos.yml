@@ -216,17 +216,22 @@ jobs:
           echo "-------------------"
           exit $RC
 
-      - name: Nachweisbild vom laufenden Fenster
+      - name: Nachweisbilder vom laufenden Fenster
         if: always()
-        timeout-minutes: 5
+        timeout-minutes: 8
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
-          # Der Startversuch oben zeigt nur, dass der Prozess noch lebt. Dieses
-          # Bild zeigt, dass wirklich ein Fenster steht. Aufgenommen wird es
-          # von Qt selbst (QWidget.grab), deshalb geht es auch ohne Bildschirm.
+          # Der Startversuch oben zeigt nur, dass der Prozess noch lebt. Hier
+          # laedt die Anwendung eine GPX-Spur und ein Testvideo, drueckt auf
+          # Wiedergabe und macht DREI Bilder im Abstand von zwei Sekunden
+          # (nachweis.py). Wer sie nebeneinanderlegt, sieht an der
+          # Abspielmarke und am Ball im Testvideo, dass wirklich etwas lief -
+          # ein einzelnes Standbild koennte auch ein eingefrorenes Fenster
+          # sein. Aufgenommen wird von Qt selbst (QWidget.grab), deshalb geht
+          # es auch ohne Bildschirm.
           "$APP/Contents/MacOS/KVRouite" --screenshot
-          ls -l KVRouite_screenshot.png
+          ls -l KVRouite_screenshot_*.png
 
       - name: Hat das Laufen das Buendel veraendert?
         if: always()
@@ -238,12 +243,12 @@ jobs:
           codesign --verify --deep --strict --verbose=2 "$APP"
           echo "OK: das Buendel ist nach dem Laufen unveraendert."
 
-      - name: Nachweisbild ablegen
+      - name: Nachweisbilder ablegen
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: KVRouite-macOS-${{ matrix.arch }}-screenshot
-          path: KVRouite_screenshot.png
+          path: KVRouite_screenshot_*.png
           if-no-files-found: warn
           retention-days: 14
 

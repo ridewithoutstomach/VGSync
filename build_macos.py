@@ -194,6 +194,8 @@ def buendel_bauen(ziel_ordner):
     # selftest wird nur innerhalb von main() importiert; ausdruecklich nennen,
     # damit PyInstaller es nicht uebersieht.
     befehl.append("--hidden-import=selftest")
+    # nachweis.py wird ebenso nur innerhalb von main() importiert.
+    befehl.append("--hidden-import=nachweis")
     # GStreamer muss ausdruecklich mit, aber nur was da ist: ein --collect-all
     # auf ein fehlendes Paket bricht PyInstaller sofort ab.
     befehl += ["--collect-all=" + paket for paket in vorhandene_gstreamer_pakete()]
