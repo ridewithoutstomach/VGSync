@@ -281,6 +281,160 @@ class VideoCutManager(QObject):
         for key in [k for k in self._cut_points if k not in alive]:
             del self._cut_points[key]
 
+    def aufzeichnungen_nachfuehren(self, ab_dt, delta_s):
+        """Aufzeichnungen hinter ab_dt um delta_s in der Zeit verschieben.
+
+        Eine Aufzeichnung steht in dem Zeitrahmen, den die Spur HATTE, als der
+        Schnitt gesetzt wurde. Verschiebt sich die Spur danach - weil ein
+        davorliegender Schnitt zurueckgenommen oder ein neuer davor gesetzt
+        wird -, zeigt sie ins Leere. Betroffen ist alles hinter der
+        veraenderten Stelle, und zwar der Anfang und die Punktzeiten
+        gleichermassen.
+
+        Ohne dieses Nachfuehren kommt die Spur bei mehreren Schnitten STILL
+        falsch zurueck. Gemessen an einer Spur aus 60 Punkten mit zwei
+        Schnitten: wird der vordere zuerst zurueckgenommen, weichen danach
+        11 von 60 Punkten ab; mit dem Nachfuehren sind es null. Nachzustellen
+        mit check_cut_undo.py.
+
+        Rueckgabe: Anzahl der nachgefuehrten Aufzeichnungen.
+        """
+        from datetime import timedelta
+
+        if ab_dt is None or not delta_s:
+            return 0
+        d = timedelta(seconds=float(delta_s))
+        anzahl = 0
+        for aufz in self._cut_points.values():
+            beginn = aufz.get("beginn_dt")
+            if beginn is None or beginn < ab_dt:
+                continue
+            aufz["beginn_dt"] = beginn + d
+            for feld in ("entfernt", "verworfen"):
+                for pt in aufz.get(feld) or []:
+                    if pt.get("time") is not None:
+                        pt["time"] = pt["time"] + d
+            naht = aufz.get("interpoliert")
+            if naht and naht.get("time") is not None:
+                naht["time"] = naht["time"] + d
+            anzahl += 1
+        return anzahl
+
+    # ------------------------------------------------------------------
+    # Aufzeichnungen fuer die Projektdatei
+    # ------------------------------------------------------------------
+    # Ohne diese beiden Funktionen war das Zuruecknehmen nach jedem
+    # "Open Project" tot: die Aufzeichnungen standen nur im Speicher, ein
+    # geladenes Projekt beginnt mit einem leeren _cut_points, und die erste
+    # Sperre in ruecknahme_moeglich() greift dann fuer jeden Schnitt.
+    #
+    # Als LISTE und nicht als Dict, weil der Schluessel ein Zahlenpaar ist -
+    # JSON kennt nur Text als Schluessel. Start und Ende stehen deshalb im
+    # Datensatz selbst; beim Laden entsteht der Schluessel daraus neu.
+    #
+    # Die Zeiten gehen als Text durch die Datei (json.dump(default=str)) und
+    # kommen mit datetime.fromisoformat() zurueck - derselbe Weg, den gpx_data
+    # schon geht. Gemessen: "2025-01-01 12:00:00.123456" kommt
+    # mikrosekundengenau zurueck.
+
+    def get_gpx_abdruck(self):
+        """Fuer die Projektdatei: der Abdruck der letzten EIGENEN Aktion."""
+        if not self._gpx_fingerabdruck:
+            return None
+        return [self._gpx_fingerabdruck[0], self._gpx_fingerabdruck[1]]
+
+    def set_gpx_abdruck(self, wert) -> bool:
+        """Abdruck aus der Projektdatei uebernehmen - nicht neu rechnen.
+
+        Das ist der springende Punkt beim Laden. Wuerde der Abdruck aus der
+        geladenen Spur neu gerechnet, passte er IMMER, und die Aufzeichnungen
+        waeren ungeprueft freigegeben - auch dann, wenn zwischen dem letzten
+        Schnitt und dem Speichern noch chT, Close Gaps oder Resample gelaufen
+        sind. Aus der Datei kommt dagegen der Zustand von der letzten eigenen
+        Aktion. Stimmt die geladene Spur damit nicht ueberein, greifen die
+        vorhandenen Sperren in ruecknahme_moeglich() - genau wie in der
+        Sitzung, in der geschnitten wurde.
+
+        Eine Nahtprobe an der Spur selbst waere die naheliegende Alternative
+        gewesen und ist verworfen: gemessen faengt sie eine um volle Sekunden
+        verschobene Spur nicht, weil dort einfach ein anderer Punkt auf der
+        Naht sitzt. Siehe check_cut_undo.py.
+        """
+        try:
+            zeiten, werte = wert
+        except (TypeError, ValueError):
+            self._gpx_fingerabdruck = None
+            return False
+        self._gpx_fingerabdruck = (str(zeiten), str(werte))
+        return True
+
+    def get_cut_points(self) -> list:
+        """Fuer die Projektdatei: Liste von Datensaetzen."""
+        self.prune_cut_points()
+        raus = []
+        for (start_s, end_s), aufz in sorted(self._cut_points.items()):
+            eintrag = dict(aufz)
+            eintrag["start"] = start_s
+            eintrag["end"] = end_s
+            raus.append(eintrag)
+        return raus
+
+    @staticmethod
+    def _zeit_lesen(wert):
+        """Zeit aus der Projektdatei: Text zu datetime, sonst unveraendert."""
+        from datetime import datetime
+        if isinstance(wert, str):
+            try:
+                return datetime.fromisoformat(wert)
+            except ValueError:
+                return None
+        return wert
+
+    def set_cut_points(self, eintraege) -> int:
+        """Aufzeichnungen aus der Projektdatei uebernehmen.
+
+        Aeltere Projektdateien kennen den Schluessel nicht; dann bleibt es beim
+        leeren Stand und die Schnitte sind gesperrt wie bisher - die vorhandene
+        Meldung dazu trifft dann auch wirklich zu.
+
+        Datensaetze ohne Anfang oder ohne entfernte Punkte werden gar nicht
+        erst uebernommen. Sie wuerden im Menue eine Moeglichkeit anbieten, die
+        anschliessend nichts zurueckholen kann.
+
+        Rueckgabe: Anzahl der uebernommenen Aufzeichnungen.
+        """
+        self._cut_points = {}
+        for eintrag in (eintraege or []):
+            try:
+                start_s = float(eintrag["start"])
+                end_s = float(eintrag["end"])
+            except (TypeError, KeyError, ValueError, IndexError):
+                continue
+
+            aufz = {
+                "entfernt": [dict(p) for p in (eintrag.get("entfernt") or [])],
+                "verworfen": [dict(p) for p in (eintrag.get("verworfen") or [])],
+                "interpoliert": (dict(eintrag["interpoliert"])
+                                 if eintrag.get("interpoliert") else None),
+                "dauer_s": float(eintrag.get("dauer_s") or 0.0),
+                "beginn_dt": self._zeit_lesen(eintrag.get("beginn_dt")),
+            }
+            for feld in ("entfernt", "verworfen"):
+                for pt in aufz[feld]:
+                    pt["time"] = self._zeit_lesen(pt.get("time"))
+            if aufz["interpoliert"] is not None:
+                aufz["interpoliert"]["time"] = self._zeit_lesen(
+                    aufz["interpoliert"].get("time"))
+
+            if aufz["beginn_dt"] is None or not aufz["entfernt"]:
+                print("[CUT-REC] Aufzeichnung %.3f-%.3f unvollstaendig, "
+                      "wird nicht uebernommen" % (start_s, end_s))
+                continue
+            self._cut_points[self._cut_key(start_s, end_s)] = aufz
+
+        self.prune_cut_points()
+        return len(self._cut_points)
+
     def spur_ohne_schnitt(self, start_s, end_s, gpx_data):
         """Die GPX-Spur so, wie sie ohne diesen Schnitt aussaehe.
 

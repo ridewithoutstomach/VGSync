@@ -3620,6 +3620,14 @@ class MainWindow(QMainWindow):
             route_geojson = self._build_route_geojson_from_gpx(new_gpx)
             self.map_widget.loadRoute(route_geojson, do_fit=False)
 
+            # Liegt dieser Schnitt VOR bereits aufgezeichneten Schnitten,
+            # sind deren Punkte gerade um delta_to_remove nach vorn
+            # gerueckt. Ihre Aufzeichnungen muessen mit, sonst zeigen sie
+            # ins Leere. Vor dem eigenen Merken, damit die frische
+            # Aufzeichnung unberuehrt bleibt.
+            self.cut_manager.aufzeichnungen_nachfuehren(
+                desired_start_dt, -delta_to_remove)
+
             # Aufzeichnung ablegen: alles, was noetig waere, um genau diesen
             # Schnitt wieder zurueckzunehmen. Der Schluessel ist die ROHZEIT
             # des Schnitts, die sich nicht mehr aendert.
@@ -3916,6 +3924,12 @@ class MainWindow(QMainWindow):
                                 "Nothing was changed.")
             return
 
+        # Anfang und Dauer merken, BEVOR schnitt_entfernen() die Aufzeichnung
+        # wegwirft - beides wird gleich zum Nachfuehren gebraucht.
+        aufz = self.cut_manager.aufzeichnung(start_s, end_s) or {}
+        nachfuehr_ab = aufz.get("beginn_dt")
+        nachfuehr_um = float(aufz.get("dauer_s") or 0.0)
+
         # Beides zusammen ist EIN Schritt fuer Strg+Z.
         self.register_gpx_undo_snapshot()
         self.register_video_undo_snapshot(True)
@@ -3923,6 +3937,13 @@ class MainWindow(QMainWindow):
         if not self.cut_manager.schnitt_entfernen(start_s, end_s):
             print("[CUT-UNDO] Schnitt war nicht mehr vorhanden, Abbruch")
             return
+
+        # Alles hinter dem zurueckgenommenen Schnitt liegt jetzt wieder um
+        # dessen Dauer spaeter. Die Aufzeichnungen der dahinterliegenden
+        # Schnitte muessen das mitmachen, sonst zeigen sie ins Leere und die
+        # Spur kaeme dort still falsch zurueck.
+        nachgefuehrt = self.cut_manager.aufzeichnungen_nachfuehren(
+            nachfuehr_ab, +nachfuehr_um)
 
         recalc_gpx_data(neue_spur)
         self.gpx_widget.set_gpx_data(neue_spur)
@@ -3941,7 +3962,8 @@ class MainWindow(QMainWindow):
         self._refresh_preview_timeline()
         self.timeline.update()
         print(f"[CUT-UNDO] Schnitt {start_s:.3f}-{end_s:.3f} zurueckgenommen, "
-              f"Spur {vorher_n} -> {len(neue_spur)}")
+              f"Spur {vorher_n} -> {len(neue_spur)}, "
+              f"{nachgefuehrt} Aufzeichnung(en) nachgefuehrt")
 
     def _ruecknahme_probe(self, start_s, end_s, spur_jetzt, spur_vorher):
         """Selbsttest: wuerde die Ruecknahme dieses Schnitts exakt zurueckfuehren?
@@ -7651,6 +7673,19 @@ class MainWindow(QMainWindow):
             "gpx_data": self.gpx_widget.gpx_list._gpx_data,
             "cut_intervals": self.cut_manager._cut_intervals,
             "hard_cuts": self.cut_manager.get_hard_cuts(),
+            # Was die Schnitte aus der GPX-Spur genommen haben. Ohne das war
+            # "Undo Cut" nach jedem Laden grau: die Aufzeichnungen standen nur
+            # im Speicher, ein geladenes Projekt begann mit einem leeren
+            # _cut_points, und die erste Sperre in ruecknahme_moeglich() griff
+            # damit fuer jeden Schnitt. Gemessen an maptest.KVRouiteproj:
+            # 200 Byte je Punkt, drei Schnitte von je einer Minute bei 1 Hz
+            # sind rund 36 kB auf eine Datei von 4,4 MB.
+            "cut_points": self.cut_manager.get_cut_points(),
+            # Der Zustand der Spur nach der letzten eigenen Aktion. Er MUSS
+            # mitgespeichert werden: beim Laden neu gerechnet wuerde er immer
+            # passen und damit jede Aufzeichnung ungeprueft freigeben - auch
+            # nach einem chT oder Close Gaps zwischen Schnitt und Speichern.
+            "gpx_fingerabdruck": self.cut_manager.get_gpx_abdruck(),
             "gpx_markers": {
                 "markB_idx": self.gpx_widget.gpx_list._markB_idx,
                 "markE_idx": self.gpx_widget.gpx_list._markE_idx
@@ -7819,6 +7854,22 @@ class MainWindow(QMainWindow):
             # Aeltere Projektdateien kennen "hard_cuts" nicht -> alle
             # Schnitte behalten ihre Blende, wie bisher.
             self.cut_manager.set_hard_cuts(project_data.get("hard_cuts", []))
+            # Aufzeichnungen der Schnitte. Fehlt der Schluessel (Projekt von
+            # vor 6.03), bleibt es beim leeren Stand und die Schnitte sind
+            # gesperrt wie bisher.
+            anzahl_aufz = self.cut_manager.set_cut_points(
+                project_data.get("cut_points", []))
+            # Der Fingerabdruck kommt AUS DER DATEI und wird nicht neu
+            # gerechnet - siehe set_gpx_abdruck(). Neu gerechnet passte er
+            # immer und gaebe jede Aufzeichnung ungeprueft frei.
+            hat_abdruck = self.cut_manager.set_gpx_abdruck(
+                project_data.get("gpx_fingerabdruck"))
+            passt = (hat_abdruck
+                     and self.cut_manager.zeiten_unveraendert(self._gpx_data))
+            print(f"[CUT-REC] {anzahl_aufz} Aufzeichnung(en) aus dem Projekt "
+                  f"geladen, Abdruck in der Datei: "
+                  f"{'ja' if hat_abdruck else 'nein'}, "
+                  f"passt zur Spur: {'ja' if passt else 'nein'}")
             if self.video_durations:
                 total_duration = sum(self.video_durations)
                 self.timeline.set_total_duration(total_duration)
