@@ -1498,9 +1498,6 @@ class MainWindow(QMainWindow):
         self.video_control.markClearClicked.connect(self.on_deselect_clicked)
         
         # Geschwindigkeiten / Rate
-        self.vlc_speeds = [0.5, 0.67, 1.0, 1.5, 2.0, 4.0, 8.0, 16.0, 32.0]
-        self.speed_index = 2
-        self.current_rate = self.vlc_speeds[self.speed_index]
 
         # Video-Abspiel-Ende
         self.video_editor.play_ended.connect(self.on_play_ended)
@@ -2581,14 +2578,10 @@ class MainWindow(QMainWindow):
             self.timeline.set_markE_time(global_video_s)
             self.cut_manager.on_cut_clicked()
     
-            msg = "Video"
-            if self._autoSyncVideoEnabled and self._edit_mode in ("copy", "encode"):
-                msg += " and GPX"
-            melden(
-                self, "Set Begin",
-                f"{msg} cut at {global_video_s:.2f}s.\n"
-                "Undo possible."
-            )
+            # Frueher stand hier ein Meldungsfenster mit "Video and GPX
+            # cut at ...s". Es sagte nur, was in der Zeitleiste ohnehin
+            # zu sehen ist, und musste jedes Mal weggeklickt werden.
+            print(f"[DEBUG] set_begin: Schnitt bei {global_video_s:.2f}s gesetzt")
     
         print("[DEBUG] on_set_begin_clicked => done.")
         return True
@@ -6799,25 +6792,6 @@ class MainWindow(QMainWindow):
 
         return results
 
-    def keyPressEvent(self, event):
-        if event.key() == Qt.Key_Plus or event.text() == '+':
-            if self.speed_index < len(self.vlc_speeds) - 1:
-                self.speed_index += 1
-                self.current_rate = self.vlc_speeds[self.speed_index]
-                self.video_editor.set_playback_rate(self.current_rate)
-        elif event.key() == Qt.Key_Minus or event.text() == '-':
-            if self.speed_index > 0:
-                self.speed_index -= 1
-                self.current_rate = self.vlc_speeds[self.speed_index]
-                self.video_editor.set_playback_rate(self.current_rate)
-                
-        elif event.key() == Qt.Key_V:
-            self.action_toggle_360.trigger()  # löst deinen Menü-Flow aus und hält den Haken in sync
-            return
-  
-        else:
-            super(MainWindow, self).keyPressEvent(event)
-
     def get_final_time_for_global(self, global_s: float, cut_intervals=None) -> float:
         """
         Konvertiert 'global_s' (Rohvideo-Zeit) => 'final_s' (geschnittenes Video).
@@ -9523,6 +9497,19 @@ class MainWindow(QMainWindow):
 
 
     def keyPressEvent(self, event):
+        """Nur V. Alles andere an Tasten liegt woanders.
+
+        Geschwindigkeit (+, -, 1 bis 9), 360-Blickwinkel und Zoom haengen an
+        QShortcut mit Qt.ApplicationShortcut in video_editor_widget.py. Die
+        greifen unabhaengig davon, welches Widget den Fokus hat, und decken
+        zusaetzlich den Ziffernblock und die =-Variante mancher Layouts ab.
+
+        Bis 6.03 stand weiter oben im Fenster eine zweite Methode desselben
+        Namens. In Python gewinnt die spaeter definierte - die erste war
+        unerreichbar. Sie behandelte + und - noch einmal auf eigene Weise und
+        wurde samt ihrem Zustand entfernt (vlc_speeds, speed_index,
+        current_rate), den sonst niemand benutzt hat.
+        """
         if event.key() == Qt.Key_V:
             # trigger() schaltet den Menuehaken um und ruft dabei
             # _on_toggle_360_from_menu mit dem neuen Zustand auf.
