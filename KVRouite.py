@@ -333,6 +333,22 @@ if getattr(sys, "frozen", False):
         except Exception as _exc2:
             print("[WARN] Auch der zweite Weg schlug fehl:", _exc2)
 
+    # Noch einmal, jetzt hat unser Ort das letzte Wort. Grund:
+    # gstreamer_libs.setup_python_environment() setzt GST_REGISTRY_1_0 auf
+    # ihren eigenen Ort, GST_REGISTRY bleibt auf unserem stehen - zwei
+    # Variablen mit verschiedenen Werten. In diesem Zustand hat die gebaute
+    # 6.03-EXE am 03.09.2026 die Plugin-Liste an KEINER Stelle mehr
+    # gespeichert und sie bei jedem Start neu aufgebaut. Ein vom Anwender
+    # selbst gesetzter Ort bleibt unangetastet, das merkt sich der erste
+    # Aufruf (core/gst_umgebung.py).
+    try:
+        from core.gst_umgebung import registry_festlegen as _registry_erneut
+        _registry2 = _registry_erneut(erneut=True)
+        if _registry2:
+            print("[INFO] GST_REGISTRY_1_0 (endgueltig) =", _registry2)
+    except Exception as _exc3:
+        print("[WARN] Ort der GStreamer-Plugin-Liste nicht bestaetigt:", _exc3)
+
 # ---------------------------------------------------------
 import path_manager
 

@@ -121,7 +121,15 @@ def _im_programm(pfad):
     return False
 
 
-def registry_festlegen():
+#: Was der Anwender selbst vorgegeben hat - oder None. Wird beim ersten
+#: Aufruf von registry_festlegen() festgehalten, siehe dort.
+_ANWENDER_ORT = None
+
+#: Der Ort, den wir gewaehlt haben. Einmal ausgerechnet, dann steht er.
+_UNSER_ORT = None
+
+
+def registry_festlegen(erneut=False):
     """Den Ort der Plugin-Liste setzen. Rueckgabe: der Pfad oder None.
 
     Bewusst eine eigene Funktion und nicht Teil von umgebung_aufbauen(): die
@@ -144,17 +152,46 @@ def registry_festlegen():
     Fuer Windows mag der Ort taugen, fuer ein signiertes macOS-Buendel nicht:
     jede Datei, die nach dem Signieren dazukommt, macht das Siegel ungueltig,
     und das Buendel beschaedigt sich beim ersten Start selbst.
+
+    ZWEIMAL aufrufen, siehe KVRouite.py:
+
+      erneut=False  vor allem anderen. Steht dann schon ein Wert da, der NICHT
+                    ins Programm zeigt, stammt er vom Anwender - der gilt, und
+                    wir merken ihn uns.
+
+      erneut=True   nachdem gstreamer_libs.setup_python_environment() gelaufen
+                    ist. Die setzt GST_REGISTRY_1_0 auf ihren eigenen Ort und
+                    ueberschreibt unseren; danach stuenden zwei Variablen mit
+                    verschiedenen Werten da (GST_REGISTRY unserer,
+                    GST_REGISTRY_1_0 der des Wheels). Am 03.09.2026 an der
+                    gebauten 6.03-EXE gemessen: in diesem Zustand wurde die
+                    Liste ueberhaupt nicht mehr gespeichert, an keiner der
+                    drei moeglichen Stellen - das Programm baute sie bei jedem
+                    Start neu auf. Mit dem zweiten Aufruf steht ueberall
+                    derselbe Ort, und der Ordner wird von uns angelegt.
     """
+    global _ANWENDER_ORT, _UNSER_ORT
+
     vorher = (os.environ.get("GST_REGISTRY_1_0")
               or os.environ.get("GST_REGISTRY"))
-    if vorher and not _im_programm(vorher):
+    if erneut:
+        if _ANWENDER_ORT:
+            # Auch der Wert des Anwenders wird vom Wheel ueberschrieben.
+            # "Der Anwender gewinnt" heisst: auch dagegen.
+            os.environ["GST_REGISTRY_1_0"] = _ANWENDER_ORT
+            os.environ["GST_REGISTRY"] = _ANWENDER_ORT
+            return _ANWENDER_ORT
+    elif vorher and not _im_programm(vorher):
+        _ANWENDER_ORT = vorher
         return None
-    datei = _registry_datei()
-    if not datei:
+
+    if _UNSER_ORT is None:
+        _UNSER_ORT = _registry_datei()
+    if not _UNSER_ORT:
         return None
-    os.environ["GST_REGISTRY_1_0"] = datei
-    os.environ["GST_REGISTRY"] = datei
-    return datei
+    os.environ["GST_REGISTRY_1_0"] = _UNSER_ORT
+    os.environ["GST_REGISTRY"] = _UNSER_ORT
+    return _UNSER_ORT
 
 
 def _wurzeln():
