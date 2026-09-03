@@ -79,6 +79,11 @@ class VideoTimelineWidget(QWidget):
         # Schluessel der Schnitte, die ohne Blende ausgefuehrt werden.
         # Wird vom VideoCutManager gesetzt, siehe set_hard_cut_keys().
         self._hard_cut_keys = set()
+        # Blendenlaenge je Uebergang, in Sekunden, unter dem Schluessel des
+        # zusammengefassten Bereichs. Gesetzt vom MainWindow - nur dort ist
+        # bekannt, was Vorgabe, eingestellter Wert und harte Kante zusammen
+        # ergeben.
+        self._blenden_laengen = {}
         # Bereich, auf den gerade rechtsgeklickt wurde: (start_s, ende_s).
         # Er wird hervorgehoben, solange das Menue oder die Rueckfrage offen
         # ist - bei mehreren Schnitten dicht beieinander ist sonst nicht zu
@@ -142,6 +147,7 @@ class VideoTimelineWidget(QWidget):
         """
         self._cut_intervals = []
         self._hard_cut_keys = set()
+        self._blenden_laengen = {}
         # Die Auswahl zeigte auf einen Schnitt, den es gleich nicht mehr gibt.
         # Jede Aenderung an den Schnitten laeuft hier durch - Zuruecknehmen,
         # Verschieben, Laden -, damit kann keine veraltete Auswahl stehen
@@ -157,6 +163,31 @@ class VideoTimelineWidget(QWidget):
         """
         self._hard_cut_keys = set(keys or ())
         self.update()
+
+    def set_blenden_laengen(self, eintraege):
+        """Blendenlaenge je Uebergang: [(start_s, ende_s, sekunden), ...].
+
+        Die Zeitleiste zeichnet damit nicht nur den Schnitt, sondern auch die
+        Ueberblendung darum herum. Eine Blende liegt MITTIG auf der Kante: je
+        die halbe Laenge liegt VOR dem Schnittanfang und HINTER dem
+        Schnittende, in Material, das im fertigen Video zu sehen ist. Dieser
+        Platz ist belegt - dort noch einen Schnitt zu setzen geht schief, und
+        das soll man sehen, bevor man es tut.
+
+        Die Schluessel sind die der zusammengefassten Bereiche: aneinander
+        stossende Schnitte sind im Video EIN Uebergang mit EINER Blende.
+        """
+        neu = {}
+        for eintrag in (eintraege or []):
+            try:
+                a, b, sek = eintrag[0], eintrag[1], float(eintrag[2])
+            except (TypeError, IndexError, ValueError):
+                continue
+            if sek > 0:
+                neu[self._cut_key(a, b)] = sek
+        if neu != self._blenden_laengen:
+            self._blenden_laengen = neu
+            self.update()
 
     @staticmethod
     def _cut_key(start_s, end_s):
@@ -754,26 +785,88 @@ class VideoTimelineWidget(QWidget):
 
     #: Abstand der Schraffurlinien in einem Schnittblock.
     SCHRAFFUR_ABSTAND = 9
+    #: Enger bei der harten Kante - das dichtere Muster liest sich als
+    #: "geschlossen", das weitere als "durchlaessig".
+    SCHRAFFUR_ABSTAND_HART = 5
 
-    def _schraffur(self, painter, x_start, breite, h):
+    def _schraffur(self, painter, x_start, breite, h, hart=False):
         """Diagonale Linien ueber einen Schnittblock.
 
         Das Muster macht den Block auch dort erkennbar, wo das Videobild
         selbst dunkel ist. Es wird auf den Block begrenzt, damit die Linien
         nicht in benachbartes Material laufen.
+
+        Blende und harte Kante bekommen VERSCHIEDENE Muster, und das ist der
+        eigentliche Unterschied zwischen beiden - nicht die Randfarbe. Ein
+        Schnitt von wenigen Zehntelsekunden ist nur ein paar Pixel breit; eine
+        kraeftigere Kante waere dort fast der ganze Block und liesse ihn
+        groesser wirken, als er ist. Das Muster wird dagegen mitgeschnitten
+        und bleibt in jeder Breite ehrlich.
+
+          Blende       "/"   hell, weit stehend, in Richtung der Blende
+          harte Kante  "\\"  orange, eng stehend und gegenlaeufig
+
+        Richtung und Abstand bleiben zusaetzlich verschieden. Wer Farben
+        schlecht unterscheidet, erkennt den Unterschied dann immer noch am
+        Muster.
         """
         if breite < 3:
             return
         painter.save()
         painter.setClipRect(QRectF(x_start, 0, breite, h))
-        painter.setPen(QPen(QColor(255, 255, 255, 38), 1))
-        # Von links unten nach rechts oben, um h versetzt - so treffen die
-        # Linien den Block unabhaengig von seiner Breite.
+        # Die FARBE traegt den Unterschied, nicht die Richtung: Richtung und
+        # Abstand allein waren auf bewegtem Bild kaum auseinanderzuhalten.
+        # Orange gehoert der harten Kante - dieselbe Farbe wie ihre
+        # Schnittkanten -, die Blende bleibt hell und neutral.
+        # Deckkraft gemessen und nicht geschaetzt: eine 1 px breite Diagonale
+        # wird kantengeglaettet, von der eingestellten Deckkraft kommt rund
+        # die Haelfte an. Bei 105 lag der Orangeanteil im Bild bei 40 von 255
+        # und war kaum zu sehen - 160 ergibt gut 60 und liest sich sofort.
+        painter.setPen(QPen(QColor(255, 138, 61, 160) if hart
+                            else QColor(255, 255, 255, 70), 1))
+        abstand = (self.SCHRAFFUR_ABSTAND_HART if hart
+                   else self.SCHRAFFUR_ABSTAND)
+        # Um h versetzt beginnen, damit die Linien den Block unabhaengig von
+        # seiner Breite treffen.
         x = x_start - h
         while x < x_start + breite + h:
-            painter.drawLine(QPointF(x, h), QPointF(x + h, 0.0))
-            x += self.SCHRAFFUR_ABSTAND
+            if hart:
+                # von links oben nach rechts unten
+                painter.drawLine(QPointF(x, 0.0), QPointF(x + h, h))
+            else:
+                # von links unten nach rechts oben
+                painter.drawLine(QPointF(x, h), QPointF(x + h, 0.0))
+            x += abstand
         painter.restore()
+
+    def _draw_blendenfluegel(self, painter, x_start, x_end, halb_px, h, w):
+        """Die Ueberblendung, die links und rechts ins Videobild hineinreicht.
+
+        Gezeichnet als Verlauf, der an der Schnittkante am kraeftigsten ist
+        und nach aussen verschwindet - so, wie die Blende dort wirkt. Die
+        gepunktete Linie am aeusseren Ende sagt, wie weit sie reicht.
+
+        Bewusst weiss und nicht farbig: Blau gehoert den Overlays, Orange der
+        harten Kante. Und der Verlauf sieht aus, als loese sich der schwarze
+        Block ins Bild auf - genau das tut die Blende.
+        """
+        painter.save()
+        try:
+            for x_kante, richtung in ((x_start, -1.0), (x_end, +1.0)):
+                x_aussen = x_kante + richtung * halb_px
+                links = min(x_kante, x_aussen)
+                breite = abs(x_aussen - x_kante)
+                if breite < 1.0 or links > w or links + breite < 0:
+                    continue
+                verlauf = QLinearGradient(x_kante, 0.0, x_aussen, 0.0)
+                verlauf.setColorAt(0.0, QColor(255, 255, 255, 95))
+                verlauf.setColorAt(1.0, QColor(255, 255, 255, 0))
+                painter.setPen(Qt.NoPen)
+                painter.fillRect(QRectF(links, 0, breite, h), QBrush(verlauf))
+                painter.setPen(QPen(QColor(255, 255, 255, 70), 1, Qt.DotLine))
+                painter.drawLine(QPointF(x_aussen, 0), QPointF(x_aussen, h))
+        finally:
+            painter.restore()
 
     def _cut_bloecke(self, eps: float = 0.001):
         """Die Schnitte so, wie sie im Video wirklich aussehen.
@@ -790,12 +883,20 @@ class VideoTimelineWidget(QWidget):
 
         Liefert (start, ende, hart) - hart, wenn irgendein Schnitt der
         Gruppe eine harte Kante ist; im Video ist die Gruppe ja ein Uebergang.
+
+        Der ERSTE und der LETZTE Schnitt zaehlen dabei immer als harte Kante.
+        Sie werden vor dem Zusammenfuegen weggetrimmt und hatten noch nie eine
+        Blende - sie als Blende zu zeichnen waere schlicht falsch, auch wenn
+        in _hard_cut_keys nichts zu ihnen steht.
         """
         gueltig = sorted((min(a, b), max(a, b)) for (a, b) in self._cut_intervals
                          if b > a)
+        gesamt = self.total_duration
         bloecke = []
         for (a, b) in gueltig:
-            hart = self._cut_key(a, b) in self._hard_cut_keys
+            hart = (self._cut_key(a, b) in self._hard_cut_keys
+                    or a < 0.1
+                    or (gesamt > 0 and abs(b - gesamt) < 0.1))
             if bloecke and a <= bloecke[-1][1] + eps:
                 vorher = bloecke[-1]
                 bloecke[-1] = (vorher[0], max(vorher[1], b), vorher[2] or hart)
@@ -861,6 +962,10 @@ class VideoTimelineWidget(QWidget):
         # als solcher zu erkennen.
         brush_black = QBrush(QColor(0, 0, 0, 215))
         pen_black = QPen(QColor("black"), 1)
+        # Bewusst nur ein Pixel: bei einem Schnitt von wenigen Zehntel-
+        # sekunden ist der Block selbst nur ein paar Pixel breit, und zwei
+        # Pixel Kante links und rechts waeren dann fast der ganze Block. Die
+        # Unterscheidung zur Blende traegt die Schraffur, siehe _schraffur().
         pen_hard = QPen(QColor("#FF8A3D"), 1)
         painter.setPen(pen_black)
         for (start_s, end_s, gruppe_hart) in self._cut_bloecke():
@@ -911,12 +1016,26 @@ class VideoTimelineWidget(QWidget):
                 painter.fillRect(QRectF(x_start, 0, rect_width, h),
                                  QBrush(grad))
 
+            # Die Ueberblendung ringsum. Nur bei einer Blende - eine harte
+            # Kante greift nicht ins behaltene Material.
+            if not gruppe_hart and self.total_duration > 0:
+                blende = self._blenden_laengen.get(
+                    self._cut_key(start_s, end_s), 0.0)
+                if blende > 0:
+                    halb_px = ((blende / 2.0) / self.total_duration
+                               ) * timeline_real_width
+                    if halb_px >= 1.0:
+                        self._draw_blendenfluegel(
+                            painter, x_start, x_start + rect_width,
+                            halb_px, h, w)
+                        painter.setPen(pen_black)
+
             # Schraffur und Kanten - erst dadurch ist ein Schnitt auf jedem
             # Untergrund als Schnitt zu erkennen. Eine weitere Vollfarbe waere
             # dafuer untauglich: Blau ist fuer Overlays vergeben, Orange fuer
             # die harte Kante, und jede andere kann im Bild selbst vorkommen.
             # Ein Muster kann das nicht.
-            self._schraffur(painter, x_start, rect_width, h)
+            self._schraffur(painter, x_start, rect_width, h, hart=gruppe_hart)
             if not gruppe_hart:
                 # Bei harter Kante sind die Raender bereits orange markiert -
                 # weisse Linien wuerden sie nur ueberdecken.

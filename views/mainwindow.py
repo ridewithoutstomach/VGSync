@@ -4037,17 +4037,32 @@ class MainWindow(QMainWindow):
                 laenge, "" if eigen is not None else ", default")
         a_blende = menue.addAction(beschriftung)
         a_blende.setCheckable(True)
-        a_blende.setChecked(not hart)
         a_hart = menue.addAction("Hard Cut")
         a_hart.setCheckable(True)
-        a_hart.setChecked(hart)
+        if rand:
+            # Der erste und der letzte Schnitt werden vor dem Zusammenfuegen
+            # weggetrimmt: sie sind IMMER eine harte Kante. Das Menue hat sie
+            # bisher als Blende angehakt und beim Klick abgewiesen - der Haken
+            # sagt jetzt gleich die Wahrheit, und umschalten laesst sich
+            # nichts.
+            a_blende.setChecked(False)
+            a_hart.setChecked(True)
+            a_blende.setEnabled(False)
+            a_hart.setEnabled(False)
+            hinweis = ("The first and the last cut are trimmed away before "
+                       "encoding, so they are always a hard cut.")
+            a_blende.setToolTip(hinweis)
+            a_hart.setToolTip(hinweis)
+        else:
+            a_blende.setChecked(not hart)
+            a_hart.setChecked(hart)
 
         a_laenge = menue.addAction("Crossfade length …")
         a_laenge.setEnabled(not rand and not hart)
         if rand:
             a_laenge.setToolTip("The first and the last cut are trimmed away "
-                                "before encoding, so they never had a "
-                                "crossfade.")
+                                "before encoding, so they are always a hard "
+                                "cut.")
         elif hart:
             a_laenge.setToolTip("This cut is a hard cut. Switch it to a "
                                 "crossfade first.")
@@ -6335,6 +6350,10 @@ class MainWindow(QMainWindow):
         # Dasselbe Muster benutzen _maybe_ask_index und _fps_nach_laden schon.
         # Der Aufbau kommt gleich nach dem Laden von selbst: _set_edit_mode
         # reiht dafuer ohnehin einen Aufruf ein.
+        # Die Anzeige der Blenden zuerst: sie haengt weder am Player noch
+        # daran, ob gerade geladen wird.
+        self._blenden_an_timeline()
+
         if getattr(self, "_loading_project", False):
             print("[DEBUG] preview-cuts: Projekt wird geladen => spaeter")
             return
@@ -6852,6 +6871,22 @@ class MainWindow(QMainWindow):
             "\n\n%s\n\n"
             "Nothing was changed. Adjust the length with the right-click menu "
             "on the cut, or move the cuts apart." % "\n".join(zeilen))
+
+    def _blenden_an_timeline(self):
+        """Der Zeitleiste sagen, wie lang die Blende je Uebergang ist.
+
+        Sie zeichnet damit die Ueberblendung, die ins behaltene Material
+        hineinreicht. Zusammengefasste Bereiche, wie ueberall sonst auch:
+        aneinander stossende Schnitte sind EIN Uebergang.
+        """
+        gesamt = float(getattr(self, "real_total_duration", 0.0) or 0.0)
+        try:
+            bereiche = self.cut_manager.get_merged_cut_intervals()
+            self.timeline.set_blenden_laengen(
+                [(a, b, self._blende_fuer(a, b, gesamt))
+                 for (a, b) in bereiche])
+        except Exception as e:
+            print(f"[WARN] Blenden an die Zeitleiste: {e}")
 
     def _blende_am_rand(self, zeit_s) -> float:
         """Blendenlaenge des Schnitts, der an dieser Keep-Grenze liegt.
