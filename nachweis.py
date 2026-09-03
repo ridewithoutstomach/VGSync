@@ -129,6 +129,32 @@ def _dialoge_beantworten(app, log):
     return zeitgeber
 
 
+def _sofort_beenden(code, log):
+    """Den Prozess beenden, ohne Qt und GStreamer abraeumen zu lassen.
+
+    Der Weg ueber app.exit() ist der saubere - aber im gepackten macOS-Buendel
+    ist der Lauf danach mit einem Segmentation fault ausgestiegen (Bauplan vom
+    03.09.2026, Rueckgabewert 139), und zwar NACHDEM alle drei Bilder
+    geschrieben waren: das Artefakt enthielt sie, und der Schritt danach
+    ("Hat das Laufen das Buendel veraendert?") lief grueen durch. Der Absturz
+    passiert also beim Abraeumen von GStreamer und QtWebEngine, nicht bei der
+    Arbeit.
+
+    Fuer den Nachweis zaehlen die Bilder, nicht das Aufraeumen. Deshalb wird
+    hier hart beendet, mit dem Rueckgabewert, den der Nachweis verdient hat.
+    Das ist NUR in diesem Modus so - eine normale Sitzung beendet sich
+    weiterhin ordentlich ueber app.exec().
+    """
+    import sys
+    log("[PROOF] exiting with %d" % code)
+    for strom in (sys.stdout, sys.stderr):
+        try:
+            strom.flush()
+        except Exception:
+            pass
+    os._exit(code)
+
+
 def bilder_machen(fenster, app, log):
     """Laden, abspielen, drei Bilder, beenden. Setzt den Rueckgabewert.
 
@@ -140,8 +166,7 @@ def bilder_machen(fenster, app, log):
     video, gpx, fehler = _material(ordner)
     if fehler:
         log("[PROOF] test material could not be created: %s" % fehler)
-        app.exit(1)
-        return
+        _sofort_beenden(1, log)
     log("[PROOF] test material in %s" % ordner)
 
     # Fenstergroesse festsetzen. Ohne Bildschirm meldet Qt einen winzigen
@@ -177,11 +202,11 @@ def bilder_machen(fenster, app, log):
             log("[PROOF] %d pictures taken - compare them: if the ball in the "
                 "video and the playhead have moved, playback really ran."
                 % len(gemacht))
-            app.exit(0)
+            _sofort_beenden(0, log)
         else:
             log("[PROOF] only %d of %d pictures were taken."
                 % (len(gemacht), len(ZEITPUNKTE)))
-            app.exit(1)
+            _sofort_beenden(1, log)
 
     def abspielen():
         try:

@@ -230,8 +230,27 @@ jobs:
           # ein einzelnes Standbild koennte auch ein eingefrorenes Fenster
           # sein. Aufgenommen wird von Qt selbst (QWidget.grab), deshalb geht
           # es auch ohne Bildschirm.
+          set +e
           "$APP/Contents/MacOS/KVRouite" --screenshot
-          ls -l KVRouite_screenshot_*.png
+          RC=$?
+          set -e
+          echo "Rueckgabewert: $RC"
+          ls -l KVRouite_screenshot_*.png || true
+          # Massstab sind die BILDER, nicht der Rueckgabewert. Am 03.09.2026
+          # ist das Buendel nach dem dritten Bild beim Abraeumen von GStreamer
+          # und QtWebEngine mit einem Segmentation fault ausgestiegen - die
+          # Bilder waren da, der Schritt trotzdem rot. Seitdem beendet sich
+          # der Nachweis-Modus hart (nachweis.py); bleibt trotzdem ein
+          # Absturz, faellt er hier auf, ohne den Nachweis zu entwerten.
+          ANZAHL=$(ls -1 KVRouite_screenshot_*.png 2>/dev/null | wc -l | tr -d " ")
+          echo "Bilder: $ANZAHL von 3"
+          if [ "$ANZAHL" -ne 3 ]; then
+            echo "ABBRUCH: es sind nicht alle drei Bilder entstanden."
+            exit 1
+          fi
+          if [ "$RC" -ne 0 ]; then
+            echo "HINWEIS: alle Bilder da, aber das Programm endete mit $RC."
+          fi
 
       - name: Hat das Laufen das Buendel veraendert?
         if: always()
