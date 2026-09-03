@@ -48,6 +48,80 @@ PLUGIN_PAKETE = (
 BIBLIOTHEK_ORDNER = ("bin", "lib")
 
 
+#: Wohin GStreamer seine Plugin-Liste schreiben darf.
+#
+# GStreamer legt sich beim Start eine Zwischendatei an, damit es nicht jedes
+# Mal alle Plugins durchsuchen muss. Wo die hingehoert, sucht es sich selbst -
+# und im macOS-Buendel griff es daneben: die Datei landete als
+# Contents/Frameworks/registry.bin IM BUENDEL.
+#
+# Das ist nicht nur unordentlich. Ein Anwendungsbuendel ist signiert, und die
+# Signatur umfasst jede Datei darin. Eine, die beim ersten Start dazukommt,
+# macht das Siegel ungueltig - genau die Meldung, die am 02.09.2026 ein
+# Anwender geschickt hat ("a sealed resource is missing or invalid"). Das
+# Buendel haette sich also bei jedem Anwender beim ersten Doppelklick selbst
+# beschaedigt. Gefunden am 03.09.2026 vom Schritt "Hat das Laufen das Buendel
+# veraendert?" im macOS-Bauplan, auf beiden Architekturen.
+#
+# Deshalb wird der Ort hier ausdruecklich vorgegeben, und zwar dort, wo
+# Zwischendateien hingehoeren: in den Zwischenspeicher des ANWENDERS, nicht
+# ins Programm. Ueberlebt ein Update, ist beschreibbar, und das Buendel wird
+# beim Laufen nicht mehr angefasst.
+_REGISTRY_ORDNER = "KVRouite"
+
+
+def _zwischenspeicher():
+    """Der Ordner des Anwenders fuer Zwischendateien, je nach System."""
+    if sys.platform == "win32":
+        basis = os.environ.get("LOCALAPPDATA")
+    elif sys.platform == "darwin":
+        basis = os.path.expanduser("~/Library/Caches")
+    else:
+        basis = (os.environ.get("XDG_CACHE_HOME")
+                 or os.path.expanduser("~/.cache"))
+    if not basis or not os.path.isdir(os.path.dirname(basis) or basis):
+        import tempfile
+        basis = tempfile.gettempdir()
+    return os.path.join(basis, _REGISTRY_ORDNER)
+
+
+def _registry_datei():
+    """Pfad der Plugin-Liste. None, wenn der Ordner nicht anzulegen ist.
+
+    Der Dateiname traegt die Architektur, weil eine Liste, die auf einem
+    Apple-Silicon-Rechner entstanden ist, auf einem Intel-Rechner nichts
+    taugt - GStreamer macht es bei seinem eigenen Vorgabeort genauso.
+    """
+    import platform
+    ordner = _zwischenspeicher()
+    try:
+        os.makedirs(ordner, exist_ok=True)
+    except Exception:
+        return None
+    return os.path.join(ordner, "gstreamer-registry-%s.bin"
+                        % (platform.machine() or "unknown"))
+
+
+def registry_festlegen():
+    """Den Ort der Plugin-Liste setzen. Rueckgabe: der Pfad oder None.
+
+    Bewusst eine eigene Funktion und nicht Teil von umgebung_aufbauen(): die
+    laeuft nur als Notweg, wenn der Weg ueber das Wheel scheitert
+    (KVRouite.py). Der Ort der Plugin-Liste muss aber IMMER stehen, bevor
+    GStreamer geladen wird - sonst sucht es sich selbst einen aus.
+
+    Ein von aussen gesetzter Wert gilt und wird nicht angefasst.
+    """
+    if os.environ.get("GST_REGISTRY_1_0") or os.environ.get("GST_REGISTRY"):
+        return None
+    datei = _registry_datei()
+    if not datei:
+        return None
+    os.environ["GST_REGISTRY_1_0"] = datei
+    os.environ["GST_REGISTRY"] = datei
+    return datei
+
+
 def _wurzeln():
     """Wo die gstreamer-Pakete im gepackten Programm liegen koennen.
 
@@ -92,6 +166,10 @@ def umgebung_aufbauen():
         neu = os.pathsep.join(teile + ([vorher] if vorher else []))
         os.environ[name] = neu
         gesetzt[name] = neu
+
+    datei = registry_festlegen()
+    if datei:
+        gesetzt["GST_REGISTRY_1_0"] = datei
 
     typelibs = _sammeln(TYPELIB_PAKETE, "lib", "girepository-1.0")
     dazu("GI_TYPELIB_PATH", typelibs)
@@ -139,7 +217,7 @@ def bericht():
     """Was gerade gilt - fuer die Fehlersuche."""
     zeilen = []
     for name in ("GI_TYPELIB_PATH", "GST_PLUGIN_PATH_1_0",
-                 "GST_PLUGIN_SCANNER_1_0", "PYGI_DLL_DIRS",
+                 "GST_PLUGIN_SCANNER_1_0", "GST_REGISTRY_1_0", "PYGI_DLL_DIRS",
                  "DYLD_LIBRARY_PATH", "LD_LIBRARY_PATH"):
         wert = os.environ.get(name)
         if wert:

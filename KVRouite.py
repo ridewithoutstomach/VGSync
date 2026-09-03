@@ -298,6 +298,20 @@ def resource_path(rel_path: str) -> str:
 # Nur im gepackten Zustand: im venv hat die .pth ihre Arbeit schon getan, ein
 # zweiter Aufruf wuerde die Pfade doppelt in die Umgebung schreiben.
 if getattr(sys, "frozen", False):
+    # Zuerst festlegen, wohin GStreamer seine Plugin-Liste schreiben darf -
+    # unabhaengig davon, welcher der beiden Wege darunter greift. Ohne das
+    # sucht GStreamer sich den Ort selbst und legt die Datei im
+    # macOS-Buendel neben die Bibliotheken; damit ist die Signatur des
+    # Buendels nach dem ersten Start hinueber. Begruendung und Messung
+    # stehen in core/gst_umgebung.py.
+    try:
+        from core.gst_umgebung import registry_festlegen
+        _registry = registry_festlegen()
+        if _registry:
+            print("[INFO] GST_REGISTRY_1_0 =", _registry)
+    except Exception as _exc0:
+        print("[WARN] Ort der GStreamer-Plugin-Liste nicht gesetzt:", _exc0)
+
     try:
         import gstreamer_libs
         gstreamer_libs.setup_python_environment()
