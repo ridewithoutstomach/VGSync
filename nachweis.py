@@ -58,6 +58,9 @@ ZEITPUNKTE = (2.0, 4.0, 6.0)
 #: da; auf einem Bauserver ohne Grafikkarte dauert es laenger als hier.
 LADEZEIT = 12.0
 
+#: Groesse des Fensters fuer die Aufnahme - siehe bilder_machen().
+FENSTERGROESSE = (1920, 1200)
+
 #: So heissen die Bilder. Die Nummer wird angehaengt.
 DATEINAME = "KVRouite_screenshot"
 
@@ -141,6 +144,14 @@ def bilder_machen(fenster, app, log):
         return
     log("[PROOF] test material in %s" % ordner)
 
+    # Fenstergroesse festsetzen. Ohne Bildschirm meldet Qt einen winzigen
+    # virtuellen Bildschirm, und KVRouite.py bemisst das Fenster daran (90 %
+    # der Bildschirmbreite). Auf dem Bauserver kamen so 796x428 heraus - bei
+    # der Groesse quetscht das Raster alles zusammen, und die Karte bekommt
+    # gar keinen Platz mehr. Die Bilder sahen danach aus, als sei die
+    # Anwendung kaputt, dabei war nur das Fenster zu klein. Mit dieser Groesse
+    # zeigt die Aufnahme dasselbe Bild wie auf einem normalen Rechner.
+    fenster.resize(*FENSTERGROESSE)
     # Muss VOR dem Laden laufen: die erste Frage kommt sofort.
     zeitgeber = _dialoge_beantworten(app, log)
 
