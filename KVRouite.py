@@ -62,14 +62,59 @@ def force_print(*args, sep=" ", end="\n"):
 def force_error(*args, sep=" ", end="\n"):
     REAL_STDERR.write(sep.join(map(str, args)) + end)
     REAL_STDERR.flush()
+# ---------------------------------------------------------------------------
+# Aufrufoptionen
+# ---------------------------------------------------------------------------
+# Ein Strich oder zwei - das Programm nimmt beides. "-v" gibt es seit jeher,
+# "--selftest" kam spaeter dazu; wer sich an die eine Schreibweise gewoehnt
+# hat, soll bei der anderen nicht auflaufen. Es gelten also "-v", "--v",
+# "-verbose" und "--verbose" als dasselbe, ebenso "-selftest" wie
+# "--selftest".
+#
+# Frueher wurde nur nach Zeichenketten in der ganzen Kommandozeile gesucht
+# (" -v" in ...). Damit fiel "-verbose" durch, und ein Tippfehler wie
+# "--seftest" startete stillschweigend die Oberflaeche, ohne ein Wort dazu -
+# genau das ist am 03.09.2026 beim Testen passiert.
+
+_OPTIONEN = {
+    "v":        "verbose",
+    "verbose":  "verbose",
+    "selftest": "selftest",
+}
+
+#: Wie die Optionen in einer Meldung aufgezaehlt werden.
+_OPTIONEN_HILFE = (
+    "  -v  / --verbose    more output on the console",
+    "  -selftest / --selftest    check this installation and exit",
+)
+
+
+def _optionen_lesen(argv):
+    """(erkannte Optionen, unbekannte Argumente).
+
+    Alles, was mit einem Strich beginnt, ist eine Option. Alles andere ist ein
+    Dateiname und wird hier nicht angefasst - siehe _file_arg_from_cli.
+    """
+    erkannt, unbekannt = set(), []
+    for arg in argv[1:]:
+        if not arg.startswith("-"):
+            continue
+        name = arg.lstrip("-").lower()
+        if name in _OPTIONEN:
+            erkannt.add(_OPTIONEN[name])
+        else:
+            unbekannt.append(arg)
+    return erkannt, unbekannt
+
+
 def _is_verbose():
-    a = " ".join(sys.argv).lower()
-    if " -v" in a or " --verbose" in a:
+    erkannt, _unbekannt = _optionen_lesen(sys.argv)
+    if "verbose" in erkannt:
         return True
     # Beim Selbsttest muss die Ausgabe sichtbar bleiben - sie IST das
     # Ergebnis. Ohne das laeuft er zwar, sagt aber nichts, und ein
     # Rueckgabewert allein hilft bei der Fehlersuche nicht weiter.
-    if "--selftest" in sys.argv:
+    if "selftest" in erkannt:
         return True
     try:
         from PySide6.QtCore import QSettings
@@ -366,13 +411,21 @@ def main():
     # arbeitet - Dateien finden, Symbole laden, GPX lesen und schreiben, ein
     # Video schneiden und ausgeben. Gedacht fuer das FERTIGE Programm:
     #
-    #     KVRouite.exe --selftest
+    #     KVRouite.exe --selftest        (oder -selftest)
     #     KVRouite.app/Contents/MacOS/KVRouite --selftest
     #
     # Ein Startversuch beweist nur, dass nichts abstuerzt. Ob ein gepacktes
     # Programm seine mitgelieferten Dateien findet, zeigt erst dieser Weg -
     # und genau daran ist das macOS-Buendel zuerst gescheitert.
-    if "--selftest" in sys.argv:
+    erkannt, unbekannt = _optionen_lesen(sys.argv)
+    if unbekannt:
+        force_error("Unknown option: " + " ".join(unbekannt))
+        force_error("Known options:")
+        for _zeile in _OPTIONEN_HILFE:
+            force_error(_zeile)
+        sys.exit(2)
+
+    if "selftest" in erkannt:
         import selftest
         sys.exit(selftest.alles_pruefen())
 

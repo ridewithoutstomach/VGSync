@@ -43,6 +43,7 @@ Ton wird wie beim ffmpeg-Weg nicht ausgegeben (dort "-an").
 import json
 import math
 import os
+import tempfile
 import time
 
 from PySide6.QtCore import QSettings
@@ -50,6 +51,7 @@ from PySide6.QtCore import QSettings
 # view360 faengt einen fehlenden GStreamer selbst ab und bleibt importierbar -
 # wer den ffmpeg-Weg benutzt, merkt davon nichts.
 from core import view360
+from core.hardware_detect import GST_HW_ENCODER
 
 
 class GesRenderError(RuntimeError):
@@ -100,16 +102,11 @@ _CPU_ENCODER = {
     "libx265": ("x265enc", _H265),
 }
 
-_HW_ENCODER = {
-    "nvidia_h264": ("nvh264enc", _H264),
-    "nvidia_hevc": ("nvh265enc", _H265),
-    "amd_h264":    ("amfh264enc", _H264),
-    "amd_hevc":    ("amfh265enc", _H265),
-    "intel_h264":  ("qsvh264enc", _H264),
-    "intel_hevc":  ("qsvh265enc", _H265),
-    "vaapi_h264":  ("vah264enc", _H264),
-    "vaapi_hevc":  ("vah265enc", _H265),
-}
+# Die Tabelle der GPU-Encoder steht in core/hardware_detect.py und wird von
+# dort geholt. Bis zum 03.09.2026 lag hier eine zweite, wortgleiche Kopie -
+# genau die Sorte Doppelung, bei der die beiden Seiten irgendwann
+# auseinanderlaufen und die Erkennung etwas anderes prueft als der Export.
+_HW_ENCODER = GST_HW_ENCODER
 
 # x264/x265 kennen dieselben Namen wie auf der ffmpeg-Kommandozeile.
 _SPEED_PRESET = ("ultrafast", "superfast", "veryfast", "faster", "fast",
@@ -455,7 +452,7 @@ def _timeline_bauen(quellen, skip_list, overlay_list, breite, hoehe, fps_n, fps_
     timeline.commit_sync()
     gesamt = timeline.get_duration()
     log(f"[GES] Timeline: {len(stuecke)} piece(s), {blenden} crossfade(s), "
-        f"{gesamt / NS:.6f}s bei {breite}x{hoehe} @ {fps_n}/{fps_d}")
+        f"{gesamt / NS:.6f}s at {breite}x{hoehe} @ {fps_n}/{fps_d}")
     return timeline, gesamt
 
 
@@ -575,8 +572,8 @@ def _overlays_setzen(layer, overlay_list, breite, hoehe, abbildung,
                     quelle.set(dauer_ns, 0.0)
                 else:
                     quelle.set(dauer_ns, 1.0)
-        log(f"[GES] Overlay {os.path.basename(bild)}: roh "
-            f"{roh_start:.2f}s - {roh_ende:.2f}s  ->  Ausgabe "
+        log(f"[GES] Overlay {os.path.basename(bild)}: raw "
+            f"{roh_start:.2f}s - {roh_ende:.2f}s  ->  output "
             f"{start:.2f}s - {ende:.2f}s")
 
 
@@ -587,23 +584,38 @@ def _overlays_setzen(layer, overlay_list, breite, hoehe, abbildung,
 def _profil(encoder, hw_encode, crf, preset, bitrate_mbps, log):
     hw = (hw_encode or "none").lower()
     if hw and hw != "none":
+        # KEIN stiller Rueckfall auf die CPU. Wer im Setup eine GPU einstellt,
+        # will mit der GPU kodieren - sonst haette er CPU eingestellt. Dass
+        # das Element hier fehlt, kann nach dem Umbau der Erkennung (die jetzt
+        # wirklich exportiert) nur noch heissen, dass sich am Rechner etwas
+        # geaendert hat: Karte ausgebaut, Treiber weg, GStreamer-Paket
+        # entfernt. Dann ist eine klare Meldung richtig und ein halb so
+        # schneller Export hinter dem Ruecken des Anwenders falsch.
         eintrag = _HW_ENCODER.get(hw)
         if eintrag is None:
-            log(f"[GES] unknown hardware_encode={hw_encode}, using CPU")
-        elif not _element_da(eintrag[0]):
-            log(f"[GES] {eintrag[0]} not available, using CPU")
-        else:
-            element, caps = eintrag
-            return _profil_bauen(element, caps,
-                                 _gpu_eigenschaften(element, crf, preset,
-                                                    bitrate_mbps),
-                                 log)
+            raise GesRenderError(
+                f"Unknown GPU encoder setting '{hw_encode}'. Nothing was "
+                f"encoded. Please choose the encoder again in the encoder "
+                f"setup.")
+        if not _element_da(eintrag[0]):
+            raise GesRenderError(
+                f"The GPU encoder set in the encoder setup ({hw_encode}, "
+                f"GStreamer element {eintrag[0]}) is not available on this "
+                f"computer any more. Nothing was encoded - the export does "
+                f"NOT silently fall back to the CPU. Check graphics card and "
+                f"driver, or press \"Detect HW\" in the encoder setup and "
+                f"pick an encoder that is offered there.")
+        element, caps = eintrag
+        return _profil_bauen(element, caps,
+                             _gpu_eigenschaften(element, crf, preset,
+                                                bitrate_mbps),
+                             log)
 
     element, caps = _CPU_ENCODER.get((encoder or "libx265").lower(),
                                      ("x265enc", _H265))
     if not _element_da(element):
         raise GesRenderError(
-            f"Encoder {element} fehlt. Unter Linux: "
+            f"Encoder {element} is missing. On Linux: "
             f"sudo apt install gstreamer1.0-plugins-ugly")
     return _profil_bauen(element, caps,
                          _cpu_eigenschaften(element, crf, preset), log)
@@ -695,7 +707,43 @@ def _gpu_eigenschaften(element, crf, preset, bitrate_mbps):
     return werte
 
 
+def _anmelden(element, log):
+    """Den Encoder zur Auswahl zulassen, bevor wir ihn uebergeben.
+
+    Bei ffmpeg genuegte "-c:v h264_vaapi": der Name IST die Auswahl. GES geht
+    einen Schritt mehr - wir uebergeben ein Encoding-Profil, und encodebin
+    sucht sich das Element selbst aus der Registry. Dabei nimmt es nur
+    Elemente ab Rank "marginal" (64). Wer darunter liegt, wird nicht
+    genommen, auch wenn wir seinen Namen ausdruecklich nennen; das Profil
+    wird dann komplett zurueckgewiesen und es laeuft kein einziges Bild.
+
+    Die GPU-Encoder des va-Plugins sind ab Werk mit Rank 0 eingetragen -
+    Absicht der Entwickler, damit keine Software ungefragt die Grafikkarte
+    belegt (Victor Jaquez, Igalia, zum Release 1.20: "GstVA elements are
+    ranked NONE"). Auf diesem Rechner steht es genauso um d3d12h264enc,
+    nvd3d11h264enc und nvautogpuh264enc. Es ist also kein Einzelfall und
+    keine Frage der GStreamer-Version.
+
+    Hier wird deshalb nachgeholt, was bei ffmpeg im "-c:v" schon enthalten
+    war: der eingestellte Encoder wird zur Auswahl zugelassen. Nur er, nur im
+    laufenden Programm, nichts wird gespeichert. Am Kodieren aendert es nichts
+    - am 03.09.2026 auf nvh264enc gemessen: mit kuenstlichem Rank 0 bricht der
+    Export ab, mit dieser Anmeldung kommt dieselbe Datei heraus wie mit dem
+    Originalrang, auf das Byte genau (42815 Bytes).
+    """
+    fabrik = Gst.ElementFactory.find(element)
+    if fabrik is None:
+        return
+    rank = int(fabrik.get_rank())
+    if rank < int(Gst.Rank.MARGINAL):
+        log(f"[GES] {element}: rank {rank} is below marginal "
+            f"({int(Gst.Rank.MARGINAL)}), raising it - encodebin ignores "
+            f"lower ranks")
+        fabrik.set_rank(Gst.Rank.MARGINAL)
+
+
 def _profil_bauen(element, video_caps, eigenschaften, log):
+    _anmelden(element, log)
     behaelter = GstPbutils.EncodingContainerProfile.new(
         "KVRouite", "MP4 without audio",
         Gst.Caps.from_string("video/quicktime,variant=iso"), None)
@@ -729,6 +777,103 @@ def _profil_bauen(element, video_caps, eigenschaften, log):
 
 
 # ---------------------------------------------------------------------------
+# Warum wurde das Profil abgelehnt?
+# ---------------------------------------------------------------------------
+# set_render_settings() liefert nur True oder False und sagt kein Wort dazu,
+# woran es lag. Ein Anwender hat am 03.09.2026 genau dieses False gemeldet -
+# mit vah264enc unter Linux - und aus der Meldung im Encoder-Fenster war
+# nichts zu holen. Deshalb steht hier eine Diagnose, die im selben Fenster
+# ausgegeben wird: derselbe Inhalt, den "gst-inspect-1.0" zeigen wuerde, nur
+# aus unserer eigenen Registry. Das Terminalwerkzeug liegt unter Linux im
+# Paket gstreamer1.0-tools, das wir gar nicht mitinstallieren lassen - darauf
+# ist bei einem Fehlerbericht kein Verlass.
+#
+# GEMESSEN am 03.09.2026, GStreamer 1.28.6, ohne jede GPU: encodebin sucht
+# seine Encoder ueber die Registry und uebergeht dabei alles unterhalb von
+# Rank "marginal" (64). Mit von Hand gesetztem Rank:
+#
+#     Encoder        Rank original    Rank 0        Rank 64
+#     x264enc        256  -> ok       abgelehnt     ok
+#     openh264enc     64  -> ok       abgelehnt     ok
+#     x265enc        256  -> ok       abgelehnt     ok
+#
+# "abgelehnt" ist dabei wortgleich das, was der Anwender gemeldet hat. Ein
+# Element mit Rank 0 laesst sich also anlegen und in einer von Hand gebauten
+# Pipeline betreiben - core/hardware_detect.can_encode_with_gst nennt es beim
+# Namen und meldet "laeuft" -, waehrend der Export daran scheitert. Genau
+# diese Luecke steht zwischen unserem Erkennungslauf und dem Export.
+
+def _factories(typ, caps):
+    alle = Gst.ElementFactory.list_get_elements(typ, Gst.Rank.NONE)
+    return Gst.ElementFactory.list_filter(alle, caps, Gst.PadDirection.SRC,
+                                          False)
+
+
+def _diagnose(profil, uri, log):
+    """Die drei Voraussetzungen einzeln nachsehen: Senke, Muxer, Encoder.
+
+    Rueckgabe: ein kurzer Grund in einem Satz, oder None wenn sich keiner
+    feststellen liess. Der Satz wandert in die Fehlermeldung - damit steht der
+    Grund auch dort, wo nur eine Zeile Platz hat (Erkennungslauf, Protokoll).
+    """
+    grund = None
+    log("[GES] --- why the render settings were rejected ---")
+    log(f"[GES] {Gst.version_string()}")
+
+    try:
+        senke = Gst.Element.make_from_uri(Gst.URIType.SINK, uri, None)
+    except Exception as exc:
+        senke = None
+        grund = f"no sink for {uri} ({exc})"
+        log(f"[GES] target sink: none ({exc})")
+    if senke is not None:
+        log(f"[GES] target sink: {senke.get_factory().get_name()}  ({uri})")
+
+    caps = profil.get_format()
+    muxer = _factories(Gst.ELEMENT_FACTORY_TYPE_MUXER, caps)
+    if not muxer:
+        grund = f"no muxer for {caps.to_string()}"
+    log(f"[GES] muxer for {caps.to_string()}: "
+        + (", ".join(f"{f.get_name()} (rank {int(f.get_rank())})"
+                     for f in muxer) if muxer else "NONE FOUND"))
+
+    for teil in profil.get_profiles():
+        caps = teil.get_format()
+        gewuenscht = teil.get_preset_name()
+        kandidaten = _factories(Gst.ELEMENT_FACTORY_TYPE_ENCODER, caps)
+        log(f"[GES] encoders for {caps.to_string()} "
+            f"(encodebin needs rank >= {int(Gst.Rank.MARGINAL)}):")
+        for f in kandidaten:
+            marke = " <-- selected" if f.get_name() == gewuenscht else ""
+            log(f"[GES]     {f.get_name():<24} rank {int(f.get_rank()):>3}"
+                f"{marke}")
+
+        if not gewuenscht:
+            continue
+        eigen = [f for f in kandidaten if f.get_name() == gewuenscht]
+        if not eigen:
+            grund = (f"{gewuenscht} cannot produce {caps.to_string()}, "
+                     f"or its plugin is missing")
+            log(f"[GES] {gewuenscht} is not in that list - it cannot produce "
+                f"{caps.to_string()}, or the plugin is missing.")
+        elif int(eigen[0].get_rank()) < int(Gst.Rank.MARGINAL):
+            grund = (f"{gewuenscht} has rank {int(eigen[0].get_rank())}, "
+                     f"encodebin only uses elements from rank "
+                     f"{int(Gst.Rank.MARGINAL)} upwards")
+            log(f"[GES] {gewuenscht} has rank {int(eigen[0].get_rank())}. "
+                f"encodebin only considers elements from rank "
+                f"{int(Gst.Rank.MARGINAL)} upwards, so it never sees this "
+                f"encoder - even though the element itself works. THIS is "
+                f"the reason.")
+        else:
+            log(f"[GES] {gewuenscht} has rank {int(eigen[0].get_rank())}, so "
+                f"the rank is not the problem - the reason is above or in the "
+                f"element properties.")
+    log("[GES] --- end of diagnosis ---")
+    return grund
+
+
+# ---------------------------------------------------------------------------
 # Rendern
 # ---------------------------------------------------------------------------
 
@@ -737,7 +882,9 @@ def _rendern(timeline, profil, ziel, gesamt_ns, log):
     pipeline.set_timeline(timeline)
     uri = GLib.filename_to_uri(os.path.abspath(ziel), None)
     if not pipeline.set_render_settings(uri, profil):
-        raise GesRenderError("Render settings were rejected")
+        grund = _diagnose(profil, uri, log)
+        raise GesRenderError("Render settings were rejected"
+                             + (f": {grund}" if grund else ""))
     if not pipeline.set_mode(GES.PipelineFlags.RENDER):
         raise GesRenderError("Render mode could not be set")
 
@@ -767,14 +914,95 @@ def _rendern(timeline, profil, ziel, gesamt_ns, log):
                     vergangen = time.time() - begonnen
                     rest = (vergangen * (100 - prozent) / prozent) if prozent else 0
                     log(f"[GES] {prozent:3d}%  {pos / NS:8.2f}s / "
-                        f"{gesamt_ns / NS:.2f}s   noch ca. {rest:5.0f}s")
+                        f"{gesamt_ns / NS:.2f}s   approx. {rest:5.0f}s left")
     finally:
         pipeline.set_state(Gst.State.NULL)
         pipeline.get_state(5 * Gst.SECOND)
 
     if fehler:
         raise GesRenderError(fehler)
-    log(f"[GES] Fertig in {time.time() - begonnen:.1f}s")
+    log(f"[GES] Done in {time.time() - begonnen:.1f}s")
+
+
+# ---------------------------------------------------------------------------
+# Probelauf fuer die Hardware-Erkennung
+# ---------------------------------------------------------------------------
+# "Detect HW" muss denselben Weg gehen wie der Export, sonst kann das Setup
+# einen Encoder anbieten, der beim Export nicht benutzbar ist.
+#
+# Zu ffmpeg-Zeiten war das von selbst gegeben: dort waehlt man einen Encoder
+# mit "-c:v h264_nvenc", und mehr als diesen einen Weg gibt es nicht - Test und
+# Export konnten gar nicht auseinanderlaufen. Der erste GES-Erkennungslauf
+# (core/hardware_detect.can_encode_with_gst) hat zwar wirklich kodiert, aber
+# ueber eine von Hand gebaute Pipeline, in der das Element beim Namen gerufen
+# wird. Der Export uebergibt stattdessen ein Encoding-Profil an encodebin, und
+# encodebin sucht sich das Element selbst aus der Registry. Ein Encoder, der
+# dort nicht zur Auswahl zugelassen ist, besteht den Test und faellt beim
+# Export durch - am 03.09.2026 gemeldet mit vah264enc unter Linux.
+#
+# Deshalb kodiert der Probelauf hier ueber _profil() und _rendern(), also durch
+# dieselben zwei Funktionen wie jeder Export, in dieselbe Art Zieldatei. Was
+# hier durchlaeuft, laeuft auch im Export durch.
+#
+# Als Material dient ein GES-Testclip (das eingebaute Farbmuster), damit keine
+# Quelldatei noetig ist. Gemessen am 03.09.2026: 0,1 s je Encoder.
+
+PROBE_SEKUNDEN = 0.5
+PROBE_BREITE = 320
+PROBE_HOEHE = 240
+PROBE_FPS = 30
+
+
+def probelauf(hw_encode, encoder="libx264"):
+    """Ein halbe Sekunde wirklich ausgeben - auf dem Weg des Exports.
+
+    hw_encode ist die Kennung aus der JSON ("nvidia_h264", "vaapi_h264", ...)
+    oder "none" fuer den CPU-Encoder.
+
+    Rueckgabe: (True, "", protokoll) oder (False, grund, protokoll).
+    protokoll sind die Zeilen, die der Export ins Encoder-Fenster schreiben
+    wuerde - bei einem Fehlschlag steht dort die Diagnose.
+    """
+    _lade_gst()
+    zeilen = []
+    dauer_ns = int(PROBE_SEKUNDEN * NS)
+    ziel = os.path.join(tempfile.gettempdir(),
+                        "kvrouite_probe_%d.mp4" % os.getpid())
+    try:
+        timeline = GES.Timeline.new_audio_video()
+        for track in timeline.get_tracks():
+            if track.get_property("track-type") == GES.TrackType.VIDEO:
+                track.set_restriction_caps(Gst.Caps.from_string(
+                    f"video/x-raw,width={PROBE_BREITE},height={PROBE_HOEHE},"
+                    f"framerate={PROBE_FPS}/1"))
+        clip = GES.TestClip.new()
+        clip.set_start(0)
+        clip.set_duration(dauer_ns)
+        if not timeline.append_layer().add_clip(clip):
+            return False, "test clip could not be inserted", zeilen
+
+        # Fehlt das Element ueberhaupt, sagt das schon _profil() - aber mit
+        # einem Satz, der fuer das Encoder-Fenster geschrieben ist. Im
+        # Erkennungsprotokoll stehen acht Zeilen untereinander, da genuegt der
+        # kurze Befund. Das Urteil ist dasselbe: geht nicht.
+        eintrag = _HW_ENCODER.get((hw_encode or "none").lower())
+        if eintrag is not None and not _element_da(eintrag[0]):
+            return False, "%s is not installed" % eintrag[0], zeilen
+
+        profil = _profil(encoder, hw_encode, 28, None, 0, zeilen.append)
+
+        _rendern(timeline, profil, ziel, dauer_ns, zeilen.append)
+    except Exception as exc:
+        return False, str(exc), zeilen
+
+    groesse = os.path.getsize(ziel) if os.path.isfile(ziel) else 0
+    try:
+        os.remove(ziel)
+    except OSError:
+        pass
+    if groesse < 1000:
+        return False, "file stayed empty (%d bytes)" % groesse, zeilen
+    return True, "", zeilen
 
 
 # ---------------------------------------------------------------------------

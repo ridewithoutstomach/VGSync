@@ -83,7 +83,7 @@ class Bericht:
         if bedingung:
             print("   [ok]     " + was)
         else:
-            print("   [FEHLER] " + was + ((" - " + warum) if warum else ""))
+            print("   [FAILED] " + was + ((" - " + warum) if warum else ""))
             self.probleme.append(was)
         return bool(bedingung)
 
@@ -107,9 +107,9 @@ def dateien_pruefen(b: Bericht):
     """
     from config import finde_datei, programm_ordner, datenordner_liste
 
-    b.sagen("Programmordner: " + programm_ordner())
+    b.sagen("Program folder: " + programm_ordner())
     for ort in datenordner_liste():
-        b.sagen("Suchort: " + ort)
+        b.sagen("Looked in: " + ort)
 
     erwartet = [
         ("map_page.html",),
@@ -122,7 +122,7 @@ def dateien_pruefen(b: Bericht):
     ]
     for teile in erwartet:
         pfad = finde_datei(*teile)
-        b.pruefen(os.path.isfile(pfad), "/".join(teile), "gesucht als " + pfad)
+        b.pruefen(os.path.isfile(pfad), "/".join(teile), "looked for " + pfad)
 
 
 # ------------------------------------------------------------ 2. Oberflaeche
@@ -163,9 +163,9 @@ def gstreamer_pruefen(b: Bericht):
         from gi.repository import GES
         GES.init()
         zeitachse = GES.Timeline.new_audio_video()
-        b.pruefen(zeitachse is not None, "GES-Zeitachse anlegen")
+        b.pruefen(zeitachse is not None, "GES timeline can be created")
     except Exception as exc:
-        b.pruefen(False, "GES verfuegbar", str(exc))
+        b.pruefen(False, "GES available", str(exc))
 
 
 # ------------------------------------------------------------------- 4. GPX
@@ -178,7 +178,7 @@ def gpx_rundlauf(b: Bericht, ordner):
         f.write(GPX_INHALT)
 
     punkte = parse_gpx(quelle)
-    if not b.pruefen(len(punkte) == 5, "5 Punkte gelesen",
+    if not b.pruefen(len(punkte) == 5, "5 points read",
                      "bekommen: %d" % len(punkte)):
         return
     recalc_gpx_data(punkte)
@@ -188,12 +188,12 @@ def gpx_rundlauf(b: Bericht, ordner):
     from views.mainwindow import MainWindow
     ziel = os.path.join(ordner, "selftest_export.gpx")
     MainWindow._save_gpx_to_file(None, punkte, ziel)
-    if not b.pruefen(os.path.isfile(ziel), "GPX geschrieben"):
+    if not b.pruefen(os.path.isfile(ziel), "GPX written"):
         return
-    b.sagen("%d Bytes" % os.path.getsize(ziel))
+    b.sagen("%d bytes" % os.path.getsize(ziel))
 
     zurueck = parse_gpx(ziel)
-    if not b.pruefen(len(zurueck) == len(punkte), "gleiche Punktzahl zurueck",
+    if not b.pruefen(len(zurueck) == len(punkte), "same number of points read back",
                      "%d gegen %d" % (len(punkte), len(zurueck))):
         return
 
@@ -205,7 +205,7 @@ def gpx_rundlauf(b: Bericht, ordner):
                 abweichungen.append("Punkt %d: %s %s != %s" % (i, feld, va, vz))
         if a.get("time") and z.get("time") and a["time"] != z["time"]:
             abweichungen.append("Punkt %d: Zeit %s != %s" % (i, a["time"], z["time"]))
-    b.pruefen(not abweichungen, "Werte unveraendert",
+    b.pruefen(not abweichungen, "values unchanged",
               "; ".join(abweichungen[:3]))
 
 
@@ -262,10 +262,10 @@ def export_rundlauf(b: Bericht, ordner):
 
     quelle = os.path.join(ordner, "selftest_quelle.mp4")
     fehler = _testvideo_bauen(quelle)
-    if not b.pruefen(fehler is None, "Testvideo erzeugt", fehler or ""):
+    if not b.pruefen(fehler is None, "test video created", fehler or ""):
         return
     dauer, codec, breite, hoehe = _messen(quelle)
-    b.sagen("Quelle: %.2fs, %s, %dx%d, %d Bytes"
+    b.sagen("Source: %.2fs, %s, %dx%d, %d bytes"
             % (dauer, codec, breite, hoehe, os.path.getsize(quelle)))
 
     ziel = os.path.join(ordner, "selftest_export.mp4")
@@ -285,29 +285,111 @@ def export_rundlauf(b: Bericht, ordner):
         json.dump(cfg, f)
 
     from managers.ges_encoder_manager import ges_xfade_main
-    print("   --- Ausgabe des Renderlaufs ---")
+    print("   --- output of the render run ---")
     try:
         ges_xfade_main(cfg_pfad)
     except Exception as exc:
-        b.pruefen(False, "Export gelaufen", str(exc))
+        b.pruefen(False, "export finished", str(exc))
         return
-    print("   --- Ende ---")
+    print("   --- end ---")
 
-    if not b.pruefen(os.path.isfile(ziel), "Datei erzeugt"):
+    if not b.pruefen(os.path.isfile(ziel), "file created"):
         return
     groesse = os.path.getsize(ziel)
     dauer_z, codec_z, breite_z, hoehe_z = _messen(ziel)
-    b.sagen("Ergebnis: %.2fs, %s, %dx%d, %d Bytes"
+    b.sagen("Result: %.2fs, %s, %dx%d, %d bytes"
             % (dauer_z, codec_z, breite_z, hoehe_z, groesse))
 
     erwartet = QUELLE_SEKUNDEN - (SCHNITT_BIS - SCHNITT_VON)
-    b.pruefen(groesse > 10000, "Datei nicht leer", "%d Bytes" % groesse)
+    b.pruefen(groesse > 10000, "file not empty", "%d bytes" % groesse)
     b.pruefen(abs(dauer_z - erwartet) <= 1.0,
-              "Dauer rund %.0fs nach dem Schnitt" % erwartet,
-              "gemessen %.2fs" % dauer_z)
-    b.pruefen("h264" in codec_z, "h264 kodiert", codec_z)
+              "duration about %.0fs after the cut" % erwartet,
+              "measured %.2fs" % dauer_z)
+    b.pruefen("h264" in codec_z, "encoded as h264", codec_z)
     b.pruefen((breite_z, hoehe_z) == (QUELLE_BREITE, QUELLE_HOEHE),
-              "Bildgroesse unveraendert", "%dx%d" % (breite_z, hoehe_z))
+              "frame size unchanged", "%dx%d" % (breite_z, hoehe_z))
+
+
+def hw_export_rundlauf(b: Bericht, ordner):
+    """Jeden gemeldeten Hardware-Encoder einmal wirklich durch den Export schicken.
+
+    Warum das ein eigener Schritt sein muss: der Erkennungslauf in
+    core/hardware_detect.can_encode_with_gst baut seine Pipeline von Hand und
+    nennt das Element beim Namen - damit ist bewiesen, dass das Element laeuft.
+    Der Export geht einen anderen Weg: GES gibt ein Encoding-Profil an
+    encodebin, und encodebin sucht sich sein Element ueber die Registry. Was
+    dabei unterhalb von Rank "marginal" liegt, existiert fuer encodebin nicht.
+
+    Ein Encoder kann also die Erkennung bestehen und am Export scheitern. So
+    am 03.09.2026 gemeldet: vah264enc unter Linux, "Detect HW" meldete ihn,
+    der Export brach mit "Render settings were rejected" ab, bevor ein Bild
+    gelaufen war. Bis dahin lief hier nur ein Export mit
+    hardware_encode="none" - der Weg des Anwenders wurde nie geprueft.
+    """
+    import json
+    from core.hardware_detect import detect_hw_encoders_gst
+
+    lauffaehig, protokoll = detect_hw_encoders_gst()
+    for name, ok, grund in protokoll:
+        b.sagen("Detection: %-28s %s"
+                % (name, "works" if ok else "no" + (" - " + grund if grund else "")))
+
+    kennungen = sorted(k for k in lauffaehig if k != "CPU")
+    if not kennungen:
+        b.sagen("No hardware encoder on this computer - nothing to check.")
+        return
+
+    quelle = os.path.join(ordner, "selftest_quelle.mp4")
+    if not os.path.isfile(quelle):
+        fehler = _testvideo_bauen(quelle)
+        if not b.pruefen(fehler is None, "test video created", fehler or ""):
+            return
+
+    from managers.ges_encoder_manager import ges_xfade_main
+
+    for kennung in kennungen:
+        ziel = os.path.join(ordner, "selftest_%s.mp4" % kennung)
+        cfg_pfad = os.path.join(ordner, "selftest_%s.json" % kennung)
+        cfg = {
+            "videos": [quelle],
+            "skip_instructions": [[SCHNITT_VON, SCHNITT_BIS, SCHNITT_BLENDE]],
+            "overlay_instructions": [],
+            "final_output": ziel,
+            "encoder": "libx265" if kennung.endswith("hevc") else "libx264",
+            "hardware_encode": kennung,
+            "crf": 28,
+            "fps": "%d/1" % QUELLE_FPS,
+            "width": QUELLE_BREITE,
+        }
+        with open(cfg_pfad, "w", encoding="utf-8") as f:
+            json.dump(cfg, f)
+
+        print("   --- render run with %s ---" % kennung)
+        try:
+            ges_xfade_main(cfg_pfad)
+        except Exception as exc:
+            print("   --- end ---")
+            b.pruefen(False, "export with %s" % kennung, str(exc))
+            continue
+        print("   --- end ---")
+
+        if not b.pruefen(os.path.isfile(ziel), "file created with %s" % kennung):
+            continue
+        groesse = os.path.getsize(ziel)
+        dauer_z, codec_z, breite_z, hoehe_z = _messen(ziel)
+        b.sagen("Result %s: %.2fs, %s, %dx%d, %d bytes"
+                % (kennung, dauer_z, codec_z, breite_z, hoehe_z, groesse))
+        erwartet = QUELLE_SEKUNDEN - (SCHNITT_BIS - SCHNITT_VON)
+        b.pruefen(groesse > 10000, "file not empty (%s)" % kennung,
+                  "%d bytes" % groesse)
+        b.pruefen(abs(dauer_z - erwartet) <= 1.0,
+                  "duration about %.0fs after the cut (%s)" % (erwartet, kennung),
+                  "measured %.2fs" % dauer_z)
+        # _messen liefert die Caps ("video/x-h265"), nicht den
+        # ffmpeg-Namen "hevc".
+        erwarteter_codec = "h265" if kennung.endswith("hevc") else "h264"
+        b.pruefen(erwarteter_codec in codec_z,
+                  "encoded as %s (%s)" % (erwarteter_codec, kennung), codec_z)
 
 
 # ------------------------------------------------------------------- Ablauf
@@ -317,38 +399,40 @@ def alles_pruefen(ordner=None):
     if eigener_ordner:
         ordner = tempfile.mkdtemp(prefix="kvrouite_selftest_")
 
-    print("KVRouite Selbsttest")
-    print("Arbeitsordner:", ordner)
-    print("Programm:", sys.executable)
-    print("gepackt:", bool(getattr(sys, "frozen", False)))
+    print("KVRouite self-test")
+    print("Work folder:", ordner)
+    print("Program:", sys.executable)
+    print("bundled:", bool(getattr(sys, "frozen", False)))
 
     b = Bericht()
     aufgaben = (
-        ("Mitgelieferte Dateien", lambda: dateien_pruefen(b)),
-        ("Symbole laden", lambda: symbole_pruefen(b)),
-        ("GStreamer und GES", lambda: gstreamer_pruefen(b)),
-        ("GPX lesen, schreiben, wieder lesen", lambda: gpx_rundlauf(b, ordner)),
-        ("Video schneiden und ausgeben", lambda: export_rundlauf(b, ordner)),
+        ("Files shipped with the program", lambda: dateien_pruefen(b)),
+        ("Loading the icons", lambda: symbole_pruefen(b)),
+        ("GStreamer and GES", lambda: gstreamer_pruefen(b)),
+        ("Reading, writing and re-reading GPX", lambda: gpx_rundlauf(b, ordner)),
+        ("Cutting and exporting a video", lambda: export_rundlauf(b, ordner)),
+        ("Really using the hardware encoders",
+         lambda: hw_export_rundlauf(b, ordner)),
     )
     for nummer, (titel, aufgabe) in enumerate(aufgaben, 1):
         schritt(nummer, titel)
         try:
             aufgabe()
         except Exception:
-            print("   [FEHLER] Der Schritt brach ab:")
+            print("   [FAILED] this step was aborted:")
             for zeile in traceback.format_exc().splitlines():
                 print("      " + zeile)
-            b.probleme.append(titel + " (Abbruch)")
+            b.probleme.append(titel + " (aborted)")
 
     print("")
     print("=" * 70)
     if b.probleme:
-        print("ERGEBNIS: %d Punkt(e) stimmen nicht:" % len(b.probleme))
+        print("RESULT: %d point(s) are not right:" % len(b.probleme))
         for p in b.probleme:
             print("   -", p)
         print("=" * 70)
         return 1
-    print("ERGEBNIS: Alles geprueft und in Ordnung.")
+    print("RESULT: everything checked and in order.")
     print("=" * 70)
     return 0
 

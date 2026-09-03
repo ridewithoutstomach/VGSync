@@ -20,7 +20,6 @@
 
 
 # core/hardware_detect.py
-import time
 
 
 # ---------------------------------------------------------------------------
@@ -56,59 +55,44 @@ def gstreamer_verfuegbar():
         return False
 
 
-def can_encode_with_gst(element, bilder=12, zeitgrenze=8.0):
-    """Baut den Encoder wirklich auf und schickt Bilder hindurch.
+def can_encode_with_gst(kennung):
+    """Wirklich kodieren - und zwar auf genau dem Weg, den der Export geht.
 
-    Getestet wird wirklich, nicht nur geraten: es laeuft eine kleine
-    Pipeline
+    Es reicht nicht, den Encoder irgendwie laufen zu lassen. Was hier
+    herauskommt, entscheidet darueber, was im Setup zur Auswahl steht, und
+    alles was dort steht MUSS exportieren koennen.
 
-        videotestsrc -> videoconvert -> <encoder> -> fakesink
+    Zu ffmpeg-Zeiten war das von selbst gegeben: dort waehlt man den Encoder
+    mit "-c:v h264_nvenc", und einen zweiten Weg gibt es nicht - der Testlauf
+    konnte gar nicht anders arbeiten als der Export.
 
-    bis ans Ende durch. Ein Element laesst sich naemlich oft anlegen, ohne dass
-    die Hardware wirklich da ist - erst beim Starten faellt das auf. Deshalb
-    wird bis EOS gewartet und nicht nur gebaut.
+    Der erste GES-Erkennungslauf hat diese Eigenschaft verloren. Er kodierte
+    zwar wirklich, aber ueber eine von Hand gebaute Pipeline
+    (videotestsrc ! videoconvert ! <encoder> ! fakesink), in der das Element
+    beim Namen gerufen wird. Der Export uebergibt stattdessen ein
+    Encoding-Profil an encodebin, und encodebin sucht sich das Element selbst
+    aus der Registry - wer dort nicht zur Auswahl zugelassen ist, wird nicht
+    genommen. Ein Encoder konnte den Test also bestehen und beim Export
+    durchfallen. Genau das ist am 03.09.2026 einem Anwender passiert:
+    "Detect HW" bot vaapi_h264 an, der Export brach mit "Render settings were
+    rejected" ab, bevor ein Bild gelaufen war.
 
+    Deshalb laeuft die Pruefung jetzt durch managers.ges_encoder_manager -
+    dieselben zwei Funktionen, die auch jeder Export benutzt, in dieselbe Art
+    Zieldatei. Was hier durchlaeuft, laeuft auch im Export durch.
+
+    kennung ist die Programmkennung ("nvidia_h264", "vaapi_h264", ...).
     Liefert (True, "") oder (False, grund). Der Grund landet im Log; wenn ein
     Anwender meldet, seine Karte werde nicht erkannt, steht dort, woran es lag.
     """
     if not gstreamer_verfuegbar():
-        return False, "GStreamer nicht verfuegbar"
-    import gi
-    from gi.repository import Gst
-
-    beschreibung = (
-        f"videotestsrc num-buffers={int(bilder)} ! "
-        "video/x-raw,width=320,height=240,framerate=25/1 ! "
-        f"videoconvert ! {element} ! fakesink sync=false")
+        return False, "GStreamer not available"
     try:
-        pipeline = Gst.parse_launch(beschreibung)
+        from managers.ges_encoder_manager import probelauf
     except Exception as exc:
-        return False, f"Pipeline nicht baubar: {exc}"
-
-    ergebnis, grund = False, "keine Rueckmeldung"
-    try:
-        if pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
-            return False, "Pipeline startete nicht"
-        bus = pipeline.get_bus()
-        ende = time.time() + zeitgrenze
-        while time.time() < ende:
-            msg = bus.timed_pop_filtered(
-                200 * Gst.MSECOND,
-                Gst.MessageType.ERROR | Gst.MessageType.EOS)
-            if msg is None:
-                continue
-            if msg.type == Gst.MessageType.EOS:
-                ergebnis, grund = True, ""
-            else:
-                err, _dbg = msg.parse_error()
-                grund = err.message
-            break
-        else:
-            grund = "Zeitgrenze ueberschritten"
-    finally:
-        pipeline.set_state(Gst.State.NULL)
-        pipeline.get_state(2 * Gst.SECOND)
-    return ergebnis, grund
+        return False, "export path could not be loaded: %s" % exc
+    ok, grund, _zeilen = probelauf(kennung)
+    return ok, grund
 
 
 def detect_hw_encoders_gst():
@@ -120,9 +104,9 @@ def detect_hw_encoders_gst():
     gefunden = {"CPU"}
     protokoll = []
     if not gstreamer_verfuegbar():
-        return gefunden, [("GStreamer", False, "nicht verfuegbar")]
+        return gefunden, [("GStreamer", False, "not available")]
     for kennung, (element, _caps) in GST_HW_ENCODER.items():
-        ok, grund = can_encode_with_gst(element)
+        ok, grund = can_encode_with_gst(kennung)
         if ok:
             gefunden.add(kennung)
         protokoll.append((f"{kennung} ({element})", ok, grund))

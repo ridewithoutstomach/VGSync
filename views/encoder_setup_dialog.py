@@ -328,10 +328,12 @@ class EncoderSetupDialog(QDialog):
             "vaapi_hevc":  "hevc_vaapi",
         }
 
-        # Getestet wird wirklich: jeder Encoder wird aufgebaut und Bilder
-        # laufen hindurch. Gemessen auf einem NVIDIA-Rechner 0,65 s fuer alle
-        # acht Kandidaten, mit demselben Befund wie der frueher benutzte
-        # ffmpeg-Testlauf, der 6,90 s brauchte.
+        # Getestet wird wirklich, und zwar auf dem Weg des Exports: jeder
+        # Encoder gibt ein halbe Sekunde in eine echte MP4-Datei aus, durch
+        # dieselben Funktionen, die auch der Export benutzt. Nur so kann das
+        # Setup nichts anbieten, was der Export nachher nicht kann.
+        # Gemessen auf einem NVIDIA-Rechner am 03.09.2026: 1,10 s fuer alle
+        # acht Kandidaten. Der frueher benutzte ffmpeg-Testlauf brauchte 6,90 s.
         from core.hardware_detect import detect_hw_encoders_gst
 
         working, protokoll = detect_hw_encoders_gst()
