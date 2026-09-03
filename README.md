@@ -176,9 +176,8 @@ Two assets, one per architecture: `_macOS_arm64.zip` for Apple Silicon,
 you need. Unzip it and move `KVRouite.app` to your Applications folder -
 everything it needs is inside, GStreamer included.
 
-**The first start needs one extra step.** The bundle is not signed: signing
-requires a paid Apple developer membership, renewed yearly, which makes no sense
-for software given away for free. So macOS refuses a plain double-click once.
+**The first start needs one extra step.** The bundle is not signed by Apple,
+and macOS therefore refuses a plain double-click once.
 
 - macOS 14 and older: right-click the app, choose **Open**, confirm.
 - macOS 15 and newer: double-click, let it be refused, then open
@@ -186,6 +185,30 @@ for software given away for free. So macOS refuses a plain double-click once.
 - Or in Terminal: `xattr -dr com.apple.quarantine /Applications/KVRouite.app`
 
 After that it starts by double-click like anything else.
+
+#### Why there are no signed binaries, and what your alternatives are
+
+Signing and notarising an application for macOS requires a paid Apple Developer
+membership, renewed every year. **KVRouite is a non-profit hobby project, given
+away for free, and I am not going to buy a licence from Apple in order to hand
+it out.** That is the whole reason. There is nothing hidden behind it.
+
+**Nobody has to walk past Gatekeeper.** The step above is an offer, not a
+requirement. If you would rather not do it - and that is a perfectly reasonable
+position - you have two other ways, and both are fully supported:
+
+- **Run from source.** Download the source code, follow the instructions further
+  down in this section, and start KVRouite with Python. Nothing is signed there
+  either, but nothing is opaque: you are running the files you can read.
+- **Check the code before you run it.** The whole source is in this repository.
+  Read it, or have an AI read it for you and tell you whether it does anything
+  it should not - that takes minutes today, and it works just as well for the
+  packages listed in `requirements.txt`. Nothing here is obfuscated, minified or
+  precompiled.
+
+The same applies to the Windows builds, which are unsigned for the same reason:
+a code-signing certificate costs money every year, and this project has no
+income.
 
 #### Requirements
 

@@ -13,7 +13,10 @@ Versions up to and including 5.0 are documented in the GitHub releases only.
 Two strands. Taking a cut back arrived in 6.02 and only half worked. It was gone
 after every *Open Project*, it produced a silently wrong track if cuts were
 taken back in the wrong order, and it existed for middle cuts only. All three
-are fixed, and the first and the last cut can now be taken back as well.
+are fixed, and the first and the last cut can now be taken back as well. On
+that foundation the rest became possible: every cut can now be moved and
+resized with the mouse, selected and removed with *Del*, and given its own
+crossfade length. Overlays got the same treatment.
 
 The second strand comes from two user reports. One found that the macOS bundle
 had been changed after signing; the other could select his GPU in the encoder
@@ -95,6 +98,27 @@ the switch was not merely left alone, it was actively turned off. Loading a
 project into a running session that was already in encode mode worked, which is
 why it looked erratic. The state is now saved as `auto_sync` and restored behind
 the edit mode. Older files fall back to the old derivation.
+
+**Undoing the first cut switched AutoCutVideo+GPX off**
+
+The first cut sets the GPX/video shift to zero, so taking it back has to put
+the old value back. That was done with `enableVideoGpxSync(...)` - and that
+function runs through `_on_autocut_toggle_clicked()`, which *toggles*. With
+AutoCut already on, which is the normal case when a first cut can be taken back
+at all, it therefore switched it off. The switch is now only touched when no
+shift is set at all, exactly as `register_gpx_undo_snapshot()` has always done
+it.
+
+**A second `keyPressEvent` made the first one unreachable**
+
+`MainWindow` had two methods of that name. In Python the later definition wins,
+so the first one - roughly twenty lines - had never run. Nothing was lost with
+it: `+`, `-` and `1` to `9` for the playback speed come from `QShortcut` with
+`Qt.ApplicationShortcut` in `video_editor_widget.py`. Those work regardless of
+which widget has the focus and also cover the numeric keypad and the `=` of
+some layouts. The unreachable method is gone, together with the state only it
+used (`vlc_speeds`, `speed_index`, `current_rate`), and the remaining one says
+in its docstring where the keys actually live.
 
 **The macOS bundle broke its own signature - twice**
 
@@ -269,6 +293,133 @@ things that need Qt and a loaded video - applying the three kinds of cut to the
 track, and the places where the program calls the following-up. Each of those
 carries a note saying so.
 
+**Cuts can be moved - with the mouse, and every kind of cut**
+
+Grab the edge of a cut in the timeline to make it longer or shorter, grab the
+block to move it as a whole. While dragging, nothing is computed: the black
+block stays where it is and the new position appears as a frame with both
+times. Only on release is the move carried out - it costs a recalculation of
+the GPX track and possibly a freshly rendered crossfade, and doing that per
+pixel would not be usable. Afterwards the player jumps to two seconds before
+the new edge, so the result can be judged straight away. The same is available
+as numbers through the right-click menu.
+
+A move works the way one would do it by hand: **take the old cut back, then cut
+again at the new place.** Both steps run through the functions that already
+exist - the undo through `_ruecknahme_ausfuehren()`, the cutting through
+`on_cut_clicked_video()` or, for the first cut, `_startschnitt_setzen()`. That
+was the decision that mattered. A separate calculation for moving would have
+been a second code path for the same thing, and it would have drifted away from
+the first one; this way every improvement to cutting applies to moving as well.
+
+For Ctrl+Z a move is one step. A flag holds back two things during the two
+sub-steps: the inner undo snapshots, and the rebuilding of the preview - the
+intermediate state would otherwise have crossfades rendered that nobody sees.
+
+A cut keeps its kind. A middle cut cannot be dragged onto 0 or onto the end of
+the video, because there it would turn into a first or last cut - and those are
+trimmed away before encoding and treat the GPX track differently. The first and
+the last cut each have one fixed edge for the same reason.
+
+**A cut can be selected, and *Del* takes it back**
+
+Click a cut and it is framed; *Del* takes it back through exactly the same path
+as the menu entry, with the same checks and the same question. *Esc* drops the
+selection, as does a click on empty space. A click that does not drag still
+sets the marker, so nothing was taken away.
+
+**Every cut can have its own crossfade length**
+
+The value from the Encoder Setup is now a default. A cut can carry its own
+length instead - right-click, *Crossfade length …* - and the menu entry shows
+which of the two is in effect. This changes the video only; the GPX track is
+not touched, because a crossfade lies centred on the cut and moves no times.
+
+Little was needed for it, because the transport was already per cut: the
+exporter writes `[start, end, xfade]` per cut, the preview receives
+`(start, end, fade, path)` per cut, and `FadeJob.key()` contains the duration,
+so different lengths get their own cached files by themselves. Only the source
+was global - three places read `encoder/xfade` directly. Those three are now
+one function, so preview, the handing over of finished crossfades and the
+export cannot drift apart.
+
+**A crossfade is only offered where there is room for it**
+
+A crossfade lies centred on the cut: half of it comes from the kept material
+before it, half from the material after it, and the other halves from the cut
+itself. The upper limit is therefore
+`2 x min(gap before, gap after, length of the cut)`.
+
+What matters is that a gap has to serve **two** crossfades - the one of the cut
+before it and the one of the cut after it. A gap therefore only counts half as
+soon as there is another cut at its other end. With five seconds between two
+cuts neither crossfade may be longer than five seconds; each then uses 2.5 s
+and they touch without overlapping.
+
+This is checked before every change to the cuts, not only when the length is
+set - placing a cut next to an existing crossfade takes its room away. Nothing
+is shortened silently: a set length is a decision of the user. Instead a window
+names the affected cut, says how long its crossfade is and how much would still
+fit, and offers exactly two ways out - shorten it to that value, or cancel. On
+cancel nothing at all happens: no cut, no undo step, no changed length, so the
+cut in question can be adjusted by hand first.
+
+After loading a project the same check only reports. A project was consistent
+when it was saved; if it no longer is, the default in the Encoder Setup was
+changed in the meantime - and then it is even less our place to alter the
+lengths.
+
+**The timeline shows what a crossfade actually occupies**
+
+Left and right of a cut block there is now a bright gradient over half the
+crossfade length each, strongest at the edge and fading outwards, with a dotted
+line at its outer end. That is exactly the material the crossfade takes from
+the *kept* part. One sees why the question above appears - and does not get the
+idea of placing another cut there in the first place.
+
+Hard cut and crossfade are told apart by the hatching, not by the border. A cut
+of a few tenths of a second is only a few pixels wide; a heavier border would
+be almost the whole block and would make it look bigger than it is. The
+hatching is scaled down with the block and stays honest in every width:
+crossfade `/` light and wide apart, hard cut `\` orange and close together.
+
+The opacity was measured, not guessed. A one-pixel diagonal is antialiased, so
+roughly half of the set value arrives: at 105 the orange came out at 40 of 255
+in the rendered image and was hard to see, at 160 it is a good 60 and reads
+immediately.
+
+The first and the last cut are now always drawn - and named in the menu - as a
+hard cut. They are trimmed away before encoding and never had a crossfade; the
+menu used to tick *With Crossfade* for them and then refuse the click.
+
+**Overlays can be moved and resized on the timeline**
+
+The same grammar as for cuts: grab an edge to change start or end, grab the
+block to move the whole overlay, applied on release. The stops are the kept
+segment it sits in, minus the room the crossfades next to it need. Selecting
+and *Del* work as they do for cuts, and only ever one of the two is selected -
+*Del* has to be unambiguous.
+
+`update_overlay()` used to refuse changing the times, with the note that they
+"have to be checked against cuts and crossfade margins, which this method
+cannot do". That check sat inside `add_overlay()`; it is now `zeiten_pruefen()`,
+and creating, moving and dragging all go through it. Two hard rules: the overlay
+has to fit completely inside **one** kept segment, and the room for the
+crossfades at both ends of that segment has to stay free. That check also had to
+learn about the per-cut lengths - it was still asking the global value.
+
+**Fade in and fade out of an overlay**
+
+Right-click an overlay, *Fade in … / out …*. Unlike a cut these fades lie
+*inside* the bar - an overlay fades in at its own beginning - so the timeline
+draws them as ramps rising and falling within the blue bar. At a glance one
+sees how much of the overlay is fully visible at all; with a short overlay and
+long fades that is surprisingly little.
+
+Together they can never be longer than the overlay. If an overlay is dragged
+shorter than its fades, they are scaled down with it - a fade lasting longer
+than the overlay could not be rendered.
+
 **The build plan proves the macOS bundle instead of assuming it**
 
 Everything below runs against the *unzipped shipping archive*, not against the
@@ -329,6 +480,19 @@ unconditionally and reads none of them, so in the record they are lost bytes.
 Measured on `maptest2.KVRouiteproj`: the records shrink from 3384 kB to 1922 kB,
 43 percent. The track itself is untouched - this is only about the recorded
 points.
+
+**Right-clicking an overlay opens a menu**
+
+It used to ask *"Remove Overlay?"* straight away. Since an overlay can be moved
+and has its own fade lengths, removing is only one of several things one might
+want. Removing still asks - it is one step further in.
+
+**Set Begin no longer reports success**
+
+After a first cut a window said *"Video and GPX cut at 140.66s"*. It only
+stated what the timeline shows anyway and had to be clicked away every time.
+The message for a marker sitting at zero, where nothing happens, stayed -
+without it the button would look broken.
 
 **Call options take one dash or two**
 
