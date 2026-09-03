@@ -1603,11 +1603,17 @@ class MainWindow(QMainWindow):
         left_space = marker_s - kst
         right_space = ken - marker_s
 
-        if left_space < xfade_sec or right_space < xfade_sec:
+        # Wie viel Platz noetig ist, haengt an der Blende des jeweiligen
+        # Schnitts - seit 6.03 kann die je Schnitt verschieden sein.
+        noetig_links = self._blende_am_rand(kst)
+        noetig_rechts = self._blende_am_rand(ken)
+
+        if left_space < noetig_links or right_space < noetig_rechts:
             QMessageBox.warning(
                 self,
                 "Not enough space for crossfade",
-                (f"You need at least {xfade_sec}s free before and after the overlay position.\n\n"
+                (f"You need {noetig_links:.1f}s free before and "
+                 f"{noetig_rechts:.1f}s after the overlay position.\n\n"
                  f"Available: left {left_space:.2f}s, right {right_space:.2f}s.\n\n"
                  "Move the marker further away from cut boundaries, video start or end.")
             )
@@ -2386,6 +2392,18 @@ class MainWindow(QMainWindow):
         if global_video_s < 0:
             global_video_s = 0.0
         print(f"[DEBUG] set_begin => global_video_s={global_video_s:.2f}")
+
+        # Dieselbe Vorabpruefung wie beim gewoehnlichen Schnitt: der
+        # Anfangsschnitt selbst hat nie eine Blende, aber er kann dem ersten
+        # Schnitt dahinter den Platz nehmen.
+        blende_kuerzungen = []
+        if (global_video_s > 0.01
+                and not getattr(self, "_verschiebe_schritt", False)):
+            weiter, blende_kuerzungen = self._blenden_konflikt_fragen(
+                self._cuts_mit((0.0, float(global_video_s))),
+                "Placing the first cut here")
+            if not weiter:
+                return False
     
         # GPX-Bearbeitung nur bei AutoSync
         if self._autoSyncVideoEnabled and self._edit_mode in ("copy", "encode"):
@@ -2577,6 +2595,7 @@ class MainWindow(QMainWindow):
             self.timeline.set_markB_time(0.0)
             self.timeline.set_markE_time(global_video_s)
             self.cut_manager.on_cut_clicked()
+            self._blenden_kuerzen(blende_kuerzungen)
     
             # Frueher stand hier ein Meldungsfenster mit "Video and GPX
             # cut at ...s". Es sagte nur, was in der Zeitleiste ohnehin
@@ -3367,6 +3386,20 @@ class MainWindow(QMainWindow):
         except Exception:
             recalc_gpx_data = None
     
+        # Bevor irgendetwas passiert: nimmt dieser Schnitt einer bereits
+        # eingestellten Blende den Platz? Wenn ja, entscheidet der Nutzer -
+        # kuerzen lassen oder abbrechen. Waehrend eines Umzugs wird hier nicht
+        # gefragt: der fragt vorher selbst, und zwar fuer die neue Lage im
+        # Ganzen.
+        blende_kuerzungen = []
+        if not getattr(self, "_verschiebe_schritt", False):
+            kandidat = self._kandidat_aus_marken()
+            if kandidat is not None:
+                weiter, blende_kuerzungen = self._blenden_konflikt_fragen(
+                    self._cuts_mit(kandidat), "Placing this cut")
+                if not weiter:
+                    return
+
         do_gpx_edit = (self._autoSyncVideoEnabled and self._edit_mode in ("copy", "encode"))
         
         # --- 0) Wenn GPX-Edit gewünscht: Zeiten VOR dem Video-Cut speichern ---
@@ -3426,6 +3459,9 @@ class MainWindow(QMainWindow):
         
         # --- 1) Video-Cut anlegen (macht auch timeline update, reset MarkB/E intern) ---
         self.cut_manager.on_cut_clicked()
+        # Erst jetzt kuerzen: die Schluessel haengen an den Schnitten, und
+        # der neue gehoert dazu.
+        self._blenden_kuerzen(blende_kuerzungen)
         
         # --- 2) Wenn kein GPX-Edit erwünscht -> fertig ---
         if not do_gpx_edit:
@@ -3987,12 +4023,34 @@ class MainWindow(QMainWindow):
         menue.addSeparator()
 
         hart = self.cut_manager.is_hard_cut(start_s, end_s)
-        a_blende = menue.addAction("With Crossfade" if not hart else "Switch to Crossfade")
+        total_dur = float(getattr(self, "real_total_duration", 0.0) or 0.0)
+        # Start- und Endschnitt werden vor dem Zusammenfuegen weggetrimmt und
+        # haben deshalb nie eine Blende - dort ist auch nichts einzustellen.
+        rand = (abs(start_s) < 0.1
+                or (total_dur > 0 and abs(end_s - total_dur) < 0.1))
+
+        eigen = self.cut_manager.get_blende(start_s, end_s)
+        laenge = self._blende_vorgabe() if eigen is None else eigen
+        beschriftung = "With Crossfade" if not hart else "Switch to Crossfade"
+        if not hart and not rand:
+            beschriftung += " (%.1f s%s)" % (
+                laenge, "" if eigen is not None else ", default")
+        a_blende = menue.addAction(beschriftung)
         a_blende.setCheckable(True)
         a_blende.setChecked(not hart)
         a_hart = menue.addAction("Hard Cut")
         a_hart.setCheckable(True)
         a_hart.setChecked(hart)
+
+        a_laenge = menue.addAction("Crossfade length …")
+        a_laenge.setEnabled(not rand and not hart)
+        if rand:
+            a_laenge.setToolTip("The first and the last cut are trimmed away "
+                                "before encoding, so they never had a "
+                                "crossfade.")
+        elif hart:
+            a_laenge.setToolTip("This cut is a hard cut. Switch it to a "
+                                "crossfade first.")
         menue.addSeparator()
 
         moeglich, grund, warnung = self.cut_manager.ruecknahme_moeglich(
@@ -4018,6 +4076,8 @@ class MainWindow(QMainWindow):
                 self._on_cut_hard_toggle(start_s, end_s)
         elif gewaehlt is a_weg:
             self._schnitt_zuruecknehmen(start_s, end_s)
+        elif gewaehlt is a_laenge:
+            self._blende_dialog(start_s, end_s)
         elif gewaehlt is a_move:
             self._verschiebe_dialog(start_s, end_s)
 
@@ -4269,6 +4329,16 @@ class MainWindow(QMainWindow):
         # bleibt einer.
         mit_achse = self._ist_startschnitt(alt_start, alt_ende)
 
+        # Nimmt der Schnitt an seiner neuen Stelle einer eingestellten Blende
+        # den Platz? Gefragt wird VOR dem Zuruecknehmen - bei Abbruch soll
+        # nichts angefangen und wieder rueckgaengig gemacht werden muessen.
+        weiter, blende_kuerzungen = self._blenden_konflikt_fragen(
+            self._cuts_mit((float(neu_start), float(neu_ende)),
+                           ohne=(alt_start, alt_ende)),
+            "Moving this cut")
+        if not weiter:
+            return False
+
         # Ein Schritt fuer Strg+Z, angelegt bevor irgendetwas passiert.
         self.register_gpx_undo_snapshot()
         self.register_video_undo_snapshot(True)
@@ -4304,6 +4374,7 @@ class MainWindow(QMainWindow):
         finally:
             self._verschiebe_schritt = False
 
+        self._blenden_kuerzen(blende_kuerzungen)
         self._refresh_preview_timeline()
         self.timeline.update()
         print(f"[CUT-MOVE] Schnitt {alt_start:.3f}-{alt_ende:.3f} -> "
@@ -4346,6 +4417,89 @@ class MainWindow(QMainWindow):
             self.timeline.set_marker_position(ziel)
         except Exception as e:
             print(f"[WARN] Sprung nach dem Umzug: {e}")
+
+    def _blende_dialog(self, start_s, end_s):
+        """Blendenlaenge dieses Schnitts einstellen.
+
+        Aendert nur das Video. Die GPX-Spur bleibt unberuehrt - die Blende
+        verschiebt keine Zeiten, sie liegt mittig auf der Kante und laesst die
+        Gesamtlaenge gleich.
+        """
+        from PySide6.QtWidgets import (QCheckBox, QDialog, QDialogButtonBox,
+                                       QDoubleSpinBox, QFormLayout, QLabel,
+                                       QVBoxLayout)
+
+        vorgabe = self._blende_vorgabe()
+        eigen = self.cut_manager.get_blende(start_s, end_s)
+        hoechst = self._blende_hoechstwert(start_s, end_s)
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Crossfade length")
+        aussen = QVBoxLayout(dlg)
+
+        kasten = QCheckBox("Use the default from Encoder Setup (%.1f s)"
+                           % vorgabe, dlg)
+        kasten.setChecked(eigen is None)
+        aussen.addWidget(kasten)
+
+        form = QFormLayout()
+        sb = QDoubleSpinBox(dlg)
+        sb.setDecimals(1)
+        sb.setSingleStep(0.5)
+        sb.setRange(0.0, max(0.0, hoechst))
+        sb.setValue(float(vorgabe if eigen is None else eigen))
+        sb.setSuffix(" s")
+        form.addRow("Length", sb)
+        aussen.addLayout(form)
+
+        hinweis = QLabel(dlg)
+        hinweis.setWordWrap(True)
+        hinweis.setText(
+            "At most %.1f s here. The fade lies centred on the cut, so half "
+            "of it has to fit into the kept material on each side and half "
+            "into the cut itself.\n\n"
+            "0 s means a hard cut. This changes the video only - the GPX "
+            "track is not touched." % hoechst)
+        aussen.addWidget(hinweis)
+
+        knoepfe = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel, parent=dlg)
+        aussen.addWidget(knoepfe)
+        knoepfe.accepted.connect(dlg.accept)
+        knoepfe.rejected.connect(dlg.reject)
+
+        def _umschalten():
+            sb.setEnabled(not kasten.isChecked())
+            if kasten.isChecked():
+                sb.setValue(float(vorgabe))
+        kasten.toggled.connect(_umschalten)
+        _umschalten()
+
+        if hoechst <= 0.0:
+            hinweis.setText("There is no room for a crossfade here: the kept "
+                            "material next to this cut, or the cut itself, is "
+                            "too short.")
+            sb.setEnabled(False)
+            kasten.setEnabled(False)
+            knoepfe.button(QDialogButtonBox.Ok).setEnabled(False)
+
+        if dlg.exec() != QDialog.Accepted:
+            return
+
+        neu = None if kasten.isChecked() else round(sb.value(), 1)
+        if neu is not None and neu <= 0.0:
+            # 0 heisst harte Kante. Die steht in _hard_cuts und nicht als
+            # Laenge 0 daneben - sonst gaebe es zwei Schreibweisen dafuer.
+            self.cut_manager.set_blende(start_s, end_s, None)
+            self.cut_manager.set_hard_cut(start_s, end_s, True)
+            print(f"[BLENDE] Schnitt {start_s:.3f}-{end_s:.3f} => harte Kante")
+        else:
+            self.cut_manager.set_blende(start_s, end_s, neu)
+            print(f"[BLENDE] Schnitt {start_s:.3f}-{end_s:.3f} => "
+                  f"{'Vorgabe' if neu is None else ('%.1f s' % neu)}")
+
+        self.timeline.update()
+        self._refresh_preview_timeline()
 
     def _verschiebe_dialog(self, start_s, end_s):
         """Anfang und Ende des Schnitts als Zahlen eingeben.
@@ -6094,6 +6248,17 @@ class MainWindow(QMainWindow):
         new_state = self.cut_manager.toggle_hard_cut(start_s, end_s)
         print(f"[DEBUG] cut {start_s:.3f}-{end_s:.3f} => "
               f"{'hard cut' if new_state else 'crossfade'}")
+        # Aus einer harten Kante wird eine Blende: die braucht jetzt Platz.
+        # Passt sie nicht, wird gefragt - und bei Abbruch bleibt es bei der
+        # harten Kante.
+        if not new_state:
+            weiter, kuerzungen = self._blenden_konflikt_fragen(
+                None, "Switching this cut back to a crossfade")
+            if not weiter:
+                self.cut_manager.set_hard_cut(start_s, end_s, True)
+                self.timeline.update()
+                return
+            self._blenden_kuerzen(kuerzungen)
         self.timeline.update()
         self._refresh_preview_timeline()
 
@@ -6199,27 +6364,24 @@ class MainWindow(QMainWindow):
             return
 
         total_dur = getattr(self, "real_total_duration", 0.0) or 0.0
-        xfade_val = 0
-        if getattr(self, "_edit_mode", "") == "encode":
-            xfade_val = QSettings("KVRouite", "KVRouite").value("encoder/xfade", 2, type=int)
+        # Nur fuer die Protokollzeile: die tatsaechliche Laenge kann je
+        # Schnitt abweichen, siehe _blende_fuer().
+        vorgabe = self._blende_vorgabe()
 
         preview = []
         for (cstart, cend) in sorted(cuts, key=lambda x: x[0]):
-            fade = xfade_val
-            if abs(cstart - 0.0) < 0.1:                       # Startschnitt
-                fade = 0
-            elif total_dur > 0 and abs(cend - total_dur) < 0.1:  # Endschnitt
-                fade = 0
-            elif self.cut_manager.hat_harte_kante(cstart, cend):
-                # hat_harte_kante statt is_hard_cut: cstart/cend koennen ein
-                # zusammengefasster Bereich aus mehreren Schnitten sein, dessen
-                # Schluessel es in _hard_cuts gar nicht gibt.
-                fade = 0
-            preview.append((cstart, cend, fade))
+            # Start- und Endschnitt, harte Kante und eingestellte Laenge
+            # stecken alle in _blende_fuer(). cstart/cend koennen ein
+            # zusammengefasster Bereich aus mehreren Schnitten sein, dessen
+            # Schluessel es in _hard_cuts gar nicht gibt - deshalb loest die
+            # Funktion ueber blende_fuer_bereich() auf und nicht ueber den
+            # einzelnen Schluessel.
+            preview.append((cstart, cend, self._blende_fuer(cstart, cend,
+                                                            total_dur)))
 
         mit_blende = sum(1 for c in preview if c[2] > 0)
         print(f"[DEBUG] preview-cuts: mode={getattr(self, '_edit_mode', '?')} "
-              f"xfade={xfade_val}s total={total_dur:.3f}s "
+              f"Vorgabe {vorgabe:.1f}s total={total_dur:.3f}s "
               f"=> {len(preview)} Schnitt(e), davon {mit_blende} mit Blende")
 
         # Blenden werden vorgerendert (siehe core/fade_cache.py). Was schon
@@ -6410,6 +6572,302 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             print(f"[WARN] Overlay im Bild geaendert: {exc}")
 
+    # ------------------------------------------------------------------
+    # Blendenlaenge
+    # ------------------------------------------------------------------
+    def _blende_vorgabe(self) -> float:
+        """Vorgabe aus dem Encoder Setup, in Sekunden.
+
+        Sie gilt fuer jeden Schnitt, fuer den nichts Eigenes eingestellt ist.
+        """
+        try:
+            return float(QSettings("KVRouite", "KVRouite").value(
+                "encoder/xfade", 2, type=int))
+        except Exception:
+            return 2.0
+
+    def _blende_fuer(self, cstart, cend, total_dur=None) -> float:
+        """Blendenlaenge fuer diesen Schnitt oder Bereich, in Sekunden.
+
+        EINE Stelle fuer alle drei Abnehmer - Vorschau, Nachreichen der
+        fertig gerenderten Blenden und Export. Vorher stand die Entscheidung
+        dreimal fast gleich da, mit dem globalen Wert als einziger Quelle;
+        eine eingestellte Laenge haette man an allen dreien nachtragen
+        muessen.
+        """
+        if getattr(self, "_edit_mode", "") != "encode":
+            # Nur im Encode-Mode kommen Blenden ueberhaupt in den Export.
+            return 0.0
+        if total_dur is None:
+            total_dur = float(getattr(self, "real_total_duration", 0.0) or 0.0)
+        if abs(cstart - 0.0) < 0.1:
+            return 0.0      # Startschnitt: wird vor dem Zusammenfuegen getrimmt
+        if total_dur > 0 and abs(cend - total_dur) < 0.1:
+            return 0.0      # Endschnitt: ebenso
+        return self.cut_manager.blende_fuer_bereich(
+            cstart, cend, self._blende_vorgabe())
+
+    def _blende_hoechstwert(self, start_s, end_s, cuts=None) -> float:
+        """Wie lang die Blende dieses Schnitts hoechstens sein darf.
+
+        Die Blende liegt MITTIG auf der Kante (siehe _make_fade_job): das
+        abgehende Fenster reicht von cstart - fade/2 bis cstart + fade/2, das
+        ankommende von cend - fade/2 bis cend + fade/2. Die halbe Laenge kommt
+        also aus dem behaltenen Material davor beziehungsweise dahinter, die
+        andere Haelfte aus dem Schnitt selbst.
+
+        Entscheidend ist dabei, dass ein Zwischenraum ZWEI Blenden bedienen
+        muss: die des Schnitts davor und die des Schnitts dahinter. Steht
+        zwischen zwei Schnitten nur 5 s Material, darf keine der beiden
+        Blenden mehr als 5 s lang sein - sonst greifen sie ineinander und
+        holen sich Bilder aus dem Bereich, den der Nachbar schon
+        weggeschnitten hat. Deshalb zaehlt ein Zwischenraum nur zur Haelfte,
+        sobald an seinem anderen Ende ein weiterer Schnitt liegt. Grenzt er an
+        den Videoanfang oder das Videoende, steht er ganz zur Verfuegung.
+
+        Gerechnet wird auf den ZUSAMMENGEFASSTEN Bereichen. Aneinander
+        stossende Schnitte sind im Video ein einziger Uebergang mit einer
+        einzigen Blende; fuer einen inneren Schnitt einzeln zu rechnen ergaebe
+        die Grenze 0, obwohl an dieser Stelle sehr wohl Platz ist.
+
+        Die Dateigrenzen sind nicht mitgerechnet: laeuft ein Fenster in die
+        naechste Datei, faellt _make_fade_job() von sich aus auf einen harten
+        Schnitt zurueck und sagt es im Protokoll.
+        """
+        gesamt = float(getattr(self, "real_total_duration", 0.0) or 0.0)
+        try:
+            # cuts erlaubt das Rechnen auf einer GEDACHTEN Schnittliste - so
+            # laesst sich vor dem Setzen eines Schnitts sagen, was er den
+            # Nachbarn wegnehmen wuerde.
+            if cuts is None:
+                bereiche = self.cut_manager.get_merged_cut_intervals()
+            else:
+                bereiche = self._zusammenfassen(cuts)
+            keeps = self._compute_keep_intervals(bereiche, gesamt)
+        except Exception:
+            return 0.0
+
+        # Den zusammengefassten Bereich suchen, zu dem dieser Schnitt gehoert.
+        bereich = None
+        for (a, b) in bereiche:
+            if a <= start_s + 1e-6 and b >= end_s - 1e-6:
+                bereich = (float(a), float(b))
+                break
+        if bereich is None:
+            return 0.0
+        a, b = bereich
+
+        davor = danach = 0.0
+        for (ks, ke) in keeps:
+            if abs(ke - a) < 1e-6:
+                # Zwischenraum direkt davor. Beginnt er am Videoanfang, steht
+                # er ganz zur Verfuegung; sonst teilt ihn sich der Schnitt an
+                # seinem anderen Ende.
+                davor = (ke - ks) if ks <= 1e-6 else (ke - ks) / 2.0
+            elif abs(ks - b) < 1e-6:
+                danach = ((ke - ks) if ke >= gesamt - 1e-6
+                          else (ke - ks) / 2.0)
+        schnitt = max(0.0, b - a)
+        return max(0.0, min(30.0, 2.0 * min(davor, danach, schnitt)))
+
+    @staticmethod
+    def _zusammenfassen(cuts):
+        """Ueberlappende oder aneinander stossende Schnitte zusammenfassen.
+
+        Dasselbe wie VideoCutManager.get_merged_cut_intervals(), nur fuer eine
+        uebergebene Liste - gebraucht fuer die gedachte Schnittliste in der
+        Vorabpruefung.
+        """
+        if not cuts:
+            return []
+        sortiert = sorted(((float(a), float(b)) for (a, b) in cuts),
+                          key=lambda x: x[0])
+        zusammen = []
+        s_akt, e_akt = sortiert[0]
+        for (a, b) in sortiert[1:]:
+            if a <= e_akt:
+                e_akt = max(e_akt, b)
+            else:
+                zusammen.append((s_akt, e_akt))
+                s_akt, e_akt = a, b
+        zusammen.append((s_akt, e_akt))
+        return zusammen
+
+    def _blenden_konflikte(self, cuts=None):
+        """Welche Blenden passen bei dieser Schnittliste nicht mehr?
+
+        cuts=None rechnet auf dem jetzigen Stand, sonst auf einer gedachten
+        Liste - damit laesst sich ein Schnitt pruefen, BEVOR er gesetzt wird.
+
+        Rueckgabe: Liste aus (start, ende, jetzige_laenge, hoechstwert), nur
+        fuer Schnitte, deren Blende nicht mehr hineinpasst.
+        """
+        gesamt = float(getattr(self, "real_total_duration", 0.0) or 0.0)
+        vorgabe = self._blende_vorgabe()
+        liste = list(self.cut_manager._cut_intervals if cuts is None else cuts)
+        konflikte = []
+
+        for (a, b) in liste:
+            a, b = float(a), float(b)
+            if abs(a) < 0.1 or (gesamt > 0 and abs(b - gesamt) < 0.1):
+                continue                  # Start-/Endschnitt: nie eine Blende
+            if self.cut_manager.is_hard_cut(a, b):
+                continue                  # harte Kante braucht keinen Platz
+            eigen = self.cut_manager.get_blende(a, b)
+            jetzt = float(vorgabe if eigen is None else eigen)
+            hoechst = self._blende_hoechstwert(a, b, cuts=liste)
+            if jetzt > hoechst + 1e-6:
+                konflikte.append((a, b, jetzt, hoechst))
+        return konflikte
+
+    @staticmethod
+    def _blende_abrunden(hoechst) -> float:
+        """Auf 0,1 s abrunden. Aufgerundet waere die Grenze wieder ueberschritten."""
+        import math
+        return math.floor(max(0.0, float(hoechst)) * 10.0) / 10.0
+
+    def _blenden_konflikt_fragen(self, neue_cuts, anlass):
+        """Vor einer Aenderung fragen, wenn eine Blende dadurch nicht mehr passt.
+
+        Gekuerzt wird NICHTS von selbst. Eine eingestellte Blendenlaenge ist
+        eine Entscheidung des Nutzers; sie hinter seinem Ruecken zu aendern
+        waere schlimmer als die Rueckfrage. Er hat zwei Moeglichkeiten:
+        kuerzen lassen - dann steht im Fenster, auf welchen Wert - oder
+        abbrechen und den betroffenen Schnitt erst selbst in Ordnung bringen.
+
+        Rueckgabe (weiter, kuerzungen):
+          weiter     False heisst: der Nutzer hat abgebrochen, die Aenderung
+                     unterbleibt vollstaendig
+          kuerzungen Liste (start, ende, neue_laenge), die NACH der Aenderung
+                     anzuwenden ist - vorher gibt es den neuen Schnitt noch
+                     nicht, und die Schluessel haengen an den Schnitten.
+        """
+        konflikte = self._blenden_konflikte(neue_cuts)
+        if not konflikte:
+            return True, []
+
+        zeilen = []
+        kuerzungen = []
+        for (a, b, jetzt, hoechst) in konflikte:
+            neu = self._blende_abrunden(hoechst)
+            kuerzungen.append((a, b, None if neu < 0.1 else neu))
+            zeilen.append(
+                "    %s - %s:  crossfade %.1f s, only %.1f s would fit"
+                % (self._sek_kurz(a), self._sek_kurz(b), jetzt, neu))
+
+        kasten = QMessageBox(self)
+        kasten.setIcon(QMessageBox.Warning)
+        kasten.setWindowTitle("Not enough room for the crossfade")
+        kasten.setText(
+            "%s would leave too little material for a crossfade that is "
+            "already set:\n\n%s\n\n"
+            "The fade lies centred on the cut, so half of it has to fit into "
+            "the kept material on each side - and a gap between two cuts has "
+            "to serve both of them.\n\n"
+            "Shorten the crossfade of the cut named above, or cancel and "
+            "adjust it yourself first."
+            % (anlass, "\n".join(zeilen)))
+        b_kuerzen = kasten.addButton("Shorten crossfade",
+                                     QMessageBox.AcceptRole)
+        kasten.addButton("Cancel", QMessageBox.RejectRole)
+        kasten.setDefaultButton(b_kuerzen)
+        kasten.exec()
+
+        if kasten.clickedButton() is not b_kuerzen:
+            print("[BLENDE] Konflikt: der Nutzer hat abgebrochen")
+            return False, []
+        return True, kuerzungen
+
+    def _blenden_kuerzen(self, kuerzungen):
+        """Die im Fenster zugesagten Kuerzungen anwenden."""
+        for (a, b, neu) in (kuerzungen or []):
+            if neu is None:
+                self.cut_manager.set_blende(a, b, None)
+                self.cut_manager.set_hard_cut(a, b, True)
+                print(f"[BLENDE] {a:.3f}-{b:.3f}: kein Platz mehr, harte Kante")
+            else:
+                self.cut_manager.set_blende(a, b, neu)
+                print(f"[BLENDE] {a:.3f}-{b:.3f}: gekuerzt auf {neu:.1f} s")
+
+    def _kandidat_aus_marken(self):
+        """Der Schnitt, den on_cut_clicked() aus den Marken machen wuerde.
+
+        Dieselbe Klemmung wie dort. None, wenn daraus kein Schnitt wird.
+        """
+        cm = self.cut_manager
+        if cm.markB_time_s < 0 or cm.markE_time_s < 0:
+            return None
+        a = min(cm.markB_time_s, cm.markE_time_s)
+        b = max(cm.markB_time_s, cm.markE_time_s)
+        gesamt = sum(self.video_durations) if self.video_durations else 0.0
+        a = max(0.0, a)
+        b = min(b, gesamt) if gesamt > 0 else b
+        if (b - a) < 0.01:
+            return None
+        return (float(a), float(b))
+
+    def _cuts_mit(self, kandidat, ohne=None):
+        """Die gedachte Schnittliste: aktuelle, ohne 'ohne', plus 'kandidat'.
+
+        Ein neuer Endschnitt ersetzt einen vorhandenen, ein neuer
+        Anfangsschnitt ebenso - das muss die gedachte Liste abbilden, sonst
+        rechnet die Pruefung mit einem Schnitt, den es gleich nicht mehr gibt.
+        """
+        gesamt = float(getattr(self, "real_total_duration", 0.0) or 0.0)
+        a, b = kandidat
+        ist_ende = gesamt > 0 and abs(b - gesamt) < 0.1
+        ist_anfang = a < 0.1
+
+        liste = []
+        for (ca, cb) in self.cut_manager._cut_intervals:
+            if ohne is not None and (abs(ca - ohne[0]) < 1e-9
+                                     and abs(cb - ohne[1]) < 1e-9):
+                continue
+            if ist_ende and gesamt > 0 and abs(cb - gesamt) < 0.1:
+                continue
+            if ist_anfang and ca < 0.1:
+                continue
+            liste.append((float(ca), float(cb)))
+        liste.append((float(a), float(b)))
+        return liste
+
+    def _blenden_lage_melden(self):
+        """Nach dem Laden: passt noch alles? Nur melden, nichts aendern.
+
+        Ein geladenes Projekt war beim Speichern stimmig. Weicht es jetzt ab,
+        wurde zwischenzeitlich die Vorgabe im Encoder Setup geaendert - dann
+        ist es erst recht nicht an uns, die Laengen zu verstellen.
+        """
+        konflikte = self._blenden_konflikte()
+        if not konflikte:
+            return
+        zeilen = ["    %s - %s:  crossfade %.1f s, only %.1f s fits"
+                  % (self._sek_kurz(a), self._sek_kurz(b), jetzt, hoechst)
+                  for (a, b, jetzt, hoechst) in konflikte]
+        for z in zeilen:
+            print("[BLENDE] passt nicht mehr:" + z)
+        QMessageBox.information(
+            self, "Crossfades do not fit",
+            "In this project there is not enough room for every crossfade:"
+            "\n\n%s\n\n"
+            "Nothing was changed. Adjust the length with the right-click menu "
+            "on the cut, or move the cuts apart." % "\n".join(zeilen))
+
+    def _blende_am_rand(self, zeit_s) -> float:
+        """Blendenlaenge des Schnitts, der an dieser Keep-Grenze liegt.
+
+        Fuer die Overlay-Pruefung: wie viel Platz ein Overlay zur Grenze
+        seines Keep-Segments halten muss, haengt daran, wie lang die Blende
+        des dortigen Schnitts ist - und die ist seit 6.03 nicht mehr fuer
+        alle gleich. Videoanfang und -ende liefern 0: dort gibt es keine
+        Blende, die Platz braeuchte.
+        """
+        gesamt = float(getattr(self, "real_total_duration", 0.0) or 0.0)
+        for (a, b) in self.cut_manager.get_merged_cut_intervals():
+            if abs(b - zeit_s) < 0.001 or abs(a - zeit_s) < 0.001:
+                return self._blende_fuer(a, b, gesamt)
+        return 0.0
+
     def _make_fade_job(self, cstart, cend, fade):
         """
         Beschreibt die zu rendernde Blende fuer einen Schnitt.
@@ -6502,20 +6960,11 @@ class MainWindow(QMainWindow):
         except Exception:
             return
         total_dur = getattr(self, "real_total_duration", 0.0) or 0.0
-        xfade_val = 0
-        if getattr(self, "_edit_mode", "") == "encode":
-            xfade_val = QSettings("KVRouite", "KVRouite").value("encoder/xfade", 2, type=int)
 
         fertig = []
         gefunden = 0
         for (cstart, cend) in sorted(cuts, key=lambda x: x[0]):
-            fade = xfade_val
-            if abs(cstart - 0.0) < 0.1:
-                fade = 0
-            elif total_dur > 0 and abs(cend - total_dur) < 0.1:
-                fade = 0
-            elif self.cut_manager.hat_harte_kante(cstart, cend):
-                fade = 0
+            fade = self._blende_fuer(cstart, cend, total_dur)
             job = self._fade_jobs.get((cstart, cend))
             pfad = self._fade_renderer.ready_path(job) if job is not None else None
             if pfad:
@@ -6549,7 +6998,9 @@ class MainWindow(QMainWindow):
             
             # 1) Daten aus QSettings lesen (Encoder Setup)
             s = QSettings("KVRouite","KVRouite")
-            xfade_val   = s.value("encoder/xfade", 2, type=int)
+            # Die Blendenlaenge steht nicht mehr hier: sie kann je
+            # Schnitt abweichen und wird unten Schnitt fuer Schnitt
+            # ueber _blende_fuer() bestimmt.
             hw_encode   = s.value("encoder/hw", "none", type=str)
             container   = s.value("encoder/container", "x265", type=str)
             crf_val     = s.value("encoder/crf", 25, type=int)
@@ -6579,10 +7030,12 @@ class MainWindow(QMainWindow):
                     # 0 bedeutet harte Kante: der Encoder baut dann weder
                     # A-/B-Segment noch Crossfade, die Schnittkante und die
                     # Gesamtlaenge bleiben unveraendert.
-                    if self.cut_manager.is_hard_cut(cstart, cend):
-                        skip_array.append([cstart, cend, 0])
-                    else:
-                        skip_array.append([cstart, cend, xfade_val])
+                    # Eingestellte Laenge, harte Kante oder Vorgabe -
+                    # dieselbe Entscheidung wie in der Vorschau, damit beide
+                    # nicht auseinanderlaufen koennen.
+                    skip_array.append(
+                        [cstart, cend,
+                         self._blende_fuer(cstart, cend, total_dur)])
         
             # Debug-Ausgabe, damit du siehst, was wirklich passiert:
             print("DEBUG skip_array:", skip_array)
@@ -8064,6 +8517,9 @@ class MainWindow(QMainWindow):
         # Die Markierungen 'harte Kante' gehoeren zum selben Zustand wie die
         # Schnitte selbst und muessen mit zurueckgeholt werden.
         hard_snapshot = set(self.cut_manager._hard_cuts)
+        # Die eingestellten Blendenlaengen gehoeren zum selben Zustand wie die
+        # Markierungen "harte Kante" und muessen mit zurueckgeholt werden.
+        blenden_snapshot = dict(self.cut_manager._blenden)
         # Ebenso, was die Schnitte aus der GPX-Spur genommen haben. Ohne das
         # haette ein Schnitt nach Strg+Z entweder keine Aufzeichnung mehr oder
         # die eines spaeter an derselben Stelle gesetzten.
@@ -8076,6 +8532,7 @@ class MainWindow(QMainWindow):
             for (start, end) in snapshot:
                 self.timeline.add_cut_interval(start, end)
             self.cut_manager._hard_cuts = set(hard_snapshot)
+            self.cut_manager._blenden = dict(blenden_snapshot)
             self.cut_manager.prune_hard_cuts()
             self.cut_manager._sync_timeline_hard_cuts()
 
@@ -8130,6 +8587,9 @@ class MainWindow(QMainWindow):
             "gpx_data": self.gpx_widget.gpx_list._gpx_data,
             "cut_intervals": self.cut_manager._cut_intervals,
             "hard_cuts": self.cut_manager.get_hard_cuts(),
+            # Blendenlaengen je Schnitt. Was hier fehlt, folgt der Vorgabe aus
+            # dem Encoder Setup - genau wie in einer frischen Sitzung.
+            "cut_fades": self.cut_manager.get_blenden(),
             # Was die Schnitte aus der GPX-Spur genommen haben. Ohne das war
             # "Undo Cut" nach jedem Laden grau: die Aufzeichnungen standen nur
             # im Speicher, ein geladenes Projekt begann mit einem leeren
@@ -8316,6 +8776,7 @@ class MainWindow(QMainWindow):
             # Aeltere Projektdateien kennen "hard_cuts" nicht -> alle
             # Schnitte behalten ihre Blende, wie bisher.
             self.cut_manager.set_hard_cuts(project_data.get("hard_cuts", []))
+            self.cut_manager.set_blenden(project_data.get("cut_fades", []))
             # Aufzeichnungen der Schnitte. Fehlt der Schluessel (Projekt von
             # vor 6.03), bleibt es beim leeren Stand und die Schnitte sind
             # gesperrt wie bisher.
@@ -8480,6 +8941,10 @@ class MainWindow(QMainWindow):
             # Ohne diese Zeile blieben Schnitte und Blenden danach ganz aus.
             QTimer.singleShot(0, self._refresh_preview_timeline)
             QTimer.singleShot(0, self._fragen_nach_dem_laden)
+            # Passen die gespeicherten Blenden noch? Geaendert wird dabei
+            # nichts - beim Laden hat der Nutzer nichts getan, was er
+            # zuruecknehmen koennte.
+            QTimer.singleShot(0, self._blenden_lage_melden)
 
             
     def _rebuild_playlist_menu(self):
@@ -9921,8 +10386,11 @@ class MainWindow(QMainWindow):
                 continue
 
             ks, ke = containing
-            allowed_start_min = ks + xfade
-            allowed_end_max   = ke - xfade
+            # Der Rand haengt am jeweiligen Schnitt, nicht mehr am globalen
+            # Wert: seit 6.03 kann jeder Schnitt seine eigene Blendenlaenge
+            # haben. Videoanfang und -ende liefern 0.
+            allowed_start_min = ks + self._blende_am_rand(ks)
+            allowed_end_max   = ke - self._blende_am_rand(ke)
 
             if start_s < allowed_start_min or end_s > allowed_end_max:
                 max_len_here = max(0.0, allowed_end_max - max(start_s, allowed_start_min))

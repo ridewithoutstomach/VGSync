@@ -36,6 +36,17 @@ class VideoCutManager(QObject):
         # Gespeichert als gerundete (start, end)-Schluessel, damit
         # _cut_intervals selbst unveraendert bleibt.
         self._hard_cuts = set()
+
+        # Blendenlaengen je Schnitt, in Sekunden. Was hier NICHT steht, folgt
+        # der Vorgabe aus dem Encoder Setup (encoder/xfade). Gleiches Muster
+        # wie _hard_cuts: ein Dict neben der Schnittliste, mit dem gerundeten
+        # (start, end)-Schluessel.
+        #
+        # Eine harte Kante bleibt in _hard_cuts und wird hier NICHT als 0
+        # abgelegt. Sonst gaebe es zwei Schreibweisen fuer dasselbe, und die
+        # koennten auseinanderlaufen. Beim Auswerten kommen beide zusammen -
+        # siehe blende_fuer_bereich().
+        self._blenden = {}
         self.video_durations = []
 
         # ---- Ruecknahme von Schnitten (ab 6.02, Etappe 1: nur aufzeichnen) --
@@ -660,6 +671,70 @@ class VideoCutManager(QObject):
         self.video_editor.set_cut_intervals(self._cut_intervals)
         return True
 
+    # ------------------------------------------------------------------
+    # Blendenlaenge je Schnitt
+    # ------------------------------------------------------------------
+    def get_blende(self, start_s, end_s):
+        """Eingestellte Laenge dieses Schnitts, oder None fuer die Vorgabe."""
+        return self._blenden.get(self._cut_key(start_s, end_s))
+
+    def set_blende(self, start_s, end_s, sekunden):
+        """Laenge setzen. None laesst den Schnitt wieder der Vorgabe folgen."""
+        key = self._cut_key(start_s, end_s)
+        if sekunden is None:
+            self._blenden.pop(key, None)
+        else:
+            self._blenden[key] = float(sekunden)
+
+    def blende_fuer_bereich(self, start_s, end_s, vorgabe, eps: float = 0.001):
+        """Blendenlaenge fuer einen - moeglicherweise zusammengefassten - Bereich.
+
+        Grenzen mehrere Schnitte aneinander, sind sie im Video EIN Uebergang.
+        Der kann nur eine Blende haben, deshalb gewinnt die kuerzeste der
+        beteiligten. Eine harte Kante zaehlt dabei als 0 und setzt sich damit
+        von selbst durch - dieselbe Ueberlegung wie in hat_harte_kante(), nur
+        mit Zahlen statt mit ja/nein.
+
+        vorgabe ist der Wert aus dem Encoder Setup; er gilt fuer jeden
+        Schnitt, fuer den nichts Eigenes eingestellt wurde.
+        """
+        werte = []
+        for (a, b) in self._cut_intervals:
+            if a >= start_s - eps and b <= end_s + eps:
+                key = self._cut_key(a, b)
+                if key in self._hard_cuts:
+                    werte.append(0.0)
+                else:
+                    werte.append(float(self._blenden.get(key, vorgabe)))
+        if not werte:
+            return float(vorgabe)
+        return min(werte)
+
+    def get_blenden(self) -> list:
+        """Fuer die Projektdatei: [[start, end, sekunden], ...]."""
+        self.prune_blenden()
+        return [[a, b, self._blenden[(a, b)]] for (a, b) in sorted(self._blenden)]
+
+    def set_blenden(self, eintraege):
+        """Aus der Projektdatei. Fehlt der Schluessel, folgt alles der Vorgabe."""
+        self._blenden = {}
+        for item in (eintraege or []):
+            try:
+                self._blenden[self._cut_key(item[0], item[1])] = float(item[2])
+            except (TypeError, IndexError, ValueError):
+                continue
+        self.prune_blenden()
+
+    def prune_blenden(self):
+        """Laengen wegwerfen, zu denen es keinen Schnitt mehr gibt.
+
+        Dieselbe Ueberlegung wie bei prune_hard_cuts(): sonst erbte ein
+        spaeter an derselben Stelle gesetzter Schnitt die alte Laenge.
+        """
+        alive = {self._cut_key(a, b) for (a, b) in self._cut_intervals}
+        for key in [k for k in self._blenden if k not in alive]:
+            del self._blenden[key]
+
     def is_hard_cut(self, start_s, end_s) -> bool:
         return self._cut_key(start_s, end_s) in self._hard_cuts
 
@@ -711,9 +786,15 @@ class VideoCutManager(QObject):
 
         Sonst wuerde ein spaeter an genau derselben Stelle gesetzter Schnitt
         die alte Markierung erben.
+
+        Die eingestellten Blendenlaengen gehen hier mit. Sie haengen an
+        denselben Schluesseln und muessen unter denselben Bedingungen weg;
+        an den rund vier Aufrufstellen je zwei Zeilen zu schreiben waere die
+        Gelegenheit, eine davon zu vergessen.
         """
         alive = {self._cut_key(a, b) for (a, b) in self._cut_intervals}
         self._hard_cuts &= alive
+        self.prune_blenden()
         self._sync_timeline_hard_cuts()
 
     def _sync_timeline_hard_cuts(self):
