@@ -97,13 +97,87 @@ jobs:
           /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$BUENDEL/Contents/Info.plist" || true
           /usr/libexec/PlistBuddy -c "Print :CFBundleName" "$BUENDEL/Contents/Info.plist" || true
 
-      - name: Selbsttest im gebauten Buendel
+      # ---------------------------------------------------------------
+      # Ab hier wird NICHT mehr im Bauordner geprueft, sondern in dem, was der
+      # Anwender herunterlaedt. Das Archiv wird ausgepackt, und jeder weitere
+      # Schritt fasst nur noch dieses Buendel an. Damit ist die Reihenfolge
+      # zwangslaeufig richtig: signiert hat build_macos.py als letzten Schritt,
+      # gepackt wurde danach, angefasst wird erst das Ausgepackte.
+      # ---------------------------------------------------------------
+      - name: Auslieferungsstand herstellen
+        run: |
+          ZIP=$(find dist -name "KVRouite_*_macOS_*.zip" | head -1)
+          echo "Archiv: $ZIP"
+          rm -rf pruefstand && mkdir pruefstand
+          ditto -x -k "$ZIP" pruefstand
+          APP=$(find pruefstand -maxdepth 2 -name "KVRouite.app" -type d | head -1)
+          if [ -z "$APP" ]; then
+            echo "ABBRUCH: im Archiv steckt kein KVRouite.app."
+            exit 1
+          fi
+          echo "Geprueft wird ab jetzt: $PWD/$APP"
+          echo "APP=$PWD/$APP" >> "$GITHUB_ENV"
+
+      - name: Ist das Buendel gueltig signiert?
+        run: |
+          echo "----- Wer hat signiert -----"
+          codesign -dv --verbose=4 "$APP"
+          echo
+          echo "----- Steht jede Datei im Siegel? -----"
+          # Harter Abbruch. Genau diese Pruefung fehlte: bis zum 03.09.2026
+          # liess build_macos.py das Buendel von PyInstaller signieren und
+          # kopierte DANACH noch Dateien hinein. Auf dem Mac eines Anwenders
+          # meldete codesign daraufhin fuer jede davon "a sealed resource is
+          # missing or invalid" - hier lief der Bau trotzdem gruen durch.
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          echo "OK: Siegel vollstaendig, Signatur gueltig."
+
+      - name: Gegenprobe - schlaegt diese Pruefung ueberhaupt an?
+        run: |
+          # Ein Test, der nie fehlschlaegt, beweist nichts. Deshalb wird hier
+          # eine KOPIE absichtlich kaputtgemacht, und zwar auf genau die Art,
+          # die uns passiert ist: eine Datei nachtraeglich hineinlegen. Meldet
+          # codesign das nicht, taugt der Schritt darueber nichts, und dann
+          # soll dieser Lauf abbrechen statt falsche Sicherheit zu liefern.
+          rm -rf kaputt && mkdir kaputt
+          # ditto und nicht cp: ditto kopiert ein Buendel samt allem,
+          # was zur Signatur gehoert. Eine unsaubere Kopie wuerde
+          # codesign schon von sich aus bemaengeln, und die Gegenprobe
+          # wuerde bestehen, ohne etwas bewiesen zu haben.
+          ditto "$APP" "kaputt/KVRouite.app"
+          echo "nachtraeglich hineingelegt" > "kaputt/KVRouite.app/Contents/MacOS/eingeschmuggelt.txt"
+          if codesign --verify --deep --strict --verbose=2 "kaputt/KVRouite.app"; then
+            echo "ABBRUCH: codesign meldet ein nachtraeglich veraendertes Buendel NICHT."
+            echo "Damit waere die Pruefung im Schritt davor wertlos."
+            exit 1
+          fi
+          echo "OK: eine nachtraeglich hineingelegte Datei wird erkannt."
+          echo "Die Pruefung im Schritt davor hat also Zaehne."
+          rm -rf kaputt
+
+      - name: Was Gatekeeper beim Anwender sagen wird
+        run: |
+          # Der Unterschied zwischen "laeuft auf dem Bauserver" und "laeuft
+          # beim Anwender" ist ein einziges Dateimerkmal: com.apple.quarantine
+          # setzt der Browser beim Herunterladen, und erst damit schaut
+          # Gatekeeper ueberhaupt hin. Hier wird es von Hand gesetzt, damit im
+          # Protokoll steht, was der Anwender wirklich zu sehen bekommt.
+          xattr -w com.apple.quarantine "0081;00000000;Chrome;" "$APP"
+          echo "----- spctl, also Gatekeeper -----"
+          spctl -a -t exec -vv "$APP" 2>&1 || true
+          echo
+          echo "Ohne Notarisierung sagt Gatekeeper hier zwangslaeufig nein -"
+          echo "das ist so entschieden und kein Fehler. Entscheidend ist, WAS"
+          echo "er sagt: not notarized allein ist der bekannte Stand. Steht"
+          echo "dort etwas ueber ein ungueltiges oder unvollstaendiges Siegel,"
+          echo "ist etwas kaputt."
+          xattr -dr com.apple.quarantine "$APP"
+
+      - name: Selbsttest im ausgelieferten Buendel
         timeout-minutes: 15
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
-          BUENDEL=$(find dist -maxdepth 2 -name "KVRouite.app" -type d | head -1)
-          PROG="$BUENDEL/Contents/MacOS/KVRouite"
           echo "Der eigentliche Test: das Buendel prueft sich selbst."
           echo "Es findet seine Dateien, laedt die Symbole, liest und schreibt"
           echo "GPX und schneidet ein Video - siehe selftest.py."
@@ -112,31 +186,20 @@ jobs:
           # ist das Arbeitsverzeichnis nicht der Programmordner, und genau
           # daran sind die Symbole zuerst gescheitert.
           cd /
-          "$OLDPWD/$PROG" --selftest
+          "$APP/Contents/MacOS/KVRouite" --selftest
 
-      - name: Startet das gebaute Buendel?
+      - name: Startet das ausgelieferte Buendel?
         timeout-minutes: 5
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
           set +e
-          BUENDEL=$(find dist -maxdepth 2 -name "KVRouite.app" -type d | head -1)
-          PROG="$BUENDEL/Contents/MacOS/KVRouite"
-          echo "Starte: $PROG"
+          echo "Starte: $APP/Contents/MacOS/KVRouite"
           # Der erste Start zeigt sonst zwei modale Dialoge (Disclaimer und
           # "ffmpeg not found") und wartet ewig auf einen Klick. Beide werden
           # wie nach einem ersten echten Start vorbelegt.
-          python - <<'PY'
-          from PySide6.QtCore import QSettings
-          import config
-          s = QSettings("KVRouite", "KVRouite")
-          s.setValue("appVersion", config.APP_VERSION)
-          s.setValue("disclaimerAccepted", True)
-          s.setValue("hints/ffmpeg_missing_shown", True)
-          s.sync()
-          print("Einstellungen vorbelegt fuer", config.APP_VERSION)
-          PY
-          "$PROG" > start.log 2>&1 &
+          python -c "from PySide6.QtCore import QSettings; import config; s = QSettings('KVRouite', 'KVRouite'); s.setValue('appVersion', config.APP_VERSION); s.setValue('disclaimerAccepted', True); s.setValue('hints/ffmpeg_missing_shown', True); s.sync(); print('Einstellungen vorbelegt fuer', config.APP_VERSION)"
+          "$APP/Contents/MacOS/KVRouite" > start.log 2>&1 &
           PID=$!
           sleep 25
           if kill -0 $PID 2>/dev/null; then
@@ -152,6 +215,37 @@ jobs:
           cat start.log
           echo "-------------------"
           exit $RC
+
+      - name: Nachweisbild vom laufenden Fenster
+        if: always()
+        timeout-minutes: 5
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          # Der Startversuch oben zeigt nur, dass der Prozess noch lebt. Dieses
+          # Bild zeigt, dass wirklich ein Fenster steht. Aufgenommen wird es
+          # von Qt selbst (QWidget.grab), deshalb geht es auch ohne Bildschirm.
+          "$APP/Contents/MacOS/KVRouite" --screenshot
+          ls -l KVRouite_screenshot.png
+
+      - name: Hat das Laufen das Buendel veraendert?
+        if: always()
+        run: |
+          # Letzte Gegenprobe: nach allen Startversuchen muss das Siegel immer
+          # noch stimmen. Legt das Programm beim ersten Start etwas in sein
+          # eigenes Buendel, waere es beim Anwender ab dann "veraendert" - und
+          # wir wuessten es wieder nicht.
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          echo "OK: das Buendel ist nach dem Laufen unveraendert."
+
+      - name: Nachweisbild ablegen
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: KVRouite-macOS-${{ matrix.arch }}-screenshot
+          path: KVRouite_screenshot.png
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Buendel ablegen
         if: always()          # auch bei fehlgeschlagenem Startversuch abholbar

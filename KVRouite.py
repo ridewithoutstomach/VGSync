@@ -77,15 +77,17 @@ def force_error(*args, sep=" ", end="\n"):
 # genau das ist am 03.09.2026 beim Testen passiert.
 
 _OPTIONEN = {
-    "v":        "verbose",
-    "verbose":  "verbose",
-    "selftest": "selftest",
+    "v":          "verbose",
+    "verbose":    "verbose",
+    "selftest":   "selftest",
+    "screenshot": "screenshot",
 }
 
 #: Wie die Optionen in einer Meldung aufgezaehlt werden.
 _OPTIONEN_HILFE = (
     "  -v  / --verbose    more output on the console",
     "  -selftest / --selftest    check this installation and exit",
+    "  -screenshot / --screenshot    save a picture of the window and exit",
 )
 
 
@@ -391,6 +393,40 @@ def center_mainwindow(window):
     window.move(frame_geo.topLeft())
 
 
+#: Dateiname und Wartezeit fuer "--screenshot".
+_SCREENSHOT_DATEI = "KVRouite_screenshot.png"
+_SCREENSHOT_WARTEN_MS = 12000
+
+
+def _screenshot_planen(fenster, app):
+    """Ein Bild des Fensters speichern und das Programm beenden.
+
+    Fuer den Bauserver. Der Startversuch dort zeigt bisher nur, dass der
+    Prozess nach 25 Sekunden noch lebt - ob wirklich ein Fenster steht, mit
+    Karte, Zeitleiste und Symbolen, sieht man daran nicht. Das Bild wird als
+    Artefakt abgelegt und beantwortet genau das.
+
+    Aufgenommen wird ueber QWidget.grab(), also von Qt selbst, und nicht ueber
+    ein Bildschirmfoto des Systems: so entsteht das Bild auch mit
+    QT_QPA_PLATFORM=offscreen, wo es gar keinen Bildschirm gibt.
+
+    Gewartet wird, damit die Karte fertig geladen ist - sie kommt ueber
+    QtWebEngine und ist nicht sofort da.
+    """
+    from PySide6.QtCore import QTimer
+
+    def schuss():
+        ziel = os.path.abspath(_SCREENSHOT_DATEI)
+        bild = fenster.grab()
+        ok = bool(bild.save(ziel, "PNG"))
+        force_print("[SCREENSHOT] %s  %dx%d  %s"
+                    % (ziel, bild.width(), bild.height(),
+                       "saved" if ok else "COULD NOT BE SAVED"))
+        app.exit(0 if ok else 1)
+
+    QTimer.singleShot(_SCREENSHOT_WARTEN_MS, schuss)
+
+
 def _file_arg_from_cli(argv):
     """Erste uebergebene existierende Datei aus der Kommandozeile.
 
@@ -643,6 +679,11 @@ def main():
     cli_file = _file_arg_from_cli(sys.argv)
     if cli_file:
         window.open_file_when_map_ready(cli_file)
+
+    if "screenshot" in erkannt:
+        force_print("[SCREENSHOT] window is up, waiting %d ms for the map"
+                    % _SCREENSHOT_WARTEN_MS)
+        _screenshot_planen(window, app)
 
     exit_code = app.exec()
     # Beim sauberen Beenden den eigenen Temp-Ordner mitnehmen.

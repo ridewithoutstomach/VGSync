@@ -319,6 +319,46 @@ def architektur():
     return platform.machine()
 
 
+def signieren(buendel):
+    """Das Buendel signieren - ZUM SCHLUSS, wenn nichts mehr dazukommt.
+
+    PyInstaller signiert das Buendel selbst (ad hoc; auf Apple Silicon MUSS es
+    das, sonst startet gar nichts). Danach legen ressourcen_einlegen() und
+    rechtstexte_einlegen() aber noch Dateien hinein, und die stehen dann nicht
+    im Siegel. Auf einem fremden Mac sieht das so aus:
+
+        KVRouite.app: a sealed resource is missing or invalid
+        file added: .../Contents/MacOS/ol.css
+        file added: .../Contents/MacOS/map_page.html
+        file added: .../Contents/Resources/qt/NOTICE.txt
+        ...
+
+    So gemeldet am 02.09.2026 von einem Anwender - die Liste war Zeile fuer
+    Zeile unsere eigene Kopierliste.
+
+    Auf dem Bauserver faellt das nicht auf, und zwar aus zwei Gruenden: das
+    Buendel entsteht dort lokal und traegt deshalb kein Quarantaene-Merkmal,
+    ohne das schaut Gatekeeper gar nicht hin; und gestartet wird ueber die
+    Signatur des HAUPTPROGRAMMS, die unveraendert gueltig ist - das Siegel
+    ueber die Beidateien wird nur bei einer ausdruecklichen Pruefung
+    ausgewertet. Der Lauf war also gruen, das Buendel trotzdem kaputt.
+
+    Deshalb wird hier zum Schluss neu signiert und sofort gegengeprueft.
+    Ad hoc ("-"), nicht mit einem Zertifikat: das nimmt Gatekeeper die Meldung
+    ueber das kaputte Siegel. Die Meldung ueber den unbekannten Entwickler
+    bleibt - dafuer braeuchte es ein Apple-Entwicklerzertifikat.
+    """
+    codesign = shutil.which("codesign")
+    if codesign is None:
+        raise SystemExit("[ABBRUCH] codesign nicht gefunden - ohne gueltiges "
+                         "Siegel darf das Buendel nicht ausgeliefert werden.")
+    print("[SIGN] Buendel neu signieren (ad hoc), jetzt liegt alles darin")
+    lauf([codesign, "--force", "--deep", "--sign", "-", buendel])
+    print("[SIGN] Gegenprobe - meldet jede Datei, die nicht im Siegel steht")
+    lauf([codesign, "--verify", "--deep", "--strict", "--verbose=2", buendel])
+    print("[SIGN] Siegel in Ordnung")
+
+
 def zippen(buendel, ziel_ordner, app_version):
     """Das Buendel als ZIP - so wird es abgelegt und weitergegeben.
 
@@ -398,6 +438,10 @@ def build_macos():
                          "Buendel nicht ausgeliefert werden."
                          % ", ".join(fehlende_rechtstexte))
 
+    # Signieren als LETZTER Schritt, der das Buendel anfasst - danach wird nur
+    # noch gepackt. Kommt hier jemals etwas dazu, muss es DAVOR passieren.
+    signieren(buendel)
+
     archiv = zippen(buendel, ziel_ordner, app_version)
     write_sha256(archiv)
 
@@ -405,10 +449,13 @@ def build_macos():
     print("[FERTIG] Buendel:", buendel)
     print("[FERTIG] Archiv :", archiv)
     print("")
-    print("Das Buendel ist NICHT signiert und nicht notarisiert. Auf einem")
-    print("fremden Mac meldet Gatekeeper es als nicht ueberpruefbar; oeffnen")
-    print("geht dort ueber Rechtsklick -> Oeffnen. Fuer eine Auslieferung an")
-    print("Anwender braucht es ein Entwicklerzertifikat von Apple.")
+    print("Das Buendel ist ad hoc signiert - das Siegel ist vollstaendig und")
+    print("passt zum Inhalt. Es ist NICHT notarisiert: auf einem fremden Mac")
+    print("meldet Gatekeeper einen unbekannten Entwickler. Der Anwender oeffnet")
+    print("es einmal ueber Systemeinstellungen -> Datenschutz & Sicherheit ->")
+    print("\"Trotzdem oeffnen\"; der frueher uebliche Rechtsklick -> Oeffnen ist")
+    print("seit macOS 15 (Sequoia) abgeschafft. Fuer den Wegfall auch dieser")
+    print("Meldung braeuchte es ein Entwicklerzertifikat von Apple.")
     return buendel
 
 
