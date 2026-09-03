@@ -107,9 +107,15 @@ git clone https://github.com/ridewithoutstomach/KVRouite.git
 
 ```bash
 cd KVRouite
-python3 -m venv venv                            # with the GES backend:
-# python3 -m venv --system-site-packages venv
+# --system-site-packages is mandatory on Linux: python3-gi and the GStreamer
+# typelibs are system packages, and a plain venv hides them - "import gi"
+# then fails although everything is installed, and the app will not start.
+python3 -m venv --system-site-packages venv
 source venv/bin/activate
+# Python 3.12 removed distutils from its standard library. fitparse still
+# needs it while being installed, and setuptools provides the replacement -
+# so install it before the requirements.
+pip install --upgrade pip setuptools
 pip install -r requirements.txt
 python KVRouite.py
 ```
@@ -127,6 +133,10 @@ Open **Command Prompt**, then:
 cd KVRouite
 python -m venv venv
 venv\Scripts\activate
+# Python 3.12 removed distutils from its standard library. fitparse still
+# needs it while being installed, and setuptools provides the replacement -
+# so install it before the requirements.
+pip install --upgrade pip setuptools
 pip install -r requirements.txt
 python KVRouite.py
 ```
@@ -194,6 +204,10 @@ Open **Terminal**, then:
 cd KVRouite
 python3.12 -m venv venv
 source venv/bin/activate
+# Python 3.12 removed distutils from its standard library. fitparse still
+# needs it while being installed, and setuptools provides the replacement -
+# so install it before the requirements.
+pip install --upgrade pip setuptools
 pip install -r requirements.txt
 python KVRouite.py
 ```
@@ -308,6 +322,7 @@ Building the Windows Executable Manually
 To create your own Windows executable, install the build packages on top of
 the runtime ones:
 
+    pip install --upgrade pip setuptools
     pip install -r requirements.txt
     pip install -r requirements-build.txt
     python build_with_pyinstaller.py
@@ -323,6 +338,7 @@ Building the macOS Bundle Manually
 
 On a Mac, with Python 3.12 and the runtime requirements already installed:
 
+    pip install --upgrade pip setuptools
     pip install -r requirements.txt
     pip install -r requirements-build-macos.txt
     python3 build_macos.py

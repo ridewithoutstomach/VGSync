@@ -127,8 +127,27 @@ git checkout dev_6.0GES
 ```bash
 python3 -m venv --system-site-packages venv
 source venv/bin/activate
+pip install --upgrade pip setuptools
 pip install -r requirements.txt
 ```
+
+**`pip install --upgrade setuptools` gehoert dazu.** Python 3.12 hat
+`distutils` aus der Standardbibliothek entfernt. `fitparse` braucht es beim
+INSTALLIEREN noch (nicht beim Laufen), und den Ersatz bringt `setuptools` mit.
+Debian und die davon abgeleiteten Systeme liefern ausserdem ein eigenes,
+angepasstes `setuptools`, das ausdruecklich das Bauteil von Python benutzen
+will - das es in 3.12 nicht mehr gibt. Durch `--system-site-packages` ist
+genau dieses in der venv sichtbar. Der Fehler sieht so aus:
+
+```
+from distutils.core import setup
+ModuleNotFoundError: No module named 'distutils'
+```
+
+Die eigene, frische Fassung in der venv hat Vorrang und raeumt das aus. Am
+03.09.2026 in einer Wegwerf-venv mit Python 3.12.0 nachgestellt: ohne
+setuptools bricht es ab, mit `SETUPTOOLS_USE_DISTUTILS=stdlib` kommt genau
+die Meldung oben, mit frischem setuptools laeuft es durch.
 
 **`--system-site-packages` ist nicht optional.** `python3-gi` ist ein
 Systempaket und liegt in `/usr/lib/python3/dist-packages`. Ein normales venv
