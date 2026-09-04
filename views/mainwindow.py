@@ -667,21 +667,20 @@ class MainWindow(QMainWindow):
             QSettings("KVRouite", "KVRouite").value(
                 self._KOPFZEILEN_KEY, False, type=bool))
         self.action_slot_kopf.toggled.connect(self._kopfzeilen_umschalten)
-        view_menu.addAction(self.action_slot_kopf)
-        view_menu.addSeparator()
+        # Eingehaengt wird weiter unten im Config-Menue - siehe dort.
 
-        # Hoehenprofil ins Videobild einblenden (unten links).
+        # Hoehenprofil ins Videobild einblenden. Frei verschiebbar, am
+        # Punktraster-Griff; die Stelle wird gemerkt (_OVERLAY_POS_KEY).
         self.action_hoehen_overlay = QAction(
             "Elevation Profile in Video", self, checkable=True)
         self.action_hoehen_overlay.setStatusTip(
-            "Shows the elevation profile in the lower left of the video image.")
+            "Shows the elevation profile as an overlay in the video image. "
+            "Drag it by its handle to wherever you want it.")
         self.action_hoehen_overlay.setChecked(
             QSettings("KVRouite", "KVRouite").value(
                 self._OVERLAY_KEY, False, type=bool))
         self.action_hoehen_overlay.toggled.connect(self._hoehen_overlay_umschalten)
-        view_menu.addAction(self.action_hoehen_overlay)
-
-        view_menu.addSeparator()
+        # Eingehaengt wird weiter unten im Config-Menue - siehe dort.
 
          # 360° Video Toggle (Taste V)
         self.action_toggle_360 = QAction("360° Video", self, checkable=True)
@@ -953,7 +952,7 @@ class MainWindow(QMainWindow):
         self.action_lock_width.setChecked(
             QSettings("KVRouite", "KVRouite").value("ui/freeze_width", False, type=bool))
         self.action_lock_width.toggled.connect(self._on_lock_width_toggled)
-        setup_menu.addAction(self.action_lock_width)
+        # Eingehaengt wird ganz unten im Config-Menue, vor den Resets.
 
         # Vorschaubilder in der Zeitleiste. Standardmaessig aus: sie werden
         # aus den Videodateien geholt, und das kostet bei grossem Material
@@ -968,6 +967,13 @@ class MainWindow(QMainWindow):
                 self._THUMBS_KEY, False, type=bool))
         self.action_timeline_thumbs.toggled.connect(self._thumbs_umschalten)
         setup_menu.addAction(self.action_timeline_thumbs)
+
+        # Stand bis zum 04.09.2026 im View-Menue. Ist aber keine Ansicht,
+        # die man staendig wechselt, sondern eine Einstellung, die man
+        # einmal trifft - wie die Thumbnails darueber. Angelegt wird die
+        # Aktion beim View-Menue; hier haengt sie nur. Die Kopfzeilen
+        # (action_slot_kopf) haengen weiter unten, bei Lock Window Width.
+        setup_menu.addAction(self.action_hoehen_overlay)
 
         # Farbgebung: hell, dunkel oder wie das System es haelt (core/theme.py).
         from core import theme
@@ -988,6 +994,14 @@ class MainWindow(QMainWindow):
                 lambda _geklickt=False, s=schluessel: self._theme_waehlen(s))
             self._theme_gruppe.addAction(eintrag)
             appearance_menu.addAction(eintrag)
+
+        # Der Schluss des Config-Menues: erst die Fensterbreite sperren,
+        # dann ein Trenner, dann die beiden Resets. So stehen die Eingriffe
+        # ins Fenster beieinander, und die Resets sind sichtbar abgesetzt -
+        # man greift nicht versehentlich daneben.
+        setup_menu.addAction(self.action_slot_kopf)
+        setup_menu.addAction(self.action_lock_width)
+        setup_menu.addSeparator()
 
         action_reset_layout = QAction("Reset Window Layout", self)
         action_reset_layout.setStatusTip(

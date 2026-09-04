@@ -69,11 +69,18 @@ class _OverlayGriff(QWidget):
         p.setPen(Qt.NoPen)
         p.setBrush(QColor(0, 0, 0, 150))
         p.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 3, 3)
-        # Zwei Griffleisten, wie man sie von Anfassern kennt
-        p.setPen(QPen(QColor(220, 220, 220), 1))
-        for dy in (-3, 0, 3):
-            p.drawLine(4, self.height() // 2 + dy,
-                       self.width() - 5, self.height() // 2 + dy)
+        # Punktraster, 2 Spalten x 3 Punkte - das Zeichen fuer "hier
+        # anfassen". Bis zum 04.09.2026 waren es drei waagerechte Linien,
+        # und die sehen aus wie ein Menueknopf: jeder klickt darauf und
+        # erwartet ein Menue. Ein Griff, der wie etwas anderes aussieht,
+        # ist schlechter als keiner.
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(220, 220, 220))
+        mitte_x = self.width() // 2
+        mitte_y = self.height() // 2
+        for dx in (-3, 3):
+            for dy in (-4, 0, 4):
+                p.drawEllipse(mitte_x + dx - 1, mitte_y + dy - 1, 3, 3)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -97,6 +104,13 @@ class _OverlayGriff(QWidget):
             event.accept()
         else:
             event.ignore()
+
+    def contextMenuEvent(self, event):
+        # Rechtsklick auf den Griff: nichts. Ohne diese Methode wandert das
+        # Ereignis nach oben bis zum Slot-Rahmen, und der zeigt sein
+        # Modul-Menue (Video / Map / Chart ...) - das hat mit dem Griff
+        # nichts zu tun und sah so aus, als gehoere es zu ihm.
+        event.accept()
 
 
 class VideoEditorWidget(QWidget):

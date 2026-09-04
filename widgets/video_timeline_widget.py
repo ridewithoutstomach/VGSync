@@ -296,6 +296,32 @@ class VideoTimelineWidget(QWidget):
         self.set_marker_position(new_time_s)
         self.markerMoved.emit(new_time_s)
 
+    def _offset_begrenzen(self):
+        """Den sichtbaren Ausschnitt in die Zeitleiste zwingen.
+
+        Sichtbar ist [offset, offset + Fensterbreite] von einer Zeitleiste
+        der Breite Fensterbreite * Zoom. Damit weder links vor 0 noch rechts
+        hinter dem Ende Leere zu sehen ist, muss gelten:
+
+            0 <= offset <= Fensterbreite * Zoom - Fensterbreite
+
+        Bei Zoom 1.0 ist die rechte Grenze 0, der Offset also zwingend 0:
+        ganz herausgezoomt ist IMMER alles zu sehen, egal wo der Marker
+        steht und was vorher gezogen wurde.
+
+        Bis zum 04.09.2026 wurde nur die Untergrenze geprueft, und die auch
+        nicht ueberall. Folge: nach Abspielen und Herauszoomen setzte
+        _center_marker_at_ratio() einen positiven Offset, obwohl die ganze
+        Zeitleiste ins Fenster passte - links fehlte der Anfang, rechts war
+        es schwarz. Beim Ziehen mit der Maus fehlte jede Grenze, damit
+        rutschte der Anfang der Zeitleiste in die Fenstermitte und links
+        davon stand tote Zeit. Und nichts fuehrte je wieder auf 0 zurueck.
+        """
+        w = self.width()
+        hoechstens = max(0.0, w * self._zoom_factor - w)
+        self._horizontal_offset = max(0.0, min(float(self._horizontal_offset),
+                                               hoechstens))
+
     def _keep_marker_visible(self):
         w = self.width()
         if w <= 0 or self.total_duration <= 0:
@@ -305,8 +331,7 @@ class VideoTimelineWidget(QWidget):
         marker_x = ratio * timeline_real_width - self._horizontal_offset
         if marker_x < 0:
             self._horizontal_offset = ratio * timeline_real_width
-            if self._horizontal_offset < 0:
-                self._horizontal_offset = 0
+            self._offset_begrenzen()
             return
         right_threshold = 0.95 * w
         left_position = 0.05 * w
@@ -314,8 +339,7 @@ class VideoTimelineWidget(QWidget):
             if ratio < 0.95:
                 shift = marker_x - left_position
                 self._horizontal_offset += shift
-                if self._horizontal_offset < 0:
-                    self._horizontal_offset = 0
+        self._offset_begrenzen()
 
     def set_total_duration(self, dur_s: float):
         self.total_duration = max(0.0, dur_s)
@@ -598,7 +622,39 @@ class VideoTimelineWidget(QWidget):
         finally:
             painter.restore()
 
+    def _schieben_beginnen(self, x_mouse):
+        """Das Verschieben des sichtbaren Ausschnitts anfangen (Shift + links).
+
+        Bis zum 04.09.2026 lag das auf der rechten Maustaste - und dort lag
+        seit dem Vortag auch das Kontextmenue. Die beiden vertragen sich
+        nicht, und zwar je nach System verschieden: Windows schickt das
+        Kontextmenue beim Loslassen (nach dem Schieben springt das Menue
+        auf), macOS und Linux beim Druecken (das Menue kommt sofort, das
+        Schieben nie). Deshalb jetzt Shift + linke Taste: Shift heisst in
+        dieser Zeitleiste ohnehin "horizontal bewegen" (Shift + Rad), Strg
+        heisst "Zoom" (Strg + Rad), und die rechte Taste heisst nur noch
+        Menue. Jede Taste eine Bedeutung.
+        """
+        self._dragging_timeline = True
+        self._timeline_drag_start_x = x_mouse
+        self._horizontal_offset_start = self._horizontal_offset
+        w = self.width()
+        if w > 0 and self.total_duration > 0:
+            timeline_real_width = w * self._zoom_factor
+            marker_x_current = (self._marker_position_s / self.total_duration) \
+                * timeline_real_width - self._horizontal_offset
+            self._marker_screen_x_at_drag_start = marker_x_current
+        else:
+            self._marker_screen_x_at_drag_start = 0
+
     def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton \
+                and event.modifiers() & Qt.ShiftModifier:
+            # Vor allem anderen: mit Shift wird geschoben, nicht geschnitten
+            # und nicht der Marker gesetzt. Siehe _schieben_beginnen.
+            self._schieben_beginnen(event.pos().x())
+            event.accept()
+            return
         if event.button() == Qt.LeftButton:
             # Zuerst die Schnitte fragen: liegt der Zeiger auf einer Kante
             # oder in einem Block, wird gezogen statt der Marker gesetzt.
@@ -626,19 +682,9 @@ class VideoTimelineWidget(QWidget):
             self._dragging_marker = True
             self._update_marker_by_mouse_x(event.pos().x())
             event.accept()
-        elif event.button() == Qt.RightButton:
-            self._dragging_timeline = True
-            self._timeline_drag_start_x = event.pos().x()
-            self._horizontal_offset_start = self._horizontal_offset
-            w = self.width()
-            if w > 0 and self.total_duration > 0:
-                timeline_real_width = w * self._zoom_factor
-                marker_x_current = (self._marker_position_s / self.total_duration)*timeline_real_width - self._horizontal_offset
-                self._marker_screen_x_at_drag_start = marker_x_current
-            else:
-                self._marker_screen_x_at_drag_start = 0
-            event.accept()
         else:
+            # Rechte Taste: nichts anfassen. Das Kontextmenue kommt ueber
+            # contextMenuEvent, und das soll es ungestoert tun.
             event.ignore()
 
     def mouseMoveEvent(self, event):
@@ -664,6 +710,7 @@ class VideoTimelineWidget(QWidget):
         elif self._dragging_timeline:
             delta_x = event.pos().x() - self._timeline_drag_start_x
             self._horizontal_offset = self._horizontal_offset_start - delta_x
+            self._offset_begrenzen()
             w = self.width()
             if w > 0 and self.total_duration > 0:
                 timeline_real_width = w * self._zoom_factor
@@ -705,7 +752,7 @@ class VideoTimelineWidget(QWidget):
         if event.button() == Qt.LeftButton and self._dragging_marker:
             self._dragging_marker = False
             event.accept()
-        elif event.button() == Qt.RightButton and self._dragging_timeline:
+        elif event.button() == Qt.LeftButton and self._dragging_timeline:
             self._dragging_timeline = False
             event.accept()
         else:
@@ -746,9 +793,10 @@ class VideoTimelineWidget(QWidget):
             return
         if event.modifiers() & Qt.ShiftModifier:
             if delta > 0:
-                self._horizontal_offset = max(0, self._horizontal_offset - self._scroll_speed_px)
+                self._horizontal_offset -= self._scroll_speed_px
             else:
                 self._horizontal_offset += self._scroll_speed_px
+            self._offset_begrenzen()
             self._keep_marker_visible()
             self.update()
             event.accept()
@@ -775,8 +823,7 @@ class VideoTimelineWidget(QWidget):
         marker_x_absolute = (self._marker_position_s / self.total_duration)*timeline_real_width
         desired_x_in_widget = widget_ratio * w
         self._horizontal_offset = marker_x_absolute - desired_x_in_widget
-        if self._horizontal_offset < 0:
-            self._horizontal_offset = 0
+        self._offset_begrenzen()
 
     def paintEvent(self, event):
         from PySide6.QtGui import QPainter, QPen, QBrush, QPolygon
