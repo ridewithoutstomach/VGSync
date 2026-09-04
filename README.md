@@ -214,8 +214,7 @@ everything it needs is inside, GStreamer included.
 **The first start needs one extra step.** The bundle is not signed by Apple,
 and macOS therefore refuses a plain double-click once.
 
-- macOS 14 and older: right-click the app, choose **Open**, confirm.
-- macOS 15 and newer: double-click, let it be refused, then open
+- Double-click, let it be refused, then open
   **System Settings > Privacy & Security** and click **Open Anyway**.
 - Or in Terminal: `xattr -dr com.apple.quarantine /Applications/KVRouite.app`
 
