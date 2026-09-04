@@ -22,7 +22,7 @@ import os
 import sys
 import json
 from PySide6.QtWidgets import QWidget, QVBoxLayout
-from PySide6.QtCore import QUrl, Signal, Slot, Qt
+from PySide6.QtCore import QUrl, Signal, Slot, Qt, QTimer
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEngineSettings
 from PySide6.QtWebChannel import QWebChannel
@@ -55,6 +55,11 @@ class MapWidget(QWidget):
         self._markB_idx  = None
         self._markE_idx  = None
         self._curr_mapbox_profile = "cycling"
+        # Was zuletzt in die Seite geschoben wurde - damit es nach einem
+        # erzwungenen Neuladen zurueckgeholt werden kann. Siehe
+        # neu_laden_und_wiederherstellen().
+        self._letzte_route = None
+        self._wiederherstellen = False
 
         # Layout + QWebEngineView
         layout = QVBoxLayout(self)
@@ -115,6 +120,17 @@ class MapWidget(QWidget):
         if not ok:
             print("[WARN] Karte konnte nicht geladen werden.")
             return
+
+        # Nach einem erzwungenen Neuladen (Zeilenwechsel des Fensters) die
+        # Route und die Marker zurueckholen. Ueber den Zeitgeber, damit es
+        # NACH den uebrigen loadFinished-Empfaengern laeuft - das
+        # MainWindow setzt dort erst Punktgroessen und Schluessel.
+        # Steht bewusst VOR dem print darunter: das enthaelt ein Zeichen,
+        # das eine cp1252-Konsole nicht kennt, und wirft dann - alles,
+        # was danach kaeme, liefe nicht mehr.
+        if self._wiederherstellen:
+            self._wiederherstellen = False
+            QTimer.singleShot(0, self._route_wiederherstellen)
 
         print("[DEBUG] Karte ist geladen ⇒ wende jetzt ggf. QSettings-Einstellungen an.")
         # Beispiel: Du könntest hier nur noch "apply map-sizes" o. Ä. aufrufen.
@@ -194,6 +210,7 @@ class MapWidget(QWidget):
             self._yellow_idx = None
             self._markB_idx = None
             self._markE_idx = None
+            self._letzte_route = None
             try:
                 # Seite neu laden = Startzustand, sehr schnell
                 self.view.load(self._html_url)
@@ -205,9 +222,45 @@ class MapWidget(QWidget):
             1 for feat in features
             if feat.get("geometry", {}).get("type") == "Point"
         )
+        self._letzte_route = route_geojson
         do_fit_str = "true" if do_fit else "false"
         js = f"loadRoute({json.dumps(route_geojson)}, {do_fit_str});"
         self.view.page().runJavaScript(js)
+
+    def neu_laden_und_wiederherstellen(self):
+        """Seite neu laden und danach Route und Marker zurueckholen.
+
+        Gebraucht, wenn die Karte in die andere Fensterzeile wandert: sie
+        bekommt dann einen neuen Vater und ein neu erzeugtes natives
+        Fenster, und ohne Neuladen bleibt die Seite weiss. Ein Neuladen
+        laedt aber map_page.html von vorn - alles, was per JavaScript in
+        die Seite kam, ist damit weg. Bis zum 04.09.2026 wurde nur neu
+        geladen, und die Karte zeigte danach Europa ohne Strecke.
+
+        Die Daten selbst sind nie weg gewesen - sie liegen im MainWindow.
+        Die Karte hatte nur vergessen, was sie zeigen soll.
+        """
+        self._wiederherstellen = True
+        self.view.reload()
+
+    def _route_wiederherstellen(self):
+        """Nach dem Neuladen: Route, B/E und den aktuellen Punkt zurueck."""
+        route = self._letzte_route
+        if not route:
+            return
+        # Indizes VOR loadRoute sichern - loadRoute laesst sie zwar stehen,
+        # aber show_blue() prueft gegen _num_points, das erst dort entsteht.
+        blau, markb, marke = self._blue_idx, self._markB_idx, self._markE_idx
+        # do_fit=True: die frisch geladene Seite steht auf ihrem Startbild
+        # (Europa), die Strecke soll gleich das Bild fuellen.
+        self.loadRoute(route, do_fit=True)
+        if markb is not None:
+            self.set_markB_point(markb)
+        if marke is not None:
+            self.set_markE_point(marke)
+        if blau is not None:
+            self._blue_idx = None          # sonst haelt show_blue ihn fuer schon gesetzt
+            self.show_blue(blau, do_center=False)
 
     # ----------------------------------------------------------
     # Markierungen B/E

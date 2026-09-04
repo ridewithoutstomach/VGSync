@@ -1341,6 +1341,11 @@ class MainWindow(QMainWindow):
         # Vier Module auf drei waehlbare Fenster - eines ist immer verdeckt.
         # Zum Start ist das der Chart-Flow.
         self._auswahllisten_auffrischen()
+        # Gemerkte Belegung darueberlegen - VOR dem Anzeigen, solange es
+        # noch kein natives Fenster gibt, das ein Umhaengen kosten koennte.
+        # Die Splittergroessen kommen spaeter in showEvent; sie gelten fuer
+        # Positionen, nicht fuer Module, und passen deshalb auf jede Belegung.
+        self._modulbelegung_wiederherstellen()
         self._kopfzeilen_anwenden(self.action_slot_kopf.isChecked())
         # Gemerkten Zustand der Video-Einblendung herstellen.
         self.video_editor.overlayPositionGeaendert.connect(
@@ -2903,6 +2908,11 @@ class MainWindow(QMainWindow):
     _SPLITTER_KEY = "ui/splitter_state_grid"          # senkrecht: oben | Timeline | unten
     _TOP_SPLITTER_KEY = "ui/top_splitter_state_grid"       # Video | Karte
     _BOTTOM_SPLITTER_KEY = "ui/bottom_splitter_state_grid" # Chart | GPX-Tabelle
+    # Welches Modul in welchem Fenster liegt, z.B. "ol:map,or:video,ul:chart,ur:gpx".
+    # Bis zum 04.09.2026 wurden nur Groessen gemerkt - die Belegung fiel bei
+    # jedem Start auf den Standard zurueck.
+    _MODULE_LAYOUT_KEY = "ui/module_layout_grid"
+    _STANDARD_BELEGUNG = {"ol": "map", "or": "video", "ul": "chart", "ur": "gpx"}
 
     # Hoehe der Timeline-Zeile. Die Timeline hat die Zeile seit 6.02 fuer sich
     # allein - die Bedienleiste sitzt beim Player, der Mini-Chart ist weg.
@@ -3028,13 +3038,74 @@ class MainWindow(QMainWindow):
         # der Kompositor haengt dann noch am alten und die Seite bleibt weiss.
         # Ein Neuladen baut sie im neuen Fenster sauber auf. Innerhalb einer
         # Zeile passiert das nicht, dort ist es nur ein Positionswechsel.
+        #
+        # Bis zum 04.09.2026 stand hier ein nacktes view.reload() - und
+        # danach zeigte die Karte Europa ohne Strecke, weil das Neuladen
+        # alles vergisst, was per JavaScript in der Seite war. Die Karte
+        # holt sich Route und Marker jetzt selbst zurueck.
         betroffen = [(modul_id, zeile_quelle, zeile_ziel)]
         if quelle is not None and alt_id in self._module:
             betroffen.append((alt_id, zeile_ziel, zeile_quelle))
         for mid, von, nach in betroffen:
             if mid == "map" and von is not None and von != nach:
-                self.map_widget.view.reload()
+                self.map_widget.neu_laden_und_wiederherstellen()
                 break
+
+    def _modulbelegung_lesen(self):
+        """{slot_id: modul_id} fuer die vier Fenster, oder None bei Luecken."""
+        belegung = {}
+        for sid in ("ol", "or", "ul", "ur"):
+            slot = self._slots.get(sid)
+            if slot is None or not slot.modul_id():
+                return None
+            belegung[sid] = slot.modul_id()
+        return belegung
+
+    def _modulbelegung_wiederherstellen(self):
+        """Die beim letzten Beenden gemerkte Belegung anwenden - wenn es sie gibt."""
+        roh = QSettings("KVRouite", "KVRouite").value(self._MODULE_LAYOUT_KEY, "", type=str)
+        if not roh:
+            return
+        belegung = {}
+        for eintrag in roh.split(","):
+            if ":" not in eintrag:
+                return
+            sid, mid = eintrag.split(":", 1)
+            belegung[sid.strip()] = mid.strip()
+        self._modulbelegung_anwenden(belegung)
+
+    def _modulbelegung_anwenden(self, belegung):
+        """Module so verteilen, wie belegung es sagt. True, wenn angewendet.
+
+        Alles Unbrauchbare wird abgewiesen statt halb angewendet: fehlende
+        Fenster, unbekannte Module (aus einer aelteren oder neueren Fassung),
+        ein Modul doppelt, Video ausserhalb der oberen Zeile. Dann bleibt
+        die Startbelegung - ein alter Eintrag darf keinen Start verhindern.
+
+        Reihenfolge: zuerst die Video-Seite ueber _video_seite_wechseln (das
+        Video darf nur dort umziehen), dann die drei uebrigen Fenster ueber
+        _modul_wechseln - das kennt Tausch und Reserve schon, das vierte
+        Modul landet von selbst in der Reserve.
+        """
+        fenster = ("ol", "or", "ul", "ur")
+        if set(belegung) != set(fenster):
+            return False
+        bekannt = set(self._module) | {"video"}
+        werte = list(belegung.values())
+        if any(m not in bekannt for m in werte) or len(set(werte)) != 4:
+            return False
+        video_slot = None
+        for sid, mid in belegung.items():
+            if mid == "video":
+                video_slot = sid
+        if video_slot not in ("ol", "or"):
+            return False
+        if self._slots[video_slot].modul_id() != "video":
+            self._video_seite_wechseln()
+        for sid in fenster:
+            if sid != video_slot:
+                self._modul_wechseln(sid, belegung[sid])
+        return True
 
     def _video_seite_wechseln(self):
         """Die beiden oberen Fenster tauschen die Seite.
@@ -3208,6 +3279,10 @@ class MainWindow(QMainWindow):
             sp = getattr(self, attr, None)
             if sp is not None:
                 s.setValue(key, sp.saveState())
+        belegung = self._modulbelegung_lesen()
+        if belegung:
+            s.setValue(self._MODULE_LAYOUT_KEY,
+                       ",".join("%s:%s" % (sid, mid) for sid, mid in belegung.items()))
 
     def _on_reset_window_layout(self):
         s = QSettings("KVRouite", "KVRouite")
@@ -3215,6 +3290,10 @@ class MainWindow(QMainWindow):
         s.remove(self._SPLITTER_KEY)
         s.remove(self._TOP_SPLITTER_KEY)
         s.remove(self._BOTTOM_SPLITTER_KEY)
+        s.remove(self._MODULE_LAYOUT_KEY)
+        # Auch die Belegung zurueck - sonst hiesse Reset nur "Groessen
+        # zurueck, Fenster bleiben vertauscht".
+        self._modulbelegung_anwenden(self._STANDARD_BELEGUNG)
 
         if self.isMaximized() or self.isFullScreen():
             self.showNormal()

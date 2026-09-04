@@ -200,11 +200,23 @@ actually ended up in it.
 
 ### 🍎 macOS
 
-macOS support is **new**. Either take the ready-made bundle from the
-[Releases page](https://github.com/ridewithoutstomach/KVRouite/releases), or
-install Python and run from source as described below.
+macOS support is **new**, and there are two ways in:
 
-#### The ready-made bundle
+- **Recommended: install Python and run from source** (see *Requirements*
+  and *Setup and Run* below). This is the path that gets tested on
+  GitHub's macOS machines - Apple Silicon and Intel, macOS 15 and 26 -
+  and it has nothing in between you and the program: no packaging, no
+  code signing, no Gatekeeper.
+- **Experimental: the ready-made bundle** from the
+  [Releases page](https://github.com/ridewithoutstomach/KVRouite/releases).
+  It is convenient, but it adds a packaging layer that is hard to test
+  without a Mac of my own, and I do not have one. If the bundle does not
+  start for you, please try the source path before giving up - and tell me
+  (see *Feedback wanted* below).
+
+Both ways need **macOS 15 or newer**; the reason is in *Requirements*.
+
+#### The ready-made bundle (experimental)
 
 Two assets, one per architecture: `_macOS_arm64.zip` for Apple Silicon,
 `_macOS_x86_64.zip` for Intel. Apple menu > *About This Mac* tells you which one
