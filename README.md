@@ -12,7 +12,7 @@ KVRouite is a Python-based desktop application designed to synchronize GPX data 
 ![KVRouite Main Window](./screenshots/mainwindow.png)
 
 - Version: see Releases
-- Platforms: Windows 64-bit (official support), Linux (tested on Kubuntu 24.04.2), macOS 13+ on Apple Silicon and Intel (new - ready-made application bundles for both architectures, see the macOS section)
+- Platforms: Windows 64-bit (official support), Linux (tested on Kubuntu 24.04.2), macOS 15+ on Apple Silicon and Intel (new - ready-made application bundles for both architectures, see the macOS section)
 - License: GNU General Public License v3.0 or later (GPL-3.0-or-later)
 - KVRouite helps action cam users and outdoor enthusiasts to synchronize their recorded videos with GPS data for perfect route visualization and editing.
 -------------------------------------------------------------------------------
@@ -227,8 +227,14 @@ for all platforms at the top of this chapter:
 
 #### Requirements
 
-- **macOS 13 (Ventura) or newer.** This is a hard limit: PySide6 6.11 is only
-  published for macOS 13 and above, so `pip install` fails on macOS 12 or older.
+- **macOS 15 (Sequoia) or newer.** This is a hard limit, and not an obvious
+  one. The PySide6 6.11 wheels are *labelled* `macosx_13_0`, but the libraries
+  inside them are built for macOS 15 - among them `QtGui`, `QtWidgets` and
+  `libshiboken6`. On macOS 13 or 14 the `pip install` therefore succeeds and
+  the application still refuses to start, because macOS will not load those
+  libraries. The ready-made bundles contain the same libraries and have the
+  same floor. Measured on 2026-09-04 in the shipped 6.03 bundles: 18 files
+  declare a minimum of macOS 15.0, on both architectures.
 - **Python 3.12 (64-bit)** from [python.org](https://www.python.org/downloads/macos/)
   - take the *macOS 64-bit universal2 installer*. Neither Homebrew nor pyenv is
   needed.

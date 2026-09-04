@@ -3,14 +3,23 @@
 # Laeuft auf GitHub-Rechnern, nicht bei dir. Fuer oeffentliche Repositories
 # sind die macOS-Runner kostenlos.
 #
-# Ausloeser: bei jedem Push, und von Hand ueber den Reiter
-# "Actions" -> "macOS" -> "Run workflow".
+# Ausloeser: NUR von Hand, ueber Actions -> "1 - Quelltest" ->
+# Run workflow.
+#
+# Bis zum 04.09.2026 lief dieser Workflow bei jedem einzelnen Push, und
+# zwar auf vier Rechnern gleichzeitig. Das kostete fremde Rechenzeit fuer
+# Aenderungen, die mit macOS nichts zu tun hatten, und es lief nebenher,
+# waehrend eigentlich ein Bau-Ergebnis geprueft werden sollte. Jetzt gibt
+# es drei Knoepfe, und man drueckt den, den man braucht:
+#
+#   1 - Quelltest                  (diese Datei)
+#   2 - Bauen                      (build-macos.yml)
+#   3 - Fertiges Programm testen   (macos-binary-testen.yml)
 
-name: macOS
+name: 1 - Quelltest
 
 on:
-  push:                   # laeuft auf jedem Branch, auf den du pushst
-  workflow_dispatch:      # Knopf zum manuellen Starten
+  workflow_dispatch:      # nur auf Knopfdruck
 
 jobs:
   test:

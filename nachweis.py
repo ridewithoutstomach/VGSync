@@ -59,10 +59,35 @@ ZEITPUNKTE = (2.0, 4.0, 6.0)
 LADEZEIT = 12.0
 
 #: Groesse des Fensters fuer die Aufnahme - siehe bilder_machen().
-FENSTERGROESSE = (1920, 1200)
+def _fenstergroesse():
+    """Fenstergroesse fuer die Aufnahme, ueber die Umgebung einstellbar.
+
+    KVROUITE_PROOF_SIZE="1200x800" setzt sie. Gebraucht wird das, um denselben
+    Nachweis zweimal zu fahren - einmal klein, einmal gross: unter
+    QT_QPA_PLATFORM=offscreen meldet Qt einen virtuellen Bildschirm von
+    800x800, und was darueber hinausgeht, bekommt von Chromium keine
+    Zeichenflaeche mehr. Alles andere im Fenster malt Qt selbst und ist davon
+    nicht betroffen - die Karte ist das einzige, was fehlt.
+    """
+    wert = os.environ.get("KVROUITE_PROOF_SIZE", "").lower().strip()
+    if "x" in wert:
+        try:
+            b, h = wert.split("x", 1)
+            return (max(640, int(b)), max(480, int(h)))
+        except ValueError:
+            pass
+    return (1920, 1200)
+
+
+FENSTERGROESSE = _fenstergroesse()
 
 #: So heissen die Bilder. Die Nummer wird angehaengt.
 DATEINAME = "KVRouite_screenshot"
+#: Hier landet die Antwort der Kartenseite als eine einzige Zeile. Im
+#: Bauprotokoll steht sie sonst zwischen tausenden anderen und ist nicht zu
+#: finden; der Bauplan liest diese Datei und stellt sie oben in die
+#: Zusammenfassung.
+KARTENDATEI = "KVRouite_proof_map.txt"
 
 
 def _material(ordner):
@@ -129,6 +154,81 @@ def _dialoge_beantworten(app, log):
     return zeitgeber
 
 
+#: Fragt die Kartenseite, ob OpenLayers wirklich eine Karte gebaut hat.
+#: Ein Bild kann das nicht belegen: unter QT_QPA_PLATFORM=offscreen liefert
+#: Chromium keine Zeichenflaeche, die Aufnahme zeigt dort ein leeres Feld -
+#: gemessen unter Windows bei jeder Fenstergroesse. Das Kartenobjekt entsteht
+#: trotzdem, und danach laesst sich fragen.
+KARTENFRAGE = """
+(function () {
+  try {
+    if (typeof map === 'undefined' || !map) { return 'kein map-Objekt'; }
+    var ebenen = map.getLayers().getLength();
+    var groesse = map.getSize();
+    return 'ok layers=' + ebenen + ' size=' +
+           (groesse ? groesse[0] + 'x' + groesse[1] : 'null');
+  } catch (e) { return 'Fehler: ' + e; }
+})()
+"""
+
+
+def _karte_fragen(fenster, log, ablage):
+    """Die Kartenseite nach ihrem Zustand fragen. Antwort landet in ablage."""
+    try:
+        karte = getattr(fenster, "map_widget", None)
+        ansicht = getattr(karte, "view", None) if karte is not None else None
+        if ansicht is None:
+            ablage["antwort"] = "kein Kartenfenster"
+            return
+
+        def zurueck(wert):
+            ablage["antwort"] = str(wert)
+            log("[PROOF] map page says: %s" % wert)
+            try:
+                with open(os.path.abspath(KARTENDATEI), "w",
+                          encoding="utf-8") as datei:
+                    datei.write(str(wert) + "\n")
+            except Exception as exc:
+                log("[PROOF] %s not written: %s" % (KARTENDATEI, exc))
+
+        ansicht.page().runJavaScript(KARTENFRAGE, zurueck)
+    except Exception as exc:
+        ablage["antwort"] = "Fehler: %s" % exc
+        log("[PROOF] map could not be asked: %s" % exc)
+
+
+def _lage_melden(app, fenster, log):
+    """Was das Fenster wirklich vorfindet - Bildschirm, Groesse, Kartenfeld.
+
+    Ohne diese Zahlen ist ein Bild mit fehlender Karte nicht zu deuten. Alles
+    im Fenster malt Qt selbst: Video (GStreamer liefert die Bilder ueber
+    appsink), Chart, Tabelle, Zeitleiste. Die Karte ist das einzige, was NICHT
+    Qt malt - Chromium rendert in einem eigenen Prozess. Deshalb kann genau
+    sie fehlen, waehrend alles andere steht, und deshalb muss man wissen,
+    welche Flaeche sie ueberhaupt bekommen hat.
+    """
+    try:
+        schirm = app.primaryScreen()
+        g = schirm.geometry() if schirm else None
+        log("[PROOF] platform=%s  screen=%s"
+            % (os.environ.get("QT_QPA_PLATFORM", "(default)"),
+               ("%dx%d" % (g.width(), g.height())) if g else "keiner"))
+        log("[PROOF] window=%dx%d (angefordert %dx%d)"
+            % (fenster.width(), fenster.height(),
+               FENSTERGROESSE[0], FENSTERGROESSE[1]))
+        karte = getattr(fenster, "map_widget", None)
+        if karte is None:
+            log("[PROOF] map widget: nicht vorhanden")
+        else:
+            ansicht = getattr(karte, "view", None)
+            log("[PROOF] map widget=%dx%d  webview=%s"
+                % (karte.width(), karte.height(),
+                   ("%dx%d" % (ansicht.width(), ansicht.height()))
+                   if ansicht is not None else "keine"))
+    except Exception as exc:
+        log("[PROOF] Lage konnte nicht ermittelt werden: %s" % exc)
+
+
 def _sofort_beenden(code, log):
     """Den Prozess beenden, ohne Qt und GStreamer abraeumen zu lassen.
 
@@ -177,10 +277,12 @@ def bilder_machen(fenster, app, log):
     # Anwendung kaputt, dabei war nur das Fenster zu klein. Mit dieser Groesse
     # zeigt die Aufnahme dasselbe Bild wie auf einem normalen Rechner.
     fenster.resize(*FENSTERGROESSE)
+    _lage_melden(app, fenster, log)
     # Muss VOR dem Laden laufen: die erste Frage kommt sofort.
     zeitgeber = _dialoge_beantworten(app, log)
 
     gemacht = []
+    karte = {"antwort": None}
 
     def schuss(nummer):
         ziel = os.path.abspath("%s_%d.png" % (DATEINAME, nummer))
@@ -198,6 +300,19 @@ def bilder_machen(fenster, app, log):
 
     def fertig():
         zeitgeber.stop()
+        antwort = karte.get("antwort")
+        if antwort is None:
+            antwort = "keine Antwort der Kartenseite"
+            log("[PROOF] the map page did not answer in time.")
+            try:
+                with open(os.path.abspath(KARTENDATEI), "w",
+                          encoding="utf-8") as datei:
+                    datei.write(antwort + "\n")
+            except Exception:
+                pass
+        if not (antwort or "").startswith("ok"):
+            log("[PROOF] MAP FAILED: %s" % antwort)
+            _sofort_beenden(1, log)
         if len(gemacht) == len(ZEITPUNKTE):
             log("[PROOF] %d pictures taken - compare them: if the ball in the "
                 "video and the playhead have moved, playback really ran."
@@ -214,6 +329,10 @@ def bilder_machen(fenster, app, log):
             log("[PROOF] playback started")
         except Exception as exc:
             log("[PROOF] playback could not be started: %s" % exc)
+        # Die Karte fragen, sobald das erste Bild faellt - bis dahin hatte die
+        # Seite Zeit, sich aufzubauen.
+        QTimer.singleShot(int(ZEITPUNKTE[0] * 1000),
+                          lambda: _karte_fragen(fenster, log, karte))
         for nummer, sekunde in enumerate(ZEITPUNKTE, 1):
             QTimer.singleShot(int(sekunde * 1000),
                               lambda n=nummer: schuss(n))

@@ -1,34 +1,29 @@
 # Baut das macOS-Anwendungsbuendel und legt es als Artefakt ab.
 #
-# Laeuft NUR AUF KNOPFDRUCK, nicht bei jedem Push. Der Grund: ein Build zieht
-# die gesamte GStreamer-Laufzeit mit und dauert entsprechend lange. Bei jedem
-# Push mitzulaufen waere Verschwendung fremder Rechenzeit, und gebraucht wird
-# ein Buendel nur dann, wenn wirklich eines gebraucht wird.
+# Laeuft NUR AUF KNOPFDRUCK. Ein Build zieht die gesamte GStreamer-Laufzeit
+# mit und dauert entsprechend lange - gebraucht wird ein Buendel nur dann,
+# wenn wirklich eines gebraucht wird.
 #
-# Der Testlauf (macos.yml) bleibt davon unberuehrt - der ist kurz und darf bei
-# jedem Push laufen.
+# Starten: Reiter "Actions" -> "2 - Bauen" -> Run workflow.
 #
-# Starten geht auf zwei Wegen:
+# ACHTUNG: Diesen Knopf zeigt GitHub nur, wenn diese Datei im STANDARDBRANCH
+# liegt (main). Solange sie nur auf einem Arbeitszweig steht, gibt es ihn
+# nicht - das ist eine Regel von GitHub, kein Fehler.
 #
-#   1. Reiter "Actions" -> "macOS Build" -> "Run workflow".
-#      ACHTUNG: Diesen Knopf zeigt GitHub nur, wenn diese Datei im
-#      STANDARDBRANCH liegt (main). Solange sie nur auf einem Arbeitszweig
-#      steht, gibt es ihn nicht - das ist eine Regel von GitHub, kein Fehler.
+# Es gibt drei Knoepfe, und man drueckt den, den man braucht:
 #
-#   2. Bis dahin: der Lauf startet, sobald sich eine der drei Dateien aendert,
-#      die zum Bauen gehoeren (siehe paths unten). Ein Kommentar in
-#      build_macos.py genuegt, um ihn auszuloesen. Bei allen anderen Pushs
-#      passiert nichts - genau das war ja der Sinn.
+#   1 - Quelltest                  (macos.yml)
+#   2 - Bauen                      (diese Datei)
+#   3 - Fertiges Programm testen   (macos-binary-testen.yml)
+#
+# Was dieser Workflow NICHT leisten kann: er baut und prueft auf demselben
+# Rechner. Dort liegen Python, Qt und GStreamer ohnehin herum, also faellt
+# hier nicht auf, wenn im Buendel etwas fehlt. Dafuer gibt es Knopf 3.
 
-name: macOS Build
+name: 2 - Bauen
 
 on:
-  workflow_dispatch:        # der Knopf, sobald die Datei in main liegt
-  push:
-    paths:                  # sonst nur, wenn am Bauen selbst etwas geaendert wird
-      - "build_macos.py"
-      - "requirements-build-macos.txt"
-      - ".github/workflows/build-macos.yml"
+  workflow_dispatch:        # nur auf Knopfdruck
 
 jobs:
   build:
@@ -132,6 +127,30 @@ jobs:
           codesign --verify --deep --strict --verbose=2 "$APP"
           echo "OK: Siegel vollstaendig, Signatur gueltig."
 
+      - name: Zeigt eine Bibliothek aus dem Buendel heraus?
+        run: |
+          # Die Pruefung, die bis zum 04.09.2026 komplett fehlte - und die
+          # einzige, die den haeufigsten PyInstaller-Fehler ueberhaupt finden
+          # kann: eine Bibliothek im Buendel verweist auf einen Pfad, den es
+          # nur auf diesem Bau-Rechner gibt. Ein Startversuch findet das nie,
+          # weil der Bau-Rechner die Datei ja hat.
+          #
+          # Geprueft wird ausserdem die Mindest-macOS-Fassung. Am 04.09.2026
+          # kam dabei heraus, dass das Buendel macOS 15 verlangt, obwohl die
+          # README damals macOS 13 versprach - die PySide6-Wheels tragen die
+          # Aufschrift "macosx_13_0", die Dateien darin sind fuer 15 gebaut.
+          # Nachstellen laesst sich das nicht, denn einen Rechner mit macOS 13
+          # gibt es bei GitHub nicht mehr. Ablesen laesst es sich aber, und
+          # genau das passiert hier. Steigt die Grenze weiter, faellt es hier
+          # auf statt beim Anwender.
+          #
+          # Findet dieser Schritt etwas, endet der Bau hier. Ein Buendel mit
+          # einem Befund wird nicht weiter geprueft und nicht ausgeliefert.
+          set -euo pipefail
+          python tools/pruefe_macos_buendel.py "$APP" \
+                 --erwartete-arch "${{ matrix.arch }}" \
+                 --min-os 15.0
+
       - name: Gegenprobe - schlaegt diese Pruefung ueberhaupt an?
         run: |
           # Ein Test, der nie fehlschlaegt, beweist nichts. Deshalb wird hier
@@ -218,38 +237,84 @@ jobs:
 
       - name: Nachweisbilder vom laufenden Fenster
         if: always()
-        timeout-minutes: 8
+        timeout-minutes: 20
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
-          # Der Startversuch oben zeigt nur, dass der Prozess noch lebt. Hier
-          # laedt die Anwendung eine GPX-Spur und ein Testvideo, drueckt auf
-          # Wiedergabe und macht DREI Bilder im Abstand von zwei Sekunden
-          # (nachweis.py). Wer sie nebeneinanderlegt, sieht an der
-          # Abspielmarke und am Ball im Testvideo, dass wirklich etwas lief -
-          # ein einzelnes Standbild koennte auch ein eingefrorenes Fenster
-          # sein. Aufgenommen wird von Qt selbst (QWidget.grab), deshalb geht
-          # es auch ohne Bildschirm.
+          # Mehrere Durchlaeufe, jeder in seinem eigenen Ordner mit eigenen
+          # Bildern. Ein Durchlauf kostet rund 10 Sekunden.
+          #
+          # Was bisher gemessen wurde (arm64, 03.09.2026):
+          #   - die Kartenseite meldet in JEDEM Durchlauf "ok layers=3", das
+          #     Kartenobjekt lebt also, samt richtiger Groesse
+          #   - trotzdem ist das Feld in der Aufnahme weiss
+          #   - auf Intel ist es NICHT weiss, bei gleichem Code
+          #   - die Fenstergroesse aendert daran nichts (780x760 wie 1920x1200)
+          #
+          # Bleibt: das Bild des Renderers landet auf arm64 nicht in dem
+          # Puffer, den QWidget.grab() liest - Chromium reicht es ueber die
+          # GPU durch. Auf dem Intel-Laeufer gibt es keine, deshalb geht dort
+          # der Weg ueber den Hauptspeicher und das Bild ist da. Die Varianten
+          # zielen deshalb auf genau diesen Punkt.
+          #
+          #   gross      1920x1200, ohne Zusatz - zum Vergleich
+          #   nogpu      --disable-gpu
+          #   nogpucomp  --disable-gpu --disable-gpu-compositing
+          #   inprocgpu  dazu noch --in-process-gpu
           set +e
-          "$APP/Contents/MacOS/KVRouite" --screenshot
-          RC=$?
+          ZEILEN=""
+          for FALL in "gross:1920x1200:" \
+                      "nogpu:1920x1200:--disable-gpu" \
+                      "nogpucomp:1920x1200:--disable-gpu --disable-gpu-compositing" \
+                      "inprocgpu:1920x1200:--disable-gpu --disable-gpu-compositing --in-process-gpu"; do
+            NAME="${FALL%%:*}"
+            REST="${FALL#*:}"
+            GROESSE="${REST%%:*}"
+            FLAGS="${REST#*:}"
+            ORDNER="proof_$NAME"
+            rm -rf "$ORDNER"; mkdir -p "$ORDNER"
+            (
+              cd "$ORDNER"
+              export KVROUITE_PROOF_SIZE="$GROESSE"
+              export QTWEBENGINE_CHROMIUM_FLAGS="$FLAGS"
+              echo "$NAME  $GROESSE  ${FLAGS:-(ohne Zusatz)}" > variante.txt
+              "$APP/Contents/MacOS/KVRouite" --screenshot > lauf.log 2>&1
+              echo $? > rueckgabe.txt
+            )
+            KARTE=$(cat "$ORDNER/KVRouite_proof_map.txt" 2>/dev/null | head -1)
+            BILDER=$(ls -1 "$ORDNER"/KVRouite_screenshot_*.png 2>/dev/null | wc -l | tr -d " ")
+            echo "== $NAME  $GROESSE  ${FLAGS:-(ohne Zusatz)}"
+            echo "   Bilder: $BILDER von 3"
+            echo "   Karte : ${KARTE:-keine Antwort}"
+            ZEILEN="$ZEILEN| $NAME | $GROESSE | \`${FLAGS:-ohne Zusatz}\` | $BILDER von 3 | ${KARTE:-keine Antwort} |\n"
+          done
           set -e
-          echo "Rueckgabewert: $RC"
-          ls -l KVRouite_screenshot_*.png || true
-          # Massstab sind die BILDER, nicht der Rueckgabewert. Am 03.09.2026
-          # ist das Buendel nach dem dritten Bild beim Abraeumen von GStreamer
-          # und QtWebEngine mit einem Segmentation fault ausgestiegen - die
-          # Bilder waren da, der Schritt trotzdem rot. Seitdem beendet sich
-          # der Nachweis-Modus hart (nachweis.py); bleibt trotzdem ein
-          # Absturz, faellt er hier auf, ohne den Nachweis zu entwerten.
-          ANZAHL=$(ls -1 KVRouite_screenshot_*.png 2>/dev/null | wc -l | tr -d " ")
-          echo "Bilder: $ANZAHL von 3"
+
+          # Oben auf der Seite des Laufs, nicht irgendwo im Protokoll.
+          {
+            echo "### Nachweis ${{ matrix.arch }}"
+            echo ""
+            echo "| Fall | Fenster | Chromium-Flags | Bilder | Antwort der Kartenseite |"
+            echo "|---|---|---|---|---|"
+            printf "$ZEILEN"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Der erste Durchlauf ist der Massstab fuer die Bilder. Massstab
+          # sind die BILDER, nicht der Rueckgabewert: am 03.09.2026 ist das
+          # Buendel nach dem dritten Bild beim Abraeumen von GStreamer und
+          # QtWebEngine mit einem Segmentation fault ausgestiegen - die Bilder
+          # waren da, der Schritt trotzdem rot.
+          ANZAHL=$(ls -1 proof_gross/KVRouite_screenshot_*.png 2>/dev/null | wc -l | tr -d " ")
           if [ "$ANZAHL" -ne 3 ]; then
-            echo "ABBRUCH: es sind nicht alle drei Bilder entstanden."
+            echo "ABBRUCH: im Durchlauf gross sind nicht alle drei Bilder entstanden."
             exit 1
           fi
-          if [ "$RC" -ne 0 ]; then
-            echo "HINWEIS: alle Bilder da, aber das Programm endete mit $RC."
+
+          # Die Karte muss in MINDESTENS einer Variante leben. Sonst ist sie
+          # wirklich kaputt und nicht nur nicht zu sehen.
+          if ! grep -qs "^ok" proof_*/KVRouite_proof_map.txt; then
+            echo "ABBRUCH: in keiner Variante hat die Kartenseite geantwortet."
+            exit 1
           fi
 
       - name: Hat das Laufen das Buendel veraendert?
@@ -267,7 +332,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: KVRouite-macOS-${{ matrix.arch }}-screenshot
-          path: KVRouite_screenshot_*.png
+          path: proof_*/
           if-no-files-found: warn
           retention-days: 14
 

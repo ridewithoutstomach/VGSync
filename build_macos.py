@@ -350,16 +350,193 @@ def signieren(buendel):
     Ad hoc ("-"), nicht mit einem Zertifikat: das nimmt Gatekeeper die Meldung
     ueber das kaputte Siegel. Die Meldung ueber den unbekannten Entwickler
     bleibt - dafuer braeuchte es ein Apple-Entwicklerzertifikat.
+
+    --deep allein reicht nicht - es nimmt den Hilfsprogrammen die Rechte
+    ---------------------------------------------------------------------
+    Der erste Anlauf signierte nur mit --deep, und damit war die KARTE weg.
+    --deep signiert jedes eingebettete Programm mit, und dabei verliert es
+    SEINE EIGENEN Entitlements. Betroffen ist QtWebEngineProcess, der Renderer der
+    Web-Ansicht: Qt legt ihm QtWebEngineProcess.entitlements bei, darin steht
+    com.apple.security.cs.allow-jit. Auf Apple Silicon darf ohne dieses Recht
+    kein Prozess ausfuehrbaren Speicher anlegen - und genau das tut Chromium.
+    Der Renderer stirbt beim Start, die Anwendung laeuft weiter, und die Karte
+    bleibt weiss. Das Videobild ist nicht betroffen, GStreamer braucht kein JIT.
+
+    Nachgemessen am ausgelieferten 6.03-Buendel: der Signaturblock von
+    QtWebEngineProcess enthielt nur CodeDirectory (0xfade0c02), Requirements
+    (0xfade0c01) und die Signatur (0xfade0b01) - kein Entitlements-Blob
+    (0xfade7171). Vor 6.03 wurde hier gar nicht nachsigniert, deshalb trug der
+    Helfer noch die Originalsignatur aus dem Qt-Wheel und die Karte war da.
+
+    Der zweite Anlauf liess --deep ganz weg - und scheiterte am aeusseren
+    Siegel, weil dann nichts Eingebettetes signiert war. Der Ablauf hat
+    deshalb DREI Schritte, und die Reihenfolge ist der ganze Trick:
+
+      1. --deep ueber alles. Das muss sein: die GStreamer-Bibliotheken kommen
+         erst NACH PyInstaller ins Buendel und sind unsigniert. Ohne diesen
+         Durchgang bricht Schritt 3 mit "code object is not signed at all" ab -
+         das aeussere Siegel verlangt, dass alles Eingebettete gueltig
+         signiert ist. Genau daran ist der erste Anlauf gescheitert.
+      2. Die Hilfsprogramme DANACH noch einmal, jedes mit seinen eigenen
+         Entitlements. Damit ist repariert, was Schritt 1 ihnen genommen hat.
+      3. Jede SCHALE um das Hilfsprogramm herum, von innen nach aussen, und
+         zuletzt das Buendel selbst - alle ohne --deep. Ein Siegel umfasst
+         das, was darin liegt; wer innen etwas aendert, macht jedes Siegel
+         darueber ungueltig. QtWebEngineProcess.app liegt in
+         QtWebEngineCore.framework, und genau daran ist der dritte Anlauf
+         gescheitert:
+
+             KVRouite.app: nested code is modified or invalid
+             In subcomponent: .../QtWebEngineCore.framework
+
+         Damals wurde nur das aeussere Buendel nachsigniert, das Framework
+         dazwischen nicht. Die Schalen werden deshalb nicht aufgezaehlt,
+         sondern aus dem Pfad des Hilfsprogramms abgeleitet - ein anderer
+         Qt-Aufbau bringt andere Schalen mit, und die waeren sonst wieder
+         vergessen.
+
+         Ohne --deep, sonst faengt Schritt 1 wieder von vorn an und die
+         Rechte waeren erneut weg.
+
+    Zum PRUEFEN ist --deep dagegen richtig, dort steht es weiter unten.
     """
     codesign = shutil.which("codesign")
     if codesign is None:
         raise SystemExit("[ABBRUCH] codesign nicht gefunden - ohne gueltiges "
                          "Siegel darf das Buendel nicht ausgeliefert werden.")
-    print("[SIGN] Buendel neu signieren (ad hoc), jetzt liegt alles darin")
-    lauf([codesign, "--force", "--deep", "--sign", "-", buendel])
+
+    print("[SIGN] 1/3 alles Eingebettete signieren (--deep)")
+    signieren_lauf([codesign, "--force", "--deep", "--sign", "-", buendel])
+
+    helfer = hilfsprogramme_mit_rechten(buendel)
+    if not helfer:
+        raise SystemExit(
+            "[ABBRUCH] Kein Hilfsprogramm mit Entitlements gefunden. "
+            "QtWebEngineProcess muss eines sein - ohne seine Rechte bliebe "
+            "die Karte leer, und das faellt sonst erst im fertigen Buendel auf.")
+    schalen = []
+    for programm, rechte in helfer:
+        print("[SIGN] 2/3 Rechte zurueckgeben: %s"
+              % os.path.relpath(programm, buendel))
+        signieren_lauf([codesign, "--force", "--sign", "-",
+                        "--entitlements", rechte, programm])
+        schalen.extend(umgebende_schalen(programm, buendel))
+
+    # Von innen nach aussen: der laengere Pfad liegt tiefer. Ein Siegel darf
+    # erst gesetzt werden, wenn alles darin fertig ist.
+    for schale in sorted(set(schalen), key=len, reverse=True):
+        print("[SIGN] 3/3 Schale nachversiegeln: %s"
+              % os.path.relpath(schale, buendel))
+        signieren_lauf([codesign, "--force", "--sign", "-", schale])
+
+    print("[SIGN] 3/3 Buendel versiegeln (ohne --deep)")
+    signieren_lauf([codesign, "--force", "--sign", "-", buendel])
+
     print("[SIGN] Gegenprobe - meldet jede Datei, die nicht im Siegel steht")
-    lauf([codesign, "--verify", "--deep", "--strict", "--verbose=2", buendel])
+    signieren_lauf([codesign, "--verify", "--deep", "--strict",
+                    "--verbose=2", buendel])
+
+    for programm, _rechte in helfer:
+        rechte_nachweisen(codesign, programm, buendel)
     print("[SIGN] Siegel in Ordnung")
+
+
+def signieren_lauf(befehl):
+    """Wie lauf(), aber die Meldung von codesign landet im Protokoll.
+
+    codesign schreibt seinen Grund nach stderr, und im Bauprotokoll ging der
+    zwischen den uebrigen Ausgaben unter - der erste fehlgeschlagene Lauf
+    zeigte nur "Process completed with exit code 1". Hier steht er
+    ausdruecklich und mit Rahmen.
+    """
+    print("[CMD]", " ".join(befehl))
+    ergebnis = subprocess.run(befehl, capture_output=True)
+    for strom in (ergebnis.stdout, ergebnis.stderr):
+        text = (strom or b"").decode("utf-8", "replace").strip()
+        if text:
+            for zeile in text.splitlines():
+                print("      %s" % zeile)
+    if ergebnis.returncode != 0:
+        raise SystemExit(
+            "[ABBRUCH] codesign endete mit %d. Der Grund steht in den Zeilen "
+            "darueber." % ergebnis.returncode)
+
+
+def hilfsprogramme_mit_rechten(buendel):
+    """Eingebettete .app-Buendel, die eigene Entitlements mitbringen.
+
+    Gesucht wird nach der Datei und nicht nach einem festen Pfad: der Ort von
+    QtWebEngineProcess haengt an der Qt-Version, und kaeme spaeter ein
+    weiteres Hilfsprogramm mit eigenen Rechten dazu, waere es hier von selbst
+    dabei.
+
+    Rueckgabe: Liste (pfad_zum_app_buendel, pfad_zur_entitlements_datei).
+    """
+    gefunden = []
+    for wurzel, _ordner, dateien in os.walk(buendel):
+        for name in dateien:
+            if not name.endswith(".entitlements"):
+                continue
+            rechte = os.path.join(wurzel, name)
+            # .../Foo.app/Contents/Resources/Foo.entitlements -> .../Foo.app
+            teil = wurzel
+            while teil and not teil.endswith(".app"):
+                naechst = os.path.dirname(teil)
+                if naechst == teil:
+                    teil = None
+                    break
+                teil = naechst
+            if teil and os.path.abspath(teil) != os.path.abspath(buendel):
+                gefunden.append((teil, rechte))
+    return sorted(set(gefunden))
+
+
+def umgebende_schalen(programm, buendel):
+    """Signierte Behaelter zwischen programm und buendel, von innen nach aussen.
+
+    Ein Siegel umfasst alles, was darin liegt. Wer ein Hilfsprogramm tief im
+    Buendel neu signiert, macht damit jedes Siegel darueber ungueltig - beim
+    QtWebEngine-Helfer ist das QtWebEngineCore.framework, und danach das
+    Buendel selbst. Beide muessen danach neu versiegelt werden, sonst meldet
+    die Gegenprobe "nested code is modified or invalid".
+
+    Abgeleitet aus dem Pfad und nicht aufgezaehlt: ein anderer Qt-Aufbau
+    bringt andere Schalen mit.
+    """
+    raus = []
+    ende = os.path.abspath(buendel)
+    pfad = os.path.dirname(os.path.abspath(programm))
+    while pfad and pfad != ende and pfad.startswith(ende):
+        if pfad.endswith(".framework") or pfad.endswith(".app"):
+            raus.append(pfad)
+        naechst = os.path.dirname(pfad)
+        if naechst == pfad:
+            break
+        pfad = naechst
+    return raus
+
+
+def rechte_nachweisen(codesign, programm, buendel):
+    """Belegen, dass die Entitlements die Signierung ueberlebt haben.
+
+    Ohne diesen Nachweis waere der Bauplan wieder da, wo er beim Siegel schon
+    einmal war: gruen, aber nichts geprueft. Die Ausgabe von codesign ist je
+    nach macOS-Version XML oder ein Blob mit Vorspann - deshalb wird schlicht
+    im Rohtext nach dem Recht gesucht, das den Unterschied macht.
+    """
+    ergebnis = subprocess.run(
+        [codesign, "-d", "--entitlements", "-", programm],
+        capture_output=True)
+    roh = (ergebnis.stdout or b"") + (ergebnis.stderr or b"")
+    kurz = os.path.relpath(programm, buendel)
+    if b"allow-jit" in roh:
+        print("[SIGN] Rechte vorhanden (allow-jit): %s" % kurz)
+        return
+    raise SystemExit(
+        "[ABBRUCH] %s hat keine Entitlements mehr. Ohne allow-jit kann der "
+        "Renderer der Web-Ansicht auf Apple Silicon keinen ausfuehrbaren "
+        "Speicher anlegen - die Karte bliebe leer. Ausgabe von codesign:\n%s"
+        % (kurz, roh.decode("utf-8", "replace")))
 
 
 def zippen(buendel, ziel_ordner, app_version):
