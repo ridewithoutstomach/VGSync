@@ -8,6 +8,183 @@ Versions up to and including 5.0 are documented in the GitHub releases only.
 
 ---
 
+## 6.10 - 2026-09-04
+
+Why 6.10 and not 6.04: version numbers are compared part by part - by the
+updater in the program, by GitHub, by pip. Under that rule `6.1` is the same as
+`6.01` and *older* than `6.03`, which is exactly what the update check said
+when a build was labelled 6.1. From here on the minor number always has two
+digits: 6.10, 6.11, ... - never 6.1.
+
+Two strands again. One is the window: the timeline could lose its own left
+edge and never find it again, the right mouse button was doing two jobs at
+once, the map forgot its route when moved to the other row, and the layout you
+arranged was gone after every restart. All four are fixed, and the last one is
+now saved.
+
+The other strand is the macOS bundle. A user reported that 6.03 crashes; there
+was no log, no version, no Mac to test on. What came out of a day of chasing
+it is not the cause - that still needs one answer from the user - but a build
+that proves properties of the file instead of assuming them, a second workflow
+that runs the delivered bundle on a machine that never built it, and one hard
+fact: the bundle needs macOS 15, not 13 as the README promised.
+
+### Fixed
+
+**Timeline: zooming all the way out shows the whole timeline again**
+
+The visible part of the timeline is `[offset, offset + width]` of a strip
+`width * zoom` wide. For nothing dead to show, `0 <= offset <= width*zoom -
+width` must hold; at zoom 1.0 that means `offset == 0`. The lower bound was
+checked in three of the five places that write `_horizontal_offset`, the upper
+bound in none. `_center_marker_at_ratio()`, called after every zoom step, sets
+the offset so the marker sits at 30 % of the window - after playing to 60 %
+that is `0.3 * width` even at zoom 1.0, positive, so it passed: the timeline
+was shifted left by a third although it fitted the window, the beginning was
+cut off and the right side was black. Dragging with the mouse had no bound at
+all, so the strip could be pulled into the middle of the window with dead time
+left of 0. And nothing ever forced the offset back to 0.
+
+One method, `_offset_begrenzen()`, clamps the offset into the allowed range
+and is called after each of the five writes. At zoom 1.0 the range is `[0, 0]`.
+Measured on the widget offscreen: zoom 1.0 after playing to 60 % gives 0
+(was 300), dragging past either end stops at the edge.
+
+**Timeline: the right mouse button only opens the menu now**
+
+Since 6.03 a right-click on a cut or overlay opens a menu - and the right
+button was also the way to drag the timeline. Qt sends the context-menu event
+on *release* on Windows and on *press* elsewhere (documented), so the two
+collided differently per platform: on Windows the menu popped up after a drag,
+on macOS the menu came at once and the drag never started. Dragging is now
+Shift + left button. Shift already meant "move horizontally" in this widget
+(Shift + wheel), Ctrl means zoom (Ctrl + wheel), and each button has one job.
+Measured with real mouse events: Shift+left pans and is clamped, left alone
+moves the marker, right alone moves nothing.
+
+**The elevation-profile handle no longer looks like a menu**
+
+The handle in the video image was 18 px with three horizontal lines - the
+universal sign for a menu. A left-click did nothing visible unless dragged, and
+a right-click fell through the handle to the window frame behind it, which
+showed its module menu (Video / Map / Chart ...). Two unrelated things at the
+same spot. The handle is now a 2x3 dot grid, and it swallows right-clicks
+(`contextMenuEvent` with `accept()`). The window frame's own right-click menu
+is unchanged.
+
+**The map keeps its route when moved to the other row**
+
+`_modul_wechseln()` reloads the map's `QWebEngineView` when the map changes
+row - on purpose, because reparenting gives it a new native window and the
+compositor stays attached to the old one, leaving a white page. But a reload
+starts `map_page.html` from scratch, so everything pushed into the page by
+JavaScript was gone: route, points, current marker, B/E, zoom. Nothing sent it
+again; `_on_map_page_loaded` only re-applies point sizes and API keys. The
+result was Europe with no track. The data was never lost - `_gpx_data` in the
+main window was intact - the map had merely forgotten what to show.
+
+`MapWidget` now remembers the last GeoJSON it was given and restores it after
+a reload it asked for itself (`neu_laden_und_wiederherstellen()`), together
+with B/E and the current point, with `do_fit=True` so the map zooms to the
+track instead of its start view. Done via `QTimer.singleShot(0)` so it runs
+after the other `loadFinished` receivers. The empty reload for *New Project*
+does not set the flag and stays as it was. Measured against the real page:
+after the reload the widget sends `loadRoute(..., true)`, `set_markB_point`,
+`set_markE_point` and the blue highlight.
+
+**macOS: the bundle requires macOS 15, not 13**
+
+Read from the delivered 6.03 archives, 940 Mach-O files each: 18 of them -
+`QtGui.abi3.so`, `QtWidgets.abi3.so`, `libshiboken6.abi3.6.11.dylib` among
+them - declare `LC_BUILD_VERSION minos 15.0.0`. The program itself says 11.0,
+the Qt libraries 13.0; the PySide6 bindings set the floor. The wheels are
+tagged `macosx_13_0_universal2`, the files inside are built against SDK 15.0.
+On macOS 13 or 14 `pip install` succeeds and the application does not start.
+README, release notes and the build check now say 15. This is the one lead
+with evidence for the reported crash; whether it is the cause depends on the
+user's macOS version.
+
+### Added
+
+**The window layout is remembered - which module sits where**
+
+Size and position of the main window and all three splitters were already
+saved. Which module lay in which of the four windows was not; every start put
+map, video, chart and table back in their default places. A new key
+`ui/module_layout_grid` (`ol:video,or:gpx,ul:flow,ur:map`) is written in
+`_save_window_layout()` next to the splitter keys and applied in `__init__`
+right after the default placement, before the window is shown - no native
+window exists yet, so reparenting costs nothing. The splitter sizes follow in
+`showEvent` and apply to positions, not modules, so they fit any placement.
+*Reset Window Layout* removes the key and restores the default placement.
+
+`_modulbelegung_anwenden()` refuses anything unusable rather than applying it
+halfway - a missing window, an unknown module from another version, a module
+twice, the video outside the top row - and the default stays. Measured on a
+stand-in: the video side is switched first, then the three other windows via
+`_modul_wechseln()`, the fourth module lands in the reserve by itself.
+
+**Build: the bundle is checked for what only a user would find**
+
+`tools/pruefe_macos_buendel.py` runs after the build against the finished
+`KVRouite.app`: is it ad-hoc signed and fully sealed, does the architecture
+match the archive name, does any of the ~940 Mach-O files reference a path
+outside the bundle (`/opt/homebrew`, `/usr/local`, `Python.framework`), and
+what is the highest minimum-macOS the bundle declares. Every one of these is
+a property of the file and therefore true on every Mac. A finding aborts the
+build. A check that examines nothing (no Mach-O found, `otool` missing) exits
+2, never 0. The `otool` output parsing was tested against real samples.
+
+**Workflow "3 - Fertiges Programm testen": the delivered bundle on a fresh Mac**
+
+The build machine is useless as a test bench - Python, Qt and GStreamer lie
+around there anyway, so a missing library is never noticed. The new workflow
+takes the archive from a release or a build run, on a runner that did not
+build it, with no `pip`, no `setup-python` and only `tools/` checked out. It
+unpacks with `ditto` like the Finder, sets `com.apple.quarantine`, logs
+`spctl`, removes the attribute again (the step the README asks the user for),
+seeds the first-start dialogs via `defaults` (the ffmpeg hint comes *before*
+the disclaimer, and Qt stores `hints/ffmpeg_missing_shown` as the flat key
+`hints.ffmpeg_missing_shown` - read in `qsettings_mac.cpp`), then runs the
+static check, a double-click via `open`, `--selftest`, and `--screenshot`
+three times **with a real window** - not offscreen, which is where every hang
+of the day turned out to live (Gatekeeper prompt, `NSAlert`, IconServices).
+If a run hangs for 120 s, `sample` records where every thread stands before
+the step goes red. Crash reports are always collected. The run ends at the
+first error.
+
+Result on the delivered 6.03: arm64 on macOS 15 and 26 clean, x86_64 on
+macOS 15 clean, x86_64 on macOS 26 hangs in an XPC call to the IconServices
+daemon on the runner (`actions/runner-images` #13882 lists macOS 26 Intel as
+unstable). Zero external library references on either architecture.
+
+### Changed
+
+**All three macOS workflows run on demand only**
+
+"1 - Quelltest" used to run on every push on four macOS runners; "2 - Bauen"
+whenever a build file changed. Both are `workflow_dispatch` now, numbered so
+they appear in order in the Actions tab. `gh workflow disable` / `enable`
+switches them without editing files.
+
+**Config menu regrouped**
+
+*Window Headers* and *Elevation Profile in Video* moved from *View* to
+*Config* - they are settings made once, like *Thumbnails in Timeline* next to
+them, not views one flips. The bottom of the menu is now *Window Headers*,
+*Lock Window Width*, a separator, *Reset Window Layout*, *Reset Config*. The
+overlay's status tip said "lower left of the video image"; it has been
+draggable since 6.03, and the text says so now.
+
+**README: run from source is the recommended way on macOS**
+
+The bundle is marked experimental. The source path has no packaging, no code
+signing and no Gatekeeper between the user and the program, and it is the one
+exercised by the source-test workflow. Both need macOS 15; the paragraph
+telling macOS 14 users to right-click is gone, because on 14 nothing starts.
+
+---
+
 ## 6.03 - 2026-09-03
 
 Two strands. Taking a cut back arrived in 6.02 and only half worked. It was gone
