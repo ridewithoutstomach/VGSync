@@ -8,6 +8,153 @@ Versions up to and including 5.0 are documented in the GitHub releases only.
 
 ---
 
+## 6.11 - 2026-09-05
+
+Two strands. One is precision in the timeline: a cut or overlay could be
+dragged, but nobody could see by how much, and a few milliseconds are not a
+mouse movement. Dragging now shows the times, and after letting go the new
+position stays as a preview that can be nudged by the millisecond and is
+applied once. Along the way, moving a cut no longer throws away its crossfade
+setting.
+
+The other strand is the size of what ships. The bundles carried all of Qt -
+Quick3D, Charts, Multimedia, the QML tree - because PyInstaller collects the
+QML tree once WebEngine is involved, and the QML plugins pull the rest in. The
+application never loads any of it. Both packers now keep only what the
+imported Qt modules reach through their import tables, and check afterwards
+that nothing left behind points into a hole. GStreamer is deliberately left
+complete: which decoder a user's camera needs cannot be measured here.
+
+### Added
+
+**Timeline: the numbers while dragging a cut or an overlay**
+
+While a cut edge, a cut block or an overlay is dragged, a label floats next to
+the pointer: the moved edge to the millisecond (`Start 1765.123 s`, `End
+1800.456 s`, or both for a block) and the difference to where it was, with
+sign (`+0.005 s`). Three decimals match `round(a, 3)` at release - the cut is
+not stored more precisely. The label sits at pointer height, to the right of
+the pointer or to the left when there is no room; the timeline is 84 px high,
+so a label above the pointer collided with the yellow line at the top.
+
+**Timeline: fine adjustment after dragging, applied once**
+
+Letting go no longer moves the cut. The yellow preview stays, and a bar next
+to the moved edge offers `[<] [>]`, the position, the shift, `[tick] [cross]`.
+Arrows and arrow keys nudge by 1 ms, with Shift 10 ms, with Alt 100 ms; Ctrl
+is left alone because Ctrl+arrow pans the 360 view. Tick or Enter applies the
+move - one `cutMoveRequested`, one undo step, one jump ahead of the edge as
+before; cross or Esc discards it. Clicking an edge without dragging opens the
+bar too, so no mouse tremor is needed to get in; clicking into the middle of
+a block still only sets the marker. The edge can be grabbed again from the bar
+and dragging continues from the current preview. A click elsewhere does
+nothing but show a hint - accidental discarding was the thing to avoid. Shift
++ drag still pans a zoomed timeline while the bar is open.
+
+Why not one move per click: a move is undo-and-recut, rewrites the GPX track,
+takes an undo snapshot and seeks. Thirty clicks for 30 ms would be thirty of
+those and thirty undo steps.
+
+Overlays get exactly the same: label, bar, keys, and `overlayMoveRequested`
+once on apply. Their fade-in and fade-out survive, because they hang on the
+overlay, not on its position.
+
+**Loading a project says which cuts are fixed**
+
+Moving and undoing a cut need the record of what it removed from the GPX
+track (`cut_points`, since 6.03) and a track fingerprint that still matches.
+Until now the user learned that a cut is locked when the edge was already in
+hand. `_alte_schnitte_melden()` runs after loading, only when a GPX track is
+present, and reports one of three states: an old project with no records at
+all, a mix (listing the cuts without record - this also happens in new
+projects when a cut was set with AutoCutVideo+GPX off), or records whose
+track no longer matches. Nothing is changed; the same text goes to the log
+under `[CUT-REC]`.
+
+### Changed
+
+**Crossfade dialog steps in 0.1 s**
+
+The spin box stepped by 0.5 s while 1.3 s could be typed. 0.1 s is the
+resolution everything else uses (`_blende_abrunden`, one decimal in the
+project file), so the arrows and the wheel now step 0.1 s; Page Up/Down step
+ten times that, 1.0 s. The hint under the field says so. The other three
+0.5-s fields (Move Cut, Overlay fade, Overlay start and end) are untouched.
+
+**Build: Qt is cut down to what the application reaches**
+
+Measured on the 6.01 Windows build: 130 Qt DLLs, 322 MB, of which the import
+tables of the eight imported modules (QtCore, QtGui, QtWidgets, QtNetwork,
+QtPrintSupport, QtWebChannel, QtWebEngineCore, QtWebEngineWidgets) reach 25.
+`qt_abspecken()` in `build_with_pyinstaller.py` starts from those modules,
+shiboken, `QtWebEngineProcess.exe`, `opengl32sw.dll` (the software renderer
+behind `use_soft_opengl`) and the plugins of eight folders, follows the
+import tables with pefile - PyInstaller's own dependency - and removes what
+is never reached: 104 DLLs, the `qml/` tree, `qmltooling` and
+`platforminputcontexts`, 157 `.qm` translations and the `.debug` variants of
+the WebEngine resources that only a debug Qt loads. 179.8 MB less. All 53
+WebEngine locales stay; which one Chromium loads depends on the user's
+system. `check_qt_payload()` then walks every remaining DLL, module and
+executable under `PySide6/` and verifies that each import resolves inside
+the bundle or in `System32`; one unresolved import aborts the build.
+
+The result: 903 MB became 718 MB, `PySide6/` 536 MB became 350 MB, the
+portable ZIP 355 MB became 298 MB. Verified by starting the built exe with a
+PATH of only the Windows folders and no Python or Qt variables, then listing
+every module in the process: 462 from the bundle, 188 from Windows, none from
+a venv or an installed Python. Map and WebEngine process ran; the selftest
+passed with x264, NVIDIA H264 and HEVC.
+
+`build_macos.py` does the same for `Contents/Frameworks/PySide6`, reading
+load commands with `otool -L` through the functions of
+`tools/pruefe_macos_buendel.py`. PyInstaller rewrites the references to
+`@rpath/QtCore` with `@rpath` = `Contents/Frameworks` and resolves them via
+symlinks it plants both in `Contents/Frameworks` and in `Contents/Resources`
+- the latter through the directory symlink `Resources/PySide6/Qt/lib`. After
+removing the unreachable frameworks those links point nowhere and sit in the
+seal; `codesign --verify --deep` then says "No such file or directory" and
+names only the bundle. The first GitHub run failed exactly there. Dangling
+symlinks are now swept across the whole bundle before signing, and if the
+seal check still fails, `siegel_diagnose()` lists every dangling link and
+verifies each embedded part on its own. Removed per bundle: the unreachable
+frameworks, the QML tree on both sides, two plugin folders and the Qt
+translations. Workflow 3 passed on macOS 15 for both architectures and on
+macOS 26 for arm64.
+
+GStreamer stays complete on purpose. The largest plugins are WebRTC, AWS and
+AI services that nothing here uses, but which decoder a user's file needs is
+decided at runtime by GES and cannot be measured on this machine.
+`qt/COMPONENTS.txt` records the new footprint.
+
+**GStreamer plugin cache: one file per installation**
+
+The plugin registry in the user's cache folder stores plugins with absolute
+paths, and GStreamer keeps every entry whose file still exists - even in
+another installation. Measured on 2026-09-05: a freshly built exe under
+`dist/` loaded `gstpython.dll` from `C:\Program Files\KVRouite` on its first
+start, because the installed version had filled the same registry file.
+Anyone running the portable ZIP next to the installer mixed two versions.
+`_registry_datei()` in `core/gst_umgebung.py` now appends eight hex digits of
+the program folder's path (`gstreamer-registry-AMD64-fd5e690e.bin`), so each
+installation has its own list. Counter-check: installed version started
+first to refill the old list with Program Files paths, then the new exe -
+it created its own file and loaded 462 modules from its bundle, none from
+Program Files.
+
+### Fixed
+
+**Moving a cut kept the crossfade setting**
+
+The crossfade length and the hard-cut flag hang on the key `(start, end)`. A
+move is undo-and-recut, so the new cut had no entry and fell back to the
+Encoder Setup default - the user who nudged a cut by a few milliseconds then
+had to set 1.0 s again. `_schnitt_verschieben()` reads the setting before
+the move and writes it under the new key afterwards. For the "not enough
+room" question the carried-over length is placed under the new key for the
+duration of the check, so the same calculation also asks whether *it* still
+fits at the new place; nothing is shortened silently. A cut without its own
+setting is not touched and keeps following the default.
+
 ## 6.10 - 2026-09-04
 
 Why 6.10 and not 6.04: version numbers are compared part by part - by the
