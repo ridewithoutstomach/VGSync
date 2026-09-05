@@ -140,7 +140,8 @@ class VideoTimelineWidget(QWidget):
         # stehen und laesst sich per Knopf und Pfeiltaste millisekundenweise
         # ruecken. Erst Haken/Enter fuehrt den Umzug aus - jeder Klick ein
         # ganzer Umzug (Ruecknahme, Neuschnitt, GPX, Undo-Schritt) waere zu
-        # teuer. _fein_knoepfe: Name -> QRectF der gezeichneten Knoepfe.
+        # teuer. Gilt fuer Schnitte und Overlays gleich, _zieh_typ sagt
+        # welches. _fein_knoepfe: Name -> QRectF der gezeichneten Knoepfe.
         self._fein = False
         self._fein_knoepfe = {}
         self._zeiger_form = None
@@ -180,7 +181,7 @@ class VideoTimelineWidget(QWidget):
         self._cut_intervals = []
         self._hard_cut_keys = set()
         self._blenden_laengen = {}
-        self._fein_abbrechen()
+        self._fein_abbrechen("schnitt")
         # Die Auswahl zeigte auf einen Schnitt, den es gleich nicht mehr gibt.
         # Jede Aenderung an den Schnitten laeuft hier durch - Zuruecknehmen,
         # Verschieben, Laden -, damit kann keine veraltete Auswahl stehen
@@ -237,6 +238,7 @@ class VideoTimelineWidget(QWidget):
     def clear_overlay_intervals(self):
         self._overlay_intervals.clear()
         self._overlay_blenden = {}
+        self._fein_abbrechen("overlay")
         # Die Auswahl zeigte auf ein Overlay, das es gleich nicht mehr gibt.
         self._gewaehltes_overlay = None
         self.update()
@@ -378,7 +380,7 @@ class VideoTimelineWidget(QWidget):
     def remove_last_cut_interval(self):
         if self._cut_intervals:
             self._cut_intervals.pop()
-            self._fein_abbrechen()
+            self._fein_abbrechen("schnitt")
             self.update()
 
     # ------------------------------------------------------------------
@@ -635,9 +637,16 @@ class VideoTimelineWidget(QWidget):
         self._zieh_maus = None
         self._zeiger_setzen(None)
 
-    def _fein_abbrechen(self):
-        """Vorschau verwerfen, nichts wird verschoben."""
+    def _fein_abbrechen(self, typ=None):
+        """Vorschau verwerfen, nichts wird verschoben.
+
+        typ "schnitt" oder "overlay" bricht nur eine Feinstellung dieses
+        Typs ab: werden die Overlays neu gezeichnet, soll eine offene
+        Schnitt-Vorschau davon nichts merken - und umgekehrt.
+        """
         if not self._fein:
+            return
+        if typ is not None and typ != self._zieh_typ:
             return
         self._fein_zuruecksetzen()
         self.update()
@@ -648,11 +657,15 @@ class VideoTimelineWidget(QWidget):
             return
         a0, b0 = self._zieh_schnitt
         a, b = self._zieh_neu or (a0, b0)
+        typ = self._zieh_typ
         self._fein_zuruecksetzen()
         self.update()
         if abs(a - a0) < 0.0005 and abs(b - b0) < 0.0005:
             return
-        self.cutMoveRequested.emit(a0, b0, round(a, 3), round(b, 3))
+        if typ == "overlay":
+            self.overlayMoveRequested.emit(a0, b0, round(a, 3), round(b, 3))
+        else:
+            self.cutMoveRequested.emit(a0, b0, round(a, 3), round(b, 3))
 
     def _fein_ruecken(self, schritt_s):
         """Vorschau um schritt_s ruecken, mit denselben Anschlaegen wie beim
@@ -865,13 +878,16 @@ class VideoTimelineWidget(QWidget):
         eine zweite Angabe in ms daneben war doppelt. Beim Block wandern
         beide Kanten um denselben Betrag, dann stehen beide vorn.
 
+        Gilt fuer Schnitte und Overlays gleichermassen - wer einen Schnitt
+        auf die Millisekunde setzen kann, erwartet das beim Overlay auch.
+
         Die Tausendstel passen zu round(a, 3) beim Loslassen - genauer
         wird der Schnitt ohnehin nicht uebernommen.
 
         Einzeilig und auf Zeigerhoehe: die Leiste ist nur gut 80 px hoch,
         ein Schild ueber dem Zeiger laege in der Zeile oben.
         """
-        if self._zieh_maus is None or self._zieh_schnitt is None                 or self._zieh_typ != "schnitt":
+        if self._zieh_maus is None or self._zieh_schnitt is None:
             return
         a0, b0 = self._zieh_schnitt
         a, b = self._zieh_neu
@@ -1065,17 +1081,18 @@ class VideoTimelineWidget(QWidget):
             event.ignore()
 
     def mouseReleaseEvent(self, event):
-        if event.button() == Qt.LeftButton and self._zieh_schnitt is not None                 and not self._fein:
+        if event.button() == Qt.LeftButton and self._zieh_schnitt is not None \
+                and not self._fein:
             a0, b0 = self._zieh_schnitt
             a, b = self._zieh_neu or (a0, b0)
             typ = self._zieh_typ
             unveraendert = abs(a - a0) < 0.001 and abs(b - b0) < 0.001
-            if typ == "schnitt" and not (unveraendert
-                                         and self._zieh_art == "block"):
-                # Nicht gleich umziehen: erst die Feinstellung. Nur der
-                # blosse Klick in den Block bleibt, was er war - Marker
-                # setzen. Ein Klick auf eine Kante oeffnet die Feinstellung
-                # auch ohne Ziehen, so kommt man ohne Maus-Zittern hinein.
+            if not (unveraendert and self._zieh_art == "block"):
+                # Nicht gleich umziehen: erst die Feinstellung - fuer Schnitt
+                # und Overlay gleich. Nur der blosse Klick in den Block
+                # bleibt, was er war: Marker setzen. Ein Klick auf eine Kante
+                # oeffnet die Feinstellung auch ohne Ziehen, so kommt man
+                # ohne Maus-Zittern hinein.
                 self._fein_beginnen()
                 event.accept()
                 return
