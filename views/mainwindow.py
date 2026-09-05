@@ -4445,13 +4445,29 @@ class MainWindow(QMainWindow):
         # bleibt einer.
         mit_achse = self._ist_startschnitt(alt_start, alt_ende)
 
+        # Die Blende zieht mit um. Laenge und harte Kante haengen am
+        # Schluessel (start, ende); der Umzug nimmt den alten Schnitt zurueck
+        # und setzt einen neuen, damit waere die Einstellung weg und der
+        # Schnitt fiele auf die Vorgabe zurueck. Wer einen Schnitt um ein paar
+        # Millisekunden rueckt, meint aber DIESEN Schnitt samt seiner Blende.
+        blende_eigen = self.cut_manager.get_blende(alt_start, alt_ende)
+        blende_hart = self.cut_manager.is_hard_cut(alt_start, alt_ende)
+
         # Nimmt der Schnitt an seiner neuen Stelle einer eingestellten Blende
         # den Platz? Gefragt wird VOR dem Zuruecknehmen - bei Abbruch soll
         # nichts angefangen und wieder rueckgaengig gemacht werden muessen.
-        weiter, blende_kuerzungen = self._blenden_konflikt_fragen(
-            self._cuts_mit((float(neu_start), float(neu_ende)),
-                           ohne=(alt_start, alt_ende)),
-            "Moving this cut")
+        # Die mitziehende Blende steht fuer die Pruefung kurz schon unter dem
+        # neuen Schluessel: so prueft dieselbe Rechnung auch, ob SIE an der
+        # neuen Stelle noch Platz hat, und die zugesagte Kuerzung haengt
+        # gleich am richtigen Schnitt.
+        self._blende_vormerken(neu_start, neu_ende, blende_eigen, blende_hart)
+        try:
+            weiter, blende_kuerzungen = self._blenden_konflikt_fragen(
+                self._cuts_mit((float(neu_start), float(neu_ende)),
+                               ohne=(alt_start, alt_ende)),
+                "Moving this cut")
+        finally:
+            self._blende_vormerken(neu_start, neu_ende, None, False)
         if not weiter:
             return False
 
@@ -4490,6 +4506,15 @@ class MainWindow(QMainWindow):
         finally:
             self._verschiebe_schritt = False
 
+        # Erst die mitgezogene Blende setzen, dann die zugesagte Kuerzung -
+        # die darf sie ueberschreiben. Ohne eigene Einstellung wird nichts
+        # angefasst: der neue Schnitt folgt dann der Vorgabe, wie bisher.
+        if blende_hart or blende_eigen is not None:
+            self._blende_vormerken(neu_start, neu_ende,
+                                   blende_eigen, blende_hart)
+            print("[CUT-MOVE] " + ("harte Kante zieht mit" if blende_hart
+                                   else "Blende %.1f s zieht mit"
+                                   % blende_eigen))
         self._blenden_kuerzen(blende_kuerzungen)
         self._refresh_preview_timeline()
         self.timeline.update()
@@ -4501,6 +4526,20 @@ class MainWindow(QMainWindow):
         # Platz fuer ihre Blende verlieren. Die Pruefung dafuer gibt es schon.
         self._validate_overlays_after_xfade_change()
         return True
+
+    def _blende_vormerken(self, start_s, end_s, eigen, hart):
+        """Blendeneinstellung unter (start_s, end_s) eintragen oder loeschen.
+
+        eigen None und hart False raeumt den Schluessel. Harte Kante und
+        eigene Laenge schliessen sich aus (siehe _blende_dialog): hart steht
+        in _hard_cuts, nicht als Laenge 0 daneben.
+        """
+        if hart:
+            self.cut_manager.set_blende(start_s, end_s, None)
+            self.cut_manager.set_hard_cut(start_s, end_s, True)
+        else:
+            self.cut_manager.set_hard_cut(start_s, end_s, False)
+            self.cut_manager.set_blende(start_s, end_s, eigen)
 
     #: Wie viel Vorlauf nach einem Umzug vor der neuen Kante gezeigt wird.
     _UMZUG_VORLAUF_S = 2.0
