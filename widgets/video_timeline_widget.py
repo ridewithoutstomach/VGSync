@@ -136,6 +136,13 @@ class VideoTimelineWidget(QWidget):
         # Zeigerposition waehrend des Ziehens - daran haengt das Schild mit
         # der Verschiebung (siehe _draw_umzug). None, wenn nicht gezogen wird.
         self._zieh_maus = None
+        # Feinstellung: nach dem Loslassen bleibt die neue Lage als Vorschau
+        # stehen und laesst sich per Knopf und Pfeiltaste millisekundenweise
+        # ruecken. Erst Haken/Enter fuehrt den Umzug aus - jeder Klick ein
+        # ganzer Umzug (Ruecknahme, Neuschnitt, GPX, Undo-Schritt) waere zu
+        # teuer. _fein_knoepfe: Name -> QRectF der gezeichneten Knoepfe.
+        self._fein = False
+        self._fein_knoepfe = {}
         self._zeiger_form = None
 
         # Der ausgewaehlte Schnitt, (start_s, ende_s) oder None. Angeklickt
@@ -173,6 +180,7 @@ class VideoTimelineWidget(QWidget):
         self._cut_intervals = []
         self._hard_cut_keys = set()
         self._blenden_laengen = {}
+        self._fein_abbrechen()
         # Die Auswahl zeigte auf einen Schnitt, den es gleich nicht mehr gibt.
         # Jede Aenderung an den Schnitten laeuft hier durch - Zuruecknehmen,
         # Verschieben, Laden -, damit kann keine veraltete Auswahl stehen
@@ -370,6 +378,7 @@ class VideoTimelineWidget(QWidget):
     def remove_last_cut_interval(self):
         if self._cut_intervals:
             self._cut_intervals.pop()
+            self._fein_abbrechen()
             self.update()
 
     # ------------------------------------------------------------------
@@ -596,6 +605,211 @@ class VideoTimelineWidget(QWidget):
             self._zieh_neu = neu
             self.update()
 
+    # ------------------------------------------------------------------
+    # Feinstellung nach dem Ziehen
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _fein_schritt(modifiers):
+        """Schrittweite je Taste: ohne 1 ms, Shift 10 ms, Alt 100 ms. Strg
+        bleibt frei - Strg+Pfeil dreht im Fenster den 360-Blick."""
+        if modifiers & Qt.AltModifier:
+            return 0.1
+        if modifiers & Qt.ShiftModifier:
+            return 0.01
+        return 0.001
+
+    def _fein_beginnen(self):
+        """Vom Ziehen in die Feinstellung: Zustand bleibt, Maus loslassen."""
+        self._fein = True
+        self._zieh_maus = None
+        self._zeiger_setzen(None)
+        self.setFocus()
+        self.update()
+
+    def _fein_zuruecksetzen(self):
+        self._fein = False
+        self._fein_knoepfe = {}
+        self._zieh_schnitt = None
+        self._zieh_neu = None
+        self._zieh_art = None
+        self._zieh_maus = None
+        self._zeiger_setzen(None)
+
+    def _fein_abbrechen(self):
+        """Vorschau verwerfen, nichts wird verschoben."""
+        if not self._fein:
+            return
+        self._fein_zuruecksetzen()
+        self.update()
+
+    def _fein_anwenden(self):
+        """Den Umzug ausfuehren - EIN Signal, EIN Schritt fuer Strg+Z."""
+        if not self._fein or self._zieh_schnitt is None:
+            return
+        a0, b0 = self._zieh_schnitt
+        a, b = self._zieh_neu or (a0, b0)
+        self._fein_zuruecksetzen()
+        self.update()
+        if abs(a - a0) < 0.0005 and abs(b - b0) < 0.0005:
+            return
+        self.cutMoveRequested.emit(a0, b0, round(a, 3), round(b, 3))
+
+    def _fein_ruecken(self, schritt_s):
+        """Vorschau um schritt_s ruecken, mit denselben Anschlaegen wie beim
+        Ziehen: Nachbarn, Mindestlaenge, feste Kante."""
+        if not self._fein or self._zieh_neu is None:
+            return
+        a0, b0 = self._zieh_schnitt
+        a, b = self._zieh_neu
+        links, rechts = self._zieh_grenzen
+        mind = self._MIN_LAENGE_S
+        if self._zieh_art == "links":
+            a = min(max(a + schritt_s, links), b0 - mind)
+        elif self._zieh_art == "rechts":
+            b = max(min(b + schritt_s, rechts), a0 + mind)
+        else:
+            laenge = b0 - a0
+            a = min(max(a + schritt_s, links), rechts - laenge)
+            b = a + laenge
+        # Auf ganze Millisekunden, sonst sammeln sich Rundungsreste.
+        neu = (round(a, 3), round(b, 3))
+        if neu != self._zieh_neu:
+            self._zieh_neu = neu
+            self.update()
+
+    def _fein_kante_x(self):
+        """Bildschirm-x der Kante, die gerade bewegt wird."""
+        a, b = self._zieh_neu
+        return self._x_bei_zeit(b if self._zieh_art == "rechts" else a)
+
+    def _fein_im_block(self, x_mouse):
+        """Liegt x im Block der Vorschau? Nur beim Block-Umzug von Belang."""
+        if self._zieh_art != "block" or self._zieh_neu is None:
+            return False
+        a, b = self._zieh_neu
+        return self._x_bei_zeit(a) <= x_mouse <= self._x_bei_zeit(b)
+
+    def _fein_knopf_unter(self, pos):
+        for name, r in self._fein_knoepfe.items():
+            if r.contains(QPointF(pos)):
+                return name
+        return None
+
+    def _fein_wieder_ziehen(self, x_mouse, pos):
+        """Aus der Feinstellung heraus die Kante erneut mit der Maus fassen.
+
+        Der Nullpunkt wird so gelegt, dass die Vorschau beim ersten Ruck
+        nicht springt: die bisherige Verschiebung bleibt erhalten.
+        """
+        zeit = self._zeit_bei_x(x_mouse)
+        if zeit is None:
+            return False
+        a0, b0 = self._zieh_schnitt
+        a, b = self._zieh_neu
+        bisher = (b - b0) if self._zieh_art == "rechts" else (a - a0)
+        self._zieh_zeit_start = zeit - bisher
+        self._fein = False
+        self._fein_knoepfe = {}
+        self._zieh_maus = QPoint(pos)
+        self._zeiger_setzen(Qt.SizeAllCursor if self._zieh_art == "block"
+                            else Qt.SizeHorCursor)
+        self.update()
+        return True
+
+    def _draw_fein(self, painter, w, h, farbe):
+        """Die Leiste der Feinstellung neben der bewegten Kante:
+        [<] [>]  Lage  Verschiebung  [Haken] [Kreuz]."""
+        from PySide6.QtGui import QPolygonF
+        a0, b0 = self._zieh_schnitt
+        a, b = self._zieh_neu
+        if self._zieh_art == "links":
+            lage = "Start %.3f s" % a
+            delta = a - a0
+        elif self._zieh_art == "rechts":
+            lage = "End %.3f s" % b
+            delta = b - b0
+        else:
+            lage = "%.3f - %.3f s" % (a, b)
+            delta = a - a0
+        schub = "%+.3f s" % delta
+
+        fm = painter.fontMetrics()
+        hoehe = fm.height() + 10
+        q = hoehe - 6                      # Knopfkante
+        luecke = 6
+        b_lage = fm.horizontalAdvance(lage)
+        b_schub = fm.horizontalAdvance(schub)
+        breite = (3 + 2 * (q + luecke) + luecke + b_lage + 2 * luecke
+                  + b_schub + 3 * luecke + 2 * (q + luecke) + 3 - luecke)
+
+        kante_x = self._fein_kante_x()
+        x = kante_x + 12
+        if x + breite > w:
+            x = max(0.0, kante_x - 12 - breite)
+        y = max(0.0, (h - hoehe) / 2.0)
+
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(0, 0, 0, 225))
+        painter.drawRect(QRectF(x, y, breite, hoehe))
+        painter.setPen(QPen(farbe, 1))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRect(QRectF(x, y, breite, hoehe))
+
+        knoepfe = {}
+        lauf = [x + 3]
+
+        def knopf(name):
+            r = QRectF(lauf[0], y + 3, q, q)
+            knoepfe[name] = r
+            painter.setPen(QPen(farbe, 1))
+            painter.setBrush(QColor(255, 204, 0, 40))
+            painter.drawRect(r)
+            lauf[0] += q + luecke
+            return r
+
+        d = q * 0.28
+
+        def pfeil(r, nach_rechts):
+            m = r.center()
+            if nach_rechts:
+                pts = [QPointF(m.x() - d, m.y() - d), QPointF(m.x() + d, m.y()),
+                       QPointF(m.x() - d, m.y() + d)]
+            else:
+                pts = [QPointF(m.x() + d, m.y() - d), QPointF(m.x() - d, m.y()),
+                       QPointF(m.x() + d, m.y() + d)]
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(farbe)
+            painter.drawPolygon(QPolygonF(pts))
+
+        pfeil(knopf("zurueck"), False)
+        pfeil(knopf("vor"), True)
+
+        lauf[0] += luecke
+        y_text = y + 5 + fm.ascent()
+        painter.setPen(farbe)
+        painter.drawText(QPointF(lauf[0], y_text), lage)
+        lauf[0] += b_lage + 2 * luecke
+        painter.setPen(QColor("#ffffff"))
+        painter.drawText(QPointF(lauf[0], y_text), schub)
+        lauf[0] += b_schub + 3 * luecke
+
+        r = knopf("ok")
+        m = r.center()
+        painter.setPen(QPen(QColor("#7CFC00"), 2))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawPolyline(QPolygonF([QPointF(m.x() - d, m.y()),
+                                        QPointF(m.x() - d * 0.2, m.y() + d),
+                                        QPointF(m.x() + d, m.y() - d)]))
+        r = knopf("abbruch")
+        m = r.center()
+        painter.setPen(QPen(QColor("#ff5555"), 2))
+        painter.drawLine(QPointF(m.x() - d, m.y() - d),
+                         QPointF(m.x() + d, m.y() + d))
+        painter.drawLine(QPointF(m.x() - d, m.y() + d),
+                         QPointF(m.x() + d, m.y() - d))
+
+        self._fein_knoepfe = knoepfe
+
     @staticmethod
     def _zeit_kurz(sekunden):
         s = max(0.0, float(sekunden))
@@ -634,7 +848,10 @@ class VideoTimelineWidget(QWidget):
             painter.drawRect(QRectF(x_text - 4, 2, breite_text, 16))
             painter.setPen(farbe)
             painter.drawText(QPointF(x_text, 14), text)
-            self._draw_umzug_schild(painter, w, h, farbe)
+            if self._fein:
+                self._draw_fein(painter, w, h, farbe)
+            else:
+                self._draw_umzug_schild(painter, w, h, farbe)
         finally:
             painter.restore()
 
@@ -723,6 +940,38 @@ class VideoTimelineWidget(QWidget):
             self._marker_screen_x_at_drag_start = 0
 
     def mousePressEvent(self, event):
+        if self._fein:
+            # Feinstellung offen: Knoepfe, die Kante nochmal fassen - sonst
+            # nichts. Ein Klick daneben soll die Arbeit weder verwerfen noch
+            # ausfuehren; dafuer gibt es Haken, Kreuz, Enter und Esc.
+            if event.button() != Qt.LeftButton:
+                event.ignore()
+                return
+            x = event.pos().x()
+            name = self._fein_knopf_unter(event.pos())
+            if name is None and event.modifiers() & Qt.ShiftModifier:
+                # Shift + linke Taste schiebt die Leiste - auch jetzt, damit
+                # man die Kante ins Bild holen kann. Die Leiste wandert mit.
+                self._schieben_beginnen(x)
+                event.accept()
+                return
+            if name == "zurueck":
+                self._fein_ruecken(-self._fein_schritt(event.modifiers()))
+            elif name == "vor":
+                self._fein_ruecken(+self._fein_schritt(event.modifiers()))
+            elif name == "ok":
+                self._fein_anwenden()
+            elif name == "abbruch":
+                self._fein_abbrechen()
+            elif abs(x - self._fein_kante_x()) <= self._KANTE_PX \
+                    or self._fein_im_block(x):
+                self._fein_wieder_ziehen(x, event.pos())
+            else:
+                self._hinweis(event.globalPos(),
+                              "Finish the move first: tick or Enter applies "
+                              "it, cross or Esc discards it.")
+            event.accept()
+            return
         if event.button() == Qt.LeftButton \
                 and event.modifiers() & Qt.ShiftModifier:
             # Vor allem anderen: mit Shift wird geschoben, nicht geschnitten
@@ -763,7 +1012,19 @@ class VideoTimelineWidget(QWidget):
             event.ignore()
 
     def mouseMoveEvent(self, event):
-        if self._zieh_schnitt is not None:
+        if self._fein and not self._dragging_timeline:
+            x = event.pos().x()
+            if self._fein_knopf_unter(event.pos()) is not None:
+                self._zeiger_setzen(Qt.PointingHandCursor)
+            elif abs(x - self._fein_kante_x()) <= self._KANTE_PX:
+                self._zeiger_setzen(Qt.SizeHorCursor)
+            elif self._fein_im_block(x):
+                self._zeiger_setzen(Qt.SizeAllCursor)
+            else:
+                self._zeiger_setzen(None)
+            event.accept()
+            return
+        if self._zieh_schnitt is not None and not self._fein:
             self._umzug_aktualisieren(event.pos().x(), event.pos())
             event.accept()
             return
@@ -804,11 +1065,20 @@ class VideoTimelineWidget(QWidget):
             event.ignore()
 
     def mouseReleaseEvent(self, event):
-        if event.button() == Qt.LeftButton and self._zieh_schnitt is not None:
+        if event.button() == Qt.LeftButton and self._zieh_schnitt is not None                 and not self._fein:
             a0, b0 = self._zieh_schnitt
             a, b = self._zieh_neu or (a0, b0)
             typ = self._zieh_typ
             unveraendert = abs(a - a0) < 0.001 and abs(b - b0) < 0.001
+            if typ == "schnitt" and not (unveraendert
+                                         and self._zieh_art == "block"):
+                # Nicht gleich umziehen: erst die Feinstellung. Nur der
+                # blosse Klick in den Block bleibt, was er war - Marker
+                # setzen. Ein Klick auf eine Kante oeffnet die Feinstellung
+                # auch ohne Ziehen, so kommt man ohne Maus-Zittern hinein.
+                self._fein_beginnen()
+                event.accept()
+                return
             self._zieh_schnitt = None
             self._zieh_neu = None
             self._zieh_art = None
@@ -842,6 +1112,21 @@ class VideoTimelineWidget(QWidget):
         nur das Fenster - die Taste ist derselbe Weg wie der Menuepunkt, nur
         ein zweiter Zugang dorthin.
         """
+        if self._fein:
+            taste = event.key()
+            if taste == Qt.Key_Left:
+                self._fein_ruecken(-self._fein_schritt(event.modifiers()))
+            elif taste == Qt.Key_Right:
+                self._fein_ruecken(+self._fein_schritt(event.modifiers()))
+            elif taste in (Qt.Key_Return, Qt.Key_Enter):
+                self._fein_anwenden()
+            elif taste == Qt.Key_Escape:
+                self._fein_abbrechen()
+            else:
+                super().keyPressEvent(event)
+                return
+            event.accept()
+            return
         if event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
             if self._gewaehlter_schnitt is not None:
                 a, b = self._gewaehlter_schnitt
@@ -1410,6 +1695,9 @@ class VideoTimelineWidget(QWidget):
 
     def contextMenuEvent(self, event):
         from PySide6.QtWidgets import QMessageBox
+        # Das Menue kann denselben Schnitt verschieben oder zuruecknehmen;
+        # eine offene Vorschau darauf waere danach falsch.
+        self._fein_abbrechen()
         # 1) Falls kein Video oder Overlays => Abbruch
         if self.total_duration <= 0:
             event.ignore()
