@@ -133,6 +133,9 @@ class VideoTimelineWidget(QWidget):
         self._zieh_grenzen = (0.0, 0.0)
         self._zieh_neu = None          # (start_s, ende_s) der neuen Lage
         self._zieh_typ = "schnitt"     # "schnitt" oder "overlay"
+        # Zeigerposition waehrend des Ziehens - daran haengt das Schild mit
+        # der Verschiebung (siehe _draw_umzug). None, wenn nicht gezogen wird.
+        self._zieh_maus = None
         self._zeiger_form = None
 
         # Der ausgewaehlte Schnitt, (start_s, ende_s) oder None. Angeklickt
@@ -550,13 +553,25 @@ class VideoTimelineWidget(QWidget):
         self._zieh_zeit_start = zeit
         self._zieh_grenzen = (float(links), float(rechts))
         self._zieh_neu = (float(a0), float(b0))
+        # Das Schild steht schon beim Anfassen (mit +0.000 s), nicht erst
+        # nach der ersten Bewegung.
+        self._zieh_maus = (self.mapFromGlobal(global_pos)
+                           if global_pos is not None else None)
         self._zeiger_setzen(Qt.SizeAllCursor if art == "block"
                             else Qt.SizeHorCursor)
         self.update()
         return True
 
-    def _umzug_aktualisieren(self, x_mouse):
-        """Neue Lage aus der Mausposition. Rechnet nur, zeichnet nur."""
+    def _umzug_aktualisieren(self, x_mouse, pos=None):
+        """Neue Lage aus der Mausposition. Rechnet nur, zeichnet nur.
+
+        pos ist der ganze Zeigerpunkt; daran haengt das Schild mit der
+        Verschiebung. Es wandert auch dann mit, wenn die Lage sich nicht
+        mehr aendert, weil ein Anschlag erreicht ist.
+        """
+        if pos is not None and pos != self._zieh_maus:
+            self._zieh_maus = QPoint(pos)
+            self.update()
         zeit = self._zeit_bei_x(x_mouse)
         if zeit is None or self._zieh_schnitt is None:
             return
@@ -619,8 +634,68 @@ class VideoTimelineWidget(QWidget):
             painter.drawRect(QRectF(x_text - 4, 2, breite_text, 16))
             painter.setPen(farbe)
             painter.drawText(QPointF(x_text, 14), text)
+            self._draw_umzug_schild(painter, w, h, farbe)
         finally:
             painter.restore()
+
+    def _draw_umzug_schild(self, painter, w, h, farbe):
+        """Das Schild am Zeiger: WIE WEIT wird gerade verschoben?
+
+        Der Rahmen oben zeigt die neue Lage grob (Zehntelsekunden). Beim
+        Feinziehen um wenige Millisekunden ist daran nichts zu erkennen,
+        deshalb hier am Zeiger die bewegte Kante auf die Millisekunde und
+        der Unterschied zur alten Lage mit Vorzeichen, nur in Sekunden -
+        eine zweite Angabe in ms daneben war doppelt. Beim Block wandern
+        beide Kanten um denselben Betrag, dann stehen beide vorn.
+
+        Die Tausendstel passen zu round(a, 3) beim Loslassen - genauer
+        wird der Schnitt ohnehin nicht uebernommen.
+
+        Einzeilig und auf Zeigerhoehe: die Leiste ist nur gut 80 px hoch,
+        ein Schild ueber dem Zeiger laege in der Zeile oben.
+        """
+        if self._zieh_maus is None or self._zieh_schnitt is None                 or self._zieh_typ != "schnitt":
+            return
+        a0, b0 = self._zieh_schnitt
+        a, b = self._zieh_neu
+        if self._zieh_art == "links":
+            lage = "Start %.3f s" % a
+            delta = a - a0
+        elif self._zieh_art == "rechts":
+            lage = "End %.3f s" % b
+            delta = b - b0
+        else:
+            lage = "%.3f - %.3f s" % (a, b)
+            delta = a - a0
+        schub = "%+.3f s" % delta
+
+        fm = painter.fontMetrics()
+        b_lage = fm.horizontalAdvance(lage)
+        b_schub = fm.horizontalAdvance(schub)
+        luecke = fm.horizontalAdvance("   ")
+        breite = b_lage + luecke + b_schub + 10
+        hoehe = fm.height() + 6
+
+        # Rechts neben dem Zeiger, damit die Hand nichts verdeckt; wo rechts
+        # kein Platz ist, links davon. Oben und unten im Fenster halten.
+        mx, my = self._zieh_maus.x(), self._zieh_maus.y()
+        x = mx + 16
+        if x + breite > w:
+            x = max(0.0, mx - 16 - breite)
+        y = my - hoehe / 2.0
+        y = max(0.0, min(y, h - hoehe))
+
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(0, 0, 0, 210))
+        painter.drawRect(QRectF(x, y, breite, hoehe))
+        painter.setPen(QPen(farbe, 1))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRect(QRectF(x, y, breite, hoehe))
+        y_text = y + 3 + fm.ascent()
+        painter.setPen(farbe)
+        painter.drawText(QPointF(x + 5, y_text), lage)
+        painter.setPen(QColor("#ffffff"))
+        painter.drawText(QPointF(x + 5 + b_lage + luecke, y_text), schub)
 
     def _schieben_beginnen(self, x_mouse):
         """Das Verschieben des sichtbaren Ausschnitts anfangen (Shift + links).
@@ -689,7 +764,7 @@ class VideoTimelineWidget(QWidget):
 
     def mouseMoveEvent(self, event):
         if self._zieh_schnitt is not None:
-            self._umzug_aktualisieren(event.pos().x())
+            self._umzug_aktualisieren(event.pos().x(), event.pos())
             event.accept()
             return
         if not (self._dragging_marker or self._dragging_timeline):
@@ -737,6 +812,7 @@ class VideoTimelineWidget(QWidget):
             self._zieh_schnitt = None
             self._zieh_neu = None
             self._zieh_art = None
+            self._zieh_maus = None
             self._zeiger_setzen(None)
             self.update()
             if unveraendert:
