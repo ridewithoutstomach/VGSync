@@ -56,6 +56,8 @@ sys.path.insert(0, BASE_DIR)
 # beide Wege dieselben Regeln anwenden und nicht auseinanderlaufen.
 from build_with_pyinstaller import (      # noqa: E402
     GSTREAMER_PAKETE,
+    QT_MODULE_WURZELN,
+    QT_PLUGIN_ORDNER,
     check_ffmpeg_frei,
     check_mpv_frei,
     gio_module_entfernen,
@@ -63,6 +65,13 @@ from build_with_pyinstaller import (      # noqa: E402
     copy_tree_all,
     load_app_version,
     write_sha256,
+)
+# Mach-O erkennen und otool -L lesen - dieselben Funktionen wie in der
+# Buendelpruefung, damit beide dasselbe unter "Verweis" verstehen.
+from tools.pruefe_macos_buendel import (  # noqa: E402
+    ist_mach_o,
+    mach_o_dateien_sammeln,
+    verweise_lesen,
 )
 
 LOCAL_GSTREAMER = os.path.join(BASE_DIR, "gstreamer")
@@ -301,6 +310,377 @@ def gstreamer_pruefen(buendel):
     for p in fehlend:
         print("   FEHLT    :", p)
     return fehlend
+
+
+
+
+# ---------------------------------------------------------------------------
+# Qt abspecken - das Gegenstueck zu qt_abspecken() im Windows-Skript
+# ---------------------------------------------------------------------------
+# Dasselbe Prinzip, andere Mechanik. Unter Windows liest pefile die
+# Importtabellen der DLLs; hier liest otool -L die Ladebefehle der
+# Mach-O-Dateien. Und statt flacher DLLs liegen die Qt-Bibliotheken als
+# Frameworks in Contents/Frameworks/PySide6/Qt/lib, jedes ein Ordner mit
+# Versions/A/<Name> als eigentlicher Bibliothek und einem Geflecht aus
+# Symlinks darum (Versions/Current, <Name>, Resources).
+#
+# PyInstaller teilt das Buendel ausserdem in zwei Baeume: Binaerdateien in
+# Contents/Frameworks, Daten in Contents/Resources, und verknuepft beide mit
+# Symlinks (siehe pyi_rth_pyside6: der qml-Baum liegt deshalb doppelt). Wird
+# auf der einen Seite etwas entfernt, bleibt auf der anderen ein Symlink ins
+# Leere zurueck - den raeumt symlinks_ins_leere_entfernen() ab, denn codesign
+# --deep stolpert sonst darueber.
+#
+# Gemessen am arm64-Buendel 6.10: 124 Frameworks mit 391 MB, der qml-Baum
+# 30 MB in beiden Baeumen zusammen, 9 MB Qt-Uebersetzungen. Die
+# Debug-Fassungen der WebEngine-Ressourcen gibt es auf macOS nicht.
+#
+# Reihenfolge im Bau: NACH ressourcen_einlegen() und VOR signieren() - wie
+# gio_module_entfernen(). Alles, was nach dem Signieren geaendert wird, macht
+# das Siegel ungueltig.
+
+#: Verweise, die nicht ins Buendel zeigen muessen: Bestandteile von macOS.
+_SYSTEM_PRAEFIXE = ("/usr/lib/", "/System/")
+
+#: Pflichtdateien relativ zu Contents/Frameworks/PySide6. Der V8-Schnappschuss
+#: heisst je Architektur anders (v8_context_snapshot.arm64.bin bzw.
+#: .x86_64.bin), deshalb steht er nicht hier, sondern wird gesondert gesucht.
+_WEBENGINE_RES = os.path.join("Qt", "lib", "QtWebEngineCore.framework",
+                              "Versions", "A", "Resources")
+QT_PFLICHT_MACOS = (
+    os.path.join("Qt", "lib", "QtWebEngineCore.framework", "Versions", "A",
+                 "Helpers", "QtWebEngineProcess.app", "Contents", "MacOS",
+                 "QtWebEngineProcess"),
+    os.path.join("Qt", "plugins", "platforms", "libqcocoa.dylib"),
+    os.path.join(_WEBENGINE_RES, "qtwebengine_resources.pak"),
+    os.path.join(_WEBENGINE_RES, "qtwebengine_resources_100p.pak"),
+    os.path.join(_WEBENGINE_RES, "qtwebengine_resources_200p.pak"),
+    os.path.join(_WEBENGINE_RES, "qtwebengine_devtools_resources.pak"),
+    os.path.join(_WEBENGINE_RES, "icudtl.dat"),
+    os.path.join(_WEBENGINE_RES, "qtwebengine_locales", "en-US.pak"),
+    os.path.join(_WEBENGINE_RES, "qtwebengine_locales", "de.pak"),
+)
+
+
+def _qt_orte(buendel):
+    """Die drei Orte, um die es geht: Frameworks/PySide6, Resources/PySide6
+    und der Framework-Ordner Qt/lib."""
+    fw = os.path.join(buendel, "Contents", "Frameworks", "PySide6")
+    res = os.path.join(buendel, "Contents", "Resources", "PySide6")
+    return fw, res, os.path.join(fw, "Qt", "lib")
+
+
+def _verweise(pfad):
+    """otool -L als Liste; ein Lesefehler ist ein Baufehler, kein Schulterzucken."""
+    liste, ausgabe = verweise_lesen(pfad)
+    if liste is None:
+        raise SystemExit("[ABBRUCH] otool kann %s nicht lesen:\n%s"
+                         % (pfad, ausgabe))
+    return liste
+
+
+def _verweis_aufloesen(verweis, datei, buendel):
+    """Wohin zeigt ein Ladebefehl? Rueckgabe (pfad, system).
+
+    pfad ist der aufgeloeste Pfad im Buendel oder None; system True heisst,
+    der Verweis gehoert zu macOS und braucht keine Datei im Buendel.
+
+    @rpath wird so aufgeloest, wie der Lader es zur Laufzeit tut, nur mit
+    festen Kandidaten statt der LC_RPATH-Eintraege: Contents/Frameworks, der
+    PySide6-Ordner darin, Qt/lib, shiboken6 und der Ordner der Datei selbst.
+    Das sind alle Orte, an denen PyInstaller Qt-Bibliotheken ablegt.
+
+    Am 6.10-Buendel abgelesen (LC_LOAD_DYLIB/LC_RPATH aus den Bytes): jeder
+    LC_RPATH zeigt ueber @loader_path/.. auf Contents/Frameworks, und die
+    Verweise lauten "@rpath/QtCore", "@rpath/libpyside6.abi3.6.11.dylib" -
+    ohne Framework-Pfad. Aufgeloest werden sie ueber Symlinks, die
+    PyInstaller direkt in Contents/Frameworks anlegt. Deshalb steht
+    Contents/Frameworks hier an erster Stelle, und deshalb geht das Ergebnis
+    durch realpath(): der Symlink zaehlt nichts, die Datei dahinter alles.
+    """
+    if verweis.startswith(_SYSTEM_PRAEFIXE):
+        return None, True
+    frameworks = os.path.join(buendel, "Contents", "Frameworks")
+    fw, _res, qt_lib = _qt_orte(buendel)
+    hier = os.path.dirname(datei)
+    if verweis.startswith("@rpath/"):
+        rest = verweis[len("@rpath/"):]
+        kandidaten = [frameworks, fw, qt_lib,
+                      os.path.join(frameworks, "shiboken6"), hier]
+    elif verweis.startswith("@loader_path/"):
+        rest = verweis[len("@loader_path/"):]
+        kandidaten = [hier]
+    elif verweis.startswith("@executable_path/"):
+        rest = verweis[len("@executable_path/"):]
+        kandidaten = [os.path.join(buendel, "Contents", "MacOS")]
+    elif os.path.isabs(verweis):
+        # Ein absoluter Pfad ausserhalb von macOS: Bau-Rechner-Pfad. Das
+        # meldet tools/pruefe_macos_buendel.py ohnehin; hier zaehlt er als
+        # nicht aufloesbar.
+        return None, False
+    else:
+        rest = verweis
+        kandidaten = [hier]
+    for basis in kandidaten:
+        voll = os.path.normpath(os.path.join(basis, rest))
+        if os.path.isfile(voll):
+            return os.path.realpath(voll), False
+    return None, False
+
+
+def _qt_erreichbar_macos(buendel):
+    """Alle Mach-O-Dateien, die von den Wurzeln aus erreichbar sind.
+
+    Rueckgabe (erreichbar, offen): realpath-Menge und die Verweise, die sich
+    weder im Buendel noch in macOS finden liessen.
+    """
+    fw, _res, qt_lib = _qt_orte(buendel)
+    wurzeln = []
+    for modul in QT_MODULE_WURZELN:
+        treffer = [os.path.join(fw, n) for n in os.listdir(fw)
+                   if n.startswith(modul + ".") and n.endswith(".so")]
+        if not treffer:
+            raise SystemExit("[ABBRUCH] Qt-Modul %s fehlt in %s - PyInstaller "
+                             "hat es nicht eingesammelt." % (modul, fw))
+        wurzeln += treffer
+    shib = os.path.join(buendel, "Contents", "Frameworks", "shiboken6")
+    if os.path.isdir(shib):
+        wurzeln += [os.path.join(shib, n) for n in os.listdir(shib)
+                    if n.endswith((".so", ".dylib"))]
+    helfer = os.path.join(fw, QT_PFLICHT_MACOS[0])
+    if os.path.isfile(helfer):
+        wurzeln.append(helfer)
+    for ordner in QT_PLUGIN_ORDNER:
+        pfad = os.path.join(fw, "Qt", "plugins", ordner)
+        if os.path.isdir(pfad):
+            wurzeln += [os.path.join(pfad, n) for n in os.listdir(pfad)
+                        if n.endswith(".dylib")]
+
+    erreichbar, offen = set(), set()
+    stapel = [os.path.realpath(w) for w in wurzeln]
+    while stapel:
+        datei = stapel.pop()
+        if datei in erreichbar or not ist_mach_o(datei):
+            continue
+        erreichbar.add(datei)
+        for verweis in _verweise(datei):
+            ziel, system = _verweis_aufloesen(verweis, datei, buendel)
+            if system:
+                continue
+            if ziel is None:
+                offen.add(verweis)
+            elif ziel not in erreichbar:
+                stapel.append(ziel)
+    return erreichbar, offen
+
+
+def _groesse(pfad):
+    """Bytes unter pfad, Symlinks nicht mitgezaehlt (sie zeigen woandershin)."""
+    if os.path.islink(pfad):
+        return 0
+    if os.path.isfile(pfad):
+        return os.path.getsize(pfad)
+    summe = 0
+    for wurzel, ordner, dateien in os.walk(pfad):
+        ordner[:] = [o for o in ordner
+                     if not os.path.islink(os.path.join(wurzel, o))]
+        for name in dateien:
+            voll = os.path.join(wurzel, name)
+            if not os.path.islink(voll):
+                summe += os.path.getsize(voll)
+    return summe
+
+
+def _weg_macos(pfad, konto):
+    """Datei, Symlink oder Ordner entfernen; Groesse auf konto[0] buchen."""
+    if os.path.islink(pfad) or os.path.isfile(pfad):
+        konto[0] += _groesse(pfad)
+        os.remove(pfad)
+    elif os.path.isdir(pfad):
+        konto[0] += _groesse(pfad)
+        shutil.rmtree(pfad)
+
+
+def symlinks_ins_leere_entfernen(ordner):
+    """Symlinks entfernen, deren Ziel es nicht mehr gibt. Rueckgabe: Anzahl."""
+    entfernt = 0
+    for wurzel, unterordner, dateien in os.walk(ordner):
+        for name in list(unterordner) + dateien:
+            voll = os.path.join(wurzel, name)
+            if os.path.islink(voll) and not os.path.exists(voll):
+                os.remove(voll)
+                entfernt += 1
+                if name in unterordner:
+                    unterordner.remove(name)
+    return entfernt
+
+
+def qt_abspecken_macos(buendel):
+    """Alles aus PySide6 nehmen, was die Anwendung nicht erreicht.
+
+    Siehe den Kasten oben. Rueckgabe: befreite Bytes.
+    """
+    fw, res, qt_lib = _qt_orte(buendel)
+    if not os.path.isdir(fw):
+        print("[QT] Contents/Frameworks/PySide6 fehlt - nichts abzuspecken.")
+        return 0
+
+    erreichbar, offen = _qt_erreichbar_macos(buendel)
+    if offen:
+        raise SystemExit("[ABBRUCH] Qt: Verweise ohne Ziel schon vor dem "
+                         "Abspecken: " + ", ".join(sorted(offen)))
+
+    konto = [0]
+
+    # 1) Frameworks, in denen keine erreichte Datei liegt. Geprueft wird
+    #    ueber den Ordner, nicht ueber den Symlink <Name>.framework/<Name>:
+    #    der zeigt ueber Versions/Current auf die Bibliothek, und ein
+    #    Buendel ohne diese Symlinks (siehe zippen) soll genauso behandelt
+    #    werden wie eines mit.
+    weg_fw = []
+    if os.path.isdir(qt_lib):
+        for name in sorted(os.listdir(qt_lib)):
+            if not name.endswith(".framework"):
+                continue
+            ordner = os.path.join(qt_lib, name)
+            wurzel = os.path.realpath(ordner) + os.sep
+            if not any(d.startswith(wurzel) for d in erreichbar):
+                _weg_macos(ordner, konto)
+                weg_fw.append(name[:-len(".framework")])
+    print("[QT] %d Frameworks entfernt, die kein importiertes Modul erreicht "
+          "(%.1f MB)" % (len(weg_fw), konto[0] / (1024 * 1024)))
+
+    # 2) Python-Module und lose dylibs im PySide6-Ordner, samt Gegenstueck
+    #    im Resources-Baum
+    stand = konto[0]
+    weg_mod = 0
+    for name in sorted(os.listdir(fw)):
+        voll = os.path.join(fw, name)
+        if os.path.islink(voll) or not os.path.isfile(voll):
+            continue
+        if not name.endswith((".so", ".dylib")):
+            continue
+        if os.path.realpath(voll) in erreichbar:
+            continue
+        _weg_macos(voll, konto)
+        weg_mod += 1
+        for gegen in (os.path.join(res, name),
+                      os.path.join(res, name.split(".")[0] + ".pyi")):
+            if os.path.lexists(gegen):
+                _weg_macos(gegen, konto)
+    print("[QT] %d Module/Bibliotheken entfernt (%.1f MB)"
+          % (weg_mod, (konto[0] - stand) / (1024 * 1024)))
+
+    # 3) der qml-Baum, auf beiden Seiten
+    stand = konto[0]
+    for seite in (fw, res):
+        pfad = os.path.join(seite, "Qt", "qml")
+        if os.path.lexists(pfad):
+            _weg_macos(pfad, konto)
+    print("[QT] Qt/qml entfernt (%.1f MB)" % ((konto[0] - stand) / (1024 * 1024)))
+
+    # 4) Plugin-Ordner, die nicht auf der Liste stehen
+    stand = konto[0]
+    plugins = os.path.join(fw, "Qt", "plugins")
+    weg_pl = []
+    if os.path.isdir(plugins):
+        for name in sorted(os.listdir(plugins)):
+            if name not in QT_PLUGIN_ORDNER:
+                _weg_macos(os.path.join(plugins, name), konto)
+                weg_pl.append(name)
+    print("[QT] Plugin-Ordner entfernt: %s (%.1f MB)"
+          % (", ".join(weg_pl) or "-", (konto[0] - stand) / (1024 * 1024)))
+
+    # 5) Qt-Uebersetzungen (.qm). Die WebEngine-Sprachpakete liegen im
+    #    Framework selbst und bleiben.
+    stand = konto[0]
+    qm = 0
+    uebers = os.path.join(res, "Qt", "translations")
+    if os.path.isdir(uebers):
+        for name in os.listdir(uebers):
+            if name.endswith(".qm"):
+                _weg_macos(os.path.join(uebers, name), konto)
+                qm += 1
+    print("[QT] %d Qt-Uebersetzungen (.qm) entfernt (%.1f MB)"
+          % (qm, (konto[0] - stand) / (1024 * 1024)))
+
+    # 6) Symlinks, die jetzt ins Leere zeigen. Dazu gehoert die oberste
+    #    Ebene von Contents/Frameworks: PyInstaller schreibt die Ladebefehle
+    #    auf "@rpath/QtCore" um, mit @rpath = Contents/Frameworks, und legt
+    #    dort fuer jede Framework-Bibliothek einen Symlink QtCore ->
+    #    PySide6/Qt/lib/QtCore.framework/Versions/A/QtCore an. Fuer jedes
+    #    entfernte Framework bleibt so ein Link ohne Ziel zurueck.
+    leer = 0
+    for seite in (fw, res):
+        if os.path.isdir(seite):
+            leer += symlinks_ins_leere_entfernen(seite)
+    frameworks = os.path.join(buendel, "Contents", "Frameworks")
+    for name in os.listdir(frameworks):
+        voll = os.path.join(frameworks, name)
+        if os.path.islink(voll) and not os.path.exists(voll):
+            os.remove(voll)
+            leer += 1
+    print("[QT] %d Symlinks ins Leere entfernt" % leer)
+
+    print("[QT] zusammen %.1f MB weniger" % (konto[0] / (1024 * 1024)))
+    return konto[0]
+
+
+def check_qt_payload_macos(buendel):
+    """Ist das abgespeckte Qt in sich vollstaendig? Rueckgabe: Befunde.
+
+    Erstens: findet jede Mach-O-Datei unter PySide6 alle ihre Verweise im
+    Buendel oder in macOS? Zweitens: sind die Pflichtdateien da? Drittens:
+    zeigt kein Symlink unter PySide6 mehr ins Leere?
+    """
+    fw, res, _qt_lib = _qt_orte(buendel)
+    befunde = []
+    if not os.path.isdir(fw):
+        return ["Contents/Frameworks/PySide6 fehlt"]
+
+    for rel in QT_PFLICHT_MACOS:
+        if not os.path.isfile(os.path.join(fw, rel)):
+            befunde.append("Pflichtdatei fehlt: PySide6/" + rel)
+    res_dir = os.path.join(fw, _WEBENGINE_RES)
+    if os.path.isdir(res_dir) and not any(
+            n.startswith("v8_context_snapshot") and n.endswith(".bin")
+            for n in os.listdir(res_dir)):
+        befunde.append("Pflichtdatei fehlt: v8_context_snapshot.*.bin")
+
+    for modul in QT_MODULE_WURZELN:
+        if not any(n.startswith(modul + ".") and n.endswith(".so")
+                   for n in os.listdir(fw)):
+            befunde.append("Modul fehlt: PySide6/%s.abi3.so" % modul)
+
+    geprueft = 0
+    for datei in mach_o_dateien_sammeln(fw):
+        geprueft += 1
+        for verweis in _verweise(datei):
+            ziel, system = _verweis_aufloesen(verweis, datei, buendel)
+            if system or ziel is not None:
+                continue
+            befunde.append("%s verweist auf %s, das nirgends liegt"
+                           % (os.path.relpath(datei, buendel), verweis))
+
+    for seite in (fw, res):
+        for wurzel, unterordner, dateien in os.walk(seite):
+            for name in list(unterordner) + dateien:
+                voll = os.path.join(wurzel, name)
+                if os.path.islink(voll) and not os.path.exists(voll):
+                    befunde.append("Symlink ins Leere: "
+                                   + os.path.relpath(voll, buendel))
+    frameworks = os.path.join(buendel, "Contents", "Frameworks")
+    for name in os.listdir(frameworks):
+        voll = os.path.join(frameworks, name)
+        if os.path.islink(voll) and not os.path.exists(voll):
+            befunde.append("Symlink ins Leere: "
+                           + os.path.relpath(voll, buendel))
+
+    print("[QT] %d Mach-O-Dateien geprueft, %d Befund(e)"
+          % (geprueft, len(befunde)))
+    for b in befunde:
+        print("[QT] FEHLER:", b)
+    return befunde
 
 
 def architektur():
@@ -604,6 +984,10 @@ def build_macos():
     fehlende_rechtstexte = rechtstexte_einlegen(buendel)
     fehlende_gstreamer = gstreamer_pruefen(buendel)
 
+    # Qt abspecken - VOR dem Signieren, wie alles, was das Buendel anfasst.
+    qt_abspecken_macos(buendel)
+    qt_befunde = check_qt_payload_macos(buendel)
+
     # Das GIO-Proxy-Modul heraus - VOR dem Signieren, sonst waere das Siegel
     # sofort wieder ungueltig.
     gio_module_entfernen(buendel)
@@ -621,6 +1005,11 @@ def build_macos():
         raise SystemExit("[ABBRUCH] Rechtstexte fehlen (%s) - so darf das "
                          "Buendel nicht ausgeliefert werden."
                          % ", ".join(fehlende_rechtstexte))
+    if qt_befunde:
+        raise SystemExit("[ABBRUCH] Qt ist nach dem Abspecken unvollstaendig "
+                         "(%d Befund(e), siehe [QT] FEHLER oben) - so wuerde "
+                         "das Buendel beim Anwender nicht starten."
+                         % len(qt_befunde))
 
     # Signieren als LETZTER Schritt, der das Buendel anfasst - danach wird nur
     # noch gepackt. Kommt hier jemals etwas dazu, muss es DAVOR passieren.

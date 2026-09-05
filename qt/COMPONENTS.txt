@@ -5,8 +5,17 @@ Every package below is installed by pip from PyPI and ends up in
 "_internal/PySide6" of the Windows build. The license expression given for each
 is the one the package itself declares in its metadata, quoted unchanged.
 
-Measured against the 6.0GES build: 122 Qt6 module DLLs, 529.9 MB in total -
-the largest third-party part of the application.
+Measured against the 6.11 build (05.09.2026): 19 Qt6 module DLLs, 350.1 MB
+in total - still the largest third-party part of the application. Up to 6.10
+it was 130 DLLs and 536 MB: PyInstaller also collected the QML tree and with
+it Quick3D, Charts, Multimedia and the Quick Controls styles, none of which
+the application loads. Since 6.11 build_with_pyinstaller.py (qt_abspecken)
+keeps only what the imported Qt modules reach through their import tables,
+plus the software OpenGL renderer and the Qt WebEngine helper process, and
+checks afterwards that every remaining library still resolves all of its
+imports inside the bundle or in Windows itself. build_macos.py does the same
+for the macOS bundle (Contents/Frameworks/PySide6), reading the load commands
+with otool instead of the PE import tables.
 
 --------------------------------------------------------------------------------
 

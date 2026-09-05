@@ -215,6 +215,308 @@ def gio_module_entfernen(ziel_ordner):
     return entfernt
 
 
+# ---------------------------------------------------------------------------
+# Qt abspecken
+# ---------------------------------------------------------------------------
+# PyInstaller sammelt fuer PySide6 weit mehr ein, als die Anwendung laedt.
+# Gemessen am 6.01-Build (05.09.2026): 130 Qt-DLLs mit 322 MB, davon ueber
+# die Importtabellen erreichbar nur 25 mit 243 MB. Der Rest haengt am
+# QML-Baum: Qt6WebEngineCore.dll importiert Qt6Quick, PyInstaller nimmt
+# deshalb den ganzen qml/-Ordner mit (5000 Dateien), und dessen Plugin-DLLs
+# ziehen Quick3D, Charts, Multimedia, 3D und die Controls-Stile nach -
+# lauter Dinge, die kein Stueck Code hier je anfasst. Dazu kommen die
+# Debug-Fassungen der WebEngine-Ressourcen (77 MB), die nur ein Debug-Qt
+# laedt, und die Qt-eigenen Uebersetzungen (die Oberflaeche ist englisch).
+#
+# Geraten wird hier nichts. Ausgangspunkt sind die Qt-Module, die der Code
+# importiert (QT_MODULE_WURZELN), dazu der WebEngine-Hilfsprozess, der
+# Software-OpenGL-Renderer (config.is_soft_opengl_enabled) und die Plugins
+# der behaltenen Ordner. Von dort aus werden die Importtabellen der DLLs
+# gelesen (pefile, kommt mit PyInstaller) und rekursiv verfolgt. Was nicht
+# erreicht wird, fliegt raus. check_qt_payload() prueft danach das Gegenteil:
+# dass jede Bibliothek, die bleibt, alle ihre Importe im Buendel oder in
+# Windows selbst findet. Zeigt ein Import ins Leere, bricht der Build ab -
+# lieber kein Paket als eines, das beim Anwender mit "DLL nicht gefunden"
+# stirbt.
+#
+# Was ausdruecklich BLEIBT, obwohl es keine Importtabelle erreicht:
+#   opengl32sw.dll      Software-OpenGL; Qt laedt es zur Laufzeit, wenn der
+#                       Anwender "use_soft_opengl" einschaltet oder die
+#                       Grafikkarte keinen OpenGL-Kontext hergibt.
+#   QtWebEngineProcess  der Chromium-Prozess der Karte, wird gestartet, nicht
+#                       importiert.
+#   qtwebengine_locales alle 53 Sprachpakete der WebEngine: welches Chromium
+#                       laedt, entscheidet die Systemsprache des Anwenders.
+#   resources/*.pak     die WebEngine-Ressourcen (ohne .debug-Fassungen).
+#   plugins/position    winzig, und Qt6Positioning haengt an WebEngineCore.
+
+#: Die Qt-Module, die der Quellcode importiert (grep "from PySide6."), plus
+#: QtPrintSupport, das PyInstallers WebEngine-Hook als hiddenimport setzt.
+QT_MODULE_WURZELN = (
+    "QtCore", "QtGui", "QtWidgets", "QtNetwork", "QtPrintSupport",
+    "QtWebChannel", "QtWebEngineCore", "QtWebEngineWidgets",
+)
+
+#: Plugin-Ordner, die bleiben. Nicht dabei: qml-Werkzeuge (qmltooling), die
+#: Bildschirmtastatur (platforminputcontexts, braucht den qml/-Baum).
+QT_PLUGIN_ORDNER = (
+    "platforms", "styles", "imageformats", "iconengines", "generic",
+    "tls", "networkinformation", "position",
+)
+
+#: Einzelne Dateien in PySide6/, die ohne Importkette bleiben (siehe oben).
+QT_LOSE_WURZELN = ("QtWebEngineProcess.exe", "opengl32sw.dll")
+
+#: Pflichtdateien - fehlt eine davon nach dem Abspecken, ist das Buendel
+#: kaputt, egal was die Importtabellen sagen.
+QT_PFLICHT = (
+    "QtWebEngineProcess.exe",
+    os.path.join("plugins", "platforms", "qwindows.dll"),
+    os.path.join("resources", "qtwebengine_resources.pak"),
+    os.path.join("resources", "qtwebengine_resources_100p.pak"),
+    os.path.join("resources", "qtwebengine_resources_200p.pak"),
+    os.path.join("resources", "qtwebengine_devtools_resources.pak"),
+    os.path.join("resources", "icudtl.dat"),
+    os.path.join("resources", "v8_context_snapshot.bin"),
+    os.path.join("translations", "qtwebengine_locales", "en-US.pak"),
+    os.path.join("translations", "qtwebengine_locales", "de.pak"),
+)
+
+
+def _pe_importe(pfad):
+    """DLL-Namen aus der Importtabelle, einschliesslich Delay-Imports."""
+    import pefile
+    namen = []
+    pe = pefile.PE(pfad, fast_load=True)
+    try:
+        pe.parse_data_directories(directories=[
+            pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_IMPORT"],
+            pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT"]])
+        for feld in ("DIRECTORY_ENTRY_IMPORT", "DIRECTORY_ENTRY_DELAY_IMPORT"):
+            for eintrag in getattr(pe, feld, None) or []:
+                namen.append(eintrag.dll.decode("ascii", "ignore"))
+    finally:
+        pe.close()
+    return namen
+
+
+def _qt_suchorte(internal_dir):
+    """Wo eine importierte DLL liegen darf: PySide6/, shiboken6/, _internal/.
+
+    Das entspricht dem Suchpfad zur Laufzeit: der Ordner der ladenden DLL,
+    dazu _internal (PyInstaller setzt es an den Anfang von PATH, siehe
+    pyi_rth_pyside6). Rueckgabe: kleingeschriebener Name -> Pfad.
+    """
+    orte = {}
+    for ordner in (os.path.join(internal_dir, "PySide6"),
+                   os.path.join(internal_dir, "shiboken6"),
+                   internal_dir):
+        if not os.path.isdir(ordner):
+            continue
+        for name in os.listdir(ordner):
+            voll = os.path.join(ordner, name)
+            if os.path.isfile(voll):
+                orte.setdefault(name.lower(), voll)
+    return orte
+
+
+def _ist_windows_dll(name):
+    """Gehoert der Name zu Windows selbst? Geprueft gegen System32 des
+    Baurechners; api-ms-*/ext-ms-* sind die Umbrella-Bibliotheken der
+    Universal CRT, die jedes Windows 10 hat."""
+    n = name.lower()
+    if n.startswith("api-ms-") or n.startswith("ext-ms-"):
+        return True
+    system32 = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),
+                            "System32")
+    return os.path.isfile(os.path.join(system32, n))
+
+
+def _qt_erreichbar(internal_dir):
+    """Alle Dateien, die von den Wurzeln aus ueber Importtabellen erreichbar
+    sind. Rueckgabe (erreichbar, offen): Pfade und die DLL-Namen, die sich
+    weder im Buendel noch in Windows finden liessen."""
+    ps = os.path.join(internal_dir, "PySide6")
+    orte = _qt_suchorte(internal_dir)
+
+    wurzeln = []
+    for modul in QT_MODULE_WURZELN:
+        treffer = [voll for name, voll in orte.items()
+                   if name.startswith(modul.lower() + ".")
+                   and name.endswith(".pyd")
+                   and os.path.dirname(voll) == ps]
+        if not treffer:
+            raise SystemExit(f"[ABBRUCH] Qt-Modul {modul} fehlt in PySide6/ - "
+                             f"PyInstaller hat es nicht eingesammelt.")
+        wurzeln += treffer
+    shib = os.path.join(internal_dir, "shiboken6")
+    if os.path.isdir(shib):
+        wurzeln += [os.path.join(shib, n) for n in os.listdir(shib)
+                    if n.lower().endswith((".pyd", ".dll"))]
+    for name in QT_LOSE_WURZELN:
+        voll = os.path.join(ps, name)
+        if os.path.isfile(voll):
+            wurzeln.append(voll)
+    for ordner in QT_PLUGIN_ORDNER:
+        pfad = os.path.join(ps, "plugins", ordner)
+        if os.path.isdir(pfad):
+            wurzeln += [os.path.join(pfad, n) for n in os.listdir(pfad)
+                        if n.lower().endswith(".dll")]
+
+    erreichbar, offen = set(), set()
+    stapel = list(wurzeln)
+    while stapel:
+        pfad = stapel.pop()
+        if pfad in erreichbar:
+            continue
+        erreichbar.add(pfad)
+        for name in _pe_importe(pfad):
+            ziel = orte.get(name.lower())
+            if ziel is None:
+                if not _ist_windows_dll(name):
+                    offen.add(name)
+            elif ziel not in erreichbar:
+                stapel.append(ziel)
+    return erreichbar, offen
+
+
+def _mb(bytes_):
+    return bytes_ / (1024 * 1024)
+
+
+def _weg(pfad, konto):
+    """Datei oder Ordner entfernen und die Groesse auf konto[0] buchen."""
+    if os.path.isdir(pfad):
+        for wurzel, _d, dateien in os.walk(pfad):
+            konto[0] += sum(os.path.getsize(os.path.join(wurzel, f))
+                            for f in dateien)
+        shutil.rmtree(pfad, ignore_errors=True)
+    elif os.path.isfile(pfad):
+        konto[0] += os.path.getsize(pfad)
+        os.remove(pfad)
+
+
+def qt_abspecken(internal_dir):
+    """Alles aus PySide6/ nehmen, was die Anwendung nicht erreicht.
+
+    Siehe den Kasten oben. Rueckgabe: befreite Bytes.
+    """
+    ps = os.path.join(internal_dir, "PySide6")
+    if not os.path.isdir(ps):
+        print("[QT] PySide6/ fehlt - nichts abzuspecken.")
+        return 0
+
+    erreichbar, offen = _qt_erreichbar(internal_dir)
+    if offen:
+        # Schon VOR dem Abspecken zeigt ein Import ins Leere - dann stimmt
+        # am Build etwas nicht, und Loeschen macht es nur unuebersichtlicher.
+        raise SystemExit("[ABBRUCH] Qt: Importe ohne Ziel schon vor dem "
+                         "Abspecken: " + ", ".join(sorted(offen)))
+
+    konto = [0]
+    dll_weg = pyd_weg = 0
+    for name in sorted(os.listdir(ps)):
+        voll = os.path.join(ps, name)
+        n = name.lower()
+        if not os.path.isfile(voll) or voll in erreichbar:
+            continue
+        if n.endswith(".dll"):
+            _weg(voll, konto)
+            dll_weg += 1
+        elif n.endswith(".pyd"):
+            _weg(voll, konto)
+            pyd_weg += 1
+            # das Typ-Stub dazu (QtQml.pyi) - ohne Modul ohne Sinn
+            _weg(os.path.join(ps, name.split(".")[0] + ".pyi"), konto)
+    print(f"[QT] {dll_weg} DLLs und {pyd_weg} Module entfernt, die kein "
+          f"importiertes Modul erreicht ({_mb(konto[0]):.1f} MB)")
+
+    stand = konto[0]
+    _weg(os.path.join(ps, "qml"), konto)
+    print(f"[QT] qml/ entfernt ({_mb(konto[0] - stand):.1f} MB)")
+
+    stand = konto[0]
+    plugins = os.path.join(ps, "plugins")
+    weg_ordner = []
+    if os.path.isdir(plugins):
+        for ordner in sorted(os.listdir(plugins)):
+            if ordner not in QT_PLUGIN_ORDNER:
+                _weg(os.path.join(plugins, ordner), konto)
+                weg_ordner.append(ordner)
+    print(f"[QT] Plugin-Ordner entfernt: {', '.join(weg_ordner) or '-'} "
+          f"({_mb(konto[0] - stand):.1f} MB)")
+
+    stand = konto[0]
+    uebers = os.path.join(ps, "translations")
+    qm = 0
+    if os.path.isdir(uebers):
+        for name in os.listdir(uebers):
+            if name.lower().endswith(".qm"):
+                _weg(os.path.join(uebers, name), konto)
+                qm += 1
+    print(f"[QT] {qm} Qt-Uebersetzungen (.qm) entfernt, qtwebengine_locales "
+          f"bleiben ({_mb(konto[0] - stand):.1f} MB)")
+
+    stand = konto[0]
+    ress = os.path.join(ps, "resources")
+    debug = 0
+    if os.path.isdir(ress):
+        for name in os.listdir(ress):
+            if ".debug." in name.lower():
+                _weg(os.path.join(ress, name), konto)
+                debug += 1
+    print(f"[QT] {debug} Debug-Fassungen der WebEngine-Ressourcen entfernt "
+          f"({_mb(konto[0] - stand):.1f} MB)")
+
+    print(f"[QT] zusammen {_mb(konto[0]):.1f} MB weniger")
+    return konto[0]
+
+
+def check_qt_payload(internal_dir):
+    """Ist das abgespeckte Qt in sich vollstaendig?
+
+    Zwei Fragen. Erstens: findet jede Bibliothek, die noch da ist - DLL,
+    Modul, Plugin, Hilfsprozess - alle ihre Importe im Buendel oder in
+    Windows? Das ist genau die Frage, die sonst erst der Anwender mit
+    "DLL nicht gefunden" beantwortet bekaeme. Zweitens: sind die Dateien da,
+    die ohne Importkette gebraucht werden (QT_PFLICHT)?
+
+    Rueckgabe: Liste der Befunde; leer heisst in Ordnung.
+    """
+    ps = os.path.join(internal_dir, "PySide6")
+    befunde = []
+    if not os.path.isdir(ps):
+        return ["PySide6/ fehlt"]
+
+    for rel in QT_PFLICHT:
+        if not os.path.isfile(os.path.join(ps, rel)):
+            befunde.append(f"Pflichtdatei fehlt: PySide6/{rel}")
+
+    for modul in QT_MODULE_WURZELN:
+        if not any(n.lower().startswith(modul.lower() + ".")
+                   and n.lower().endswith(".pyd") for n in os.listdir(ps)):
+            befunde.append(f"Modul fehlt: PySide6/{modul}.pyd")
+
+    orte = _qt_suchorte(internal_dir)
+    geprueft = 0
+    for wurzel, _d, dateien in os.walk(ps):
+        for name in dateien:
+            if not name.lower().endswith((".dll", ".pyd", ".exe")):
+                continue
+            voll = os.path.join(wurzel, name)
+            geprueft += 1
+            for imp in _pe_importe(voll):
+                if imp.lower() in orte or _ist_windows_dll(imp):
+                    continue
+                befunde.append(f"{os.path.relpath(voll, internal_dir)} "
+                               f"importiert {imp}, das nirgends liegt")
+    print(f"[QT] {geprueft} Bibliotheken geprueft, "
+          f"{len(befunde)} Befund(e)")
+    for b in befunde:
+        print("[QT] FEHLER:", b)
+    return befunde
+
+
 def check_ffmpeg_frei(target_dir):
     """
     Gegenprobe: der GPL-Vollbuild von ffmpeg darf nicht im Build liegen.
@@ -524,6 +826,8 @@ def build_windows(build_setup: bool = False):
 
     cli_werkzeuge_entfernen(internal_dir)
     fehlende_gstreamer_pakete = check_gstreamer_payload(internal_dir)
+    qt_abspecken(internal_dir)
+    qt_befunde = check_qt_payload(internal_dir)
 
     # Taskbar-Icon zusätzlich in _internal/icon
     if os.path.isfile(icon_file):
@@ -613,6 +917,11 @@ def build_windows(build_setup: bool = False):
     if fehlende_gstreamer_pakete:
         raise SystemExit("[ABBRUCH] GStreamer ist unvollstaendig - der Build "
                          "wuerde nicht starten.")
+    if qt_befunde:
+        raise SystemExit("[ABBRUCH] Qt ist nach dem Abspecken unvollstaendig "
+                         "(%d Befund(e), siehe [QT] FEHLER oben) - so wuerde "
+                         "der Build beim Anwender nicht starten."
+                         % len(qt_befunde))
     if fehlende_rechtstexte:
         raise SystemExit("[ABBRUCH] Rechtstexte fehlen (%s) - so darf der Build "
                          "nicht ausgeliefert werden."

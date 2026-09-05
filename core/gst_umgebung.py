@@ -85,12 +85,38 @@ def _zwischenspeicher():
     return os.path.join(basis, _REGISTRY_ORDNER)
 
 
+def _programm_kennung():
+    """Kurze Kennung des Programmordners, aus dem dieser Prozess laeuft.
+
+    Acht Hexziffern aus dem Pfad von sys._MEIPASS (im gepackten Programm)
+    oder des Interpreters (im Quellbaum). Zwei Installationen auf demselben
+    Rechner bekommen so zwei verschiedene Plugin-Listen.
+    """
+    import hashlib
+    ort = getattr(sys, "_MEIPASS", None) or os.path.dirname(
+        os.path.abspath(sys.executable))
+    try:
+        ort = os.path.normcase(os.path.abspath(ort))
+    except Exception:
+        pass
+    return hashlib.sha1(ort.encode("utf-8", "replace")).hexdigest()[:8]
+
+
 def _registry_datei():
     """Pfad der Plugin-Liste. None, wenn der Ordner nicht anzulegen ist.
 
     Der Dateiname traegt die Architektur, weil eine Liste, die auf einem
     Apple-Silicon-Rechner entstanden ist, auf einem Intel-Rechner nichts
     taugt - GStreamer macht es bei seinem eigenen Vorgabeort genauso.
+
+    Er traegt ausserdem eine Kennung des Programmordners. Die Liste speichert
+    die Plugins mit ABSOLUTEM Pfad, und GStreamer behaelt jeden Eintrag, dessen
+    Datei es noch gibt - auch wenn sie in einer ANDEREN Installation liegt.
+    Am 05.09.2026 gemessen: eine frisch gebaute Fassung unter E:/.../dist
+    lud beim ersten Start gstpython.dll aus C:/Program Files/KVRouite, weil
+    die installierte Fassung dieselbe Liste vorher gefuellt hatte. Wer die
+    portable ZIP neben dem Installer benutzt, mischt sonst zwei Versionen.
+    Mit der Kennung hat jede Installation ihre eigene Liste.
     """
     import platform
     ordner = _zwischenspeicher()
@@ -98,8 +124,9 @@ def _registry_datei():
         os.makedirs(ordner, exist_ok=True)
     except Exception:
         return None
-    return os.path.join(ordner, "gstreamer-registry-%s.bin"
-                        % (platform.machine() or "unknown"))
+    return os.path.join(ordner, "gstreamer-registry-%s-%s.bin"
+                        % (platform.machine() or "unknown",
+                           _programm_kennung()))
 
 
 def _im_programm(pfad):
