@@ -4600,7 +4600,11 @@ class MainWindow(QMainWindow):
         form = QFormLayout()
         sb = QDoubleSpinBox(dlg)
         sb.setDecimals(1)
-        sb.setSingleStep(0.5)
+        # 0,1 s ist die Aufloesung, mit der gerechnet und gespeichert wird
+        # (_blende_abrunden, eine Nachkommastelle). Der Schritt der Pfeile
+        # soll nicht groeber sein als das, was man eintippen kann. Fuer die
+        # grossen Spruenge gibt es Bild auf/ab: das Zehnfache, also 1 s.
+        sb.setSingleStep(0.1)
         sb.setRange(0.0, max(0.0, hoechst))
         sb.setValue(float(vorgabe if eigen is None else eigen))
         sb.setSuffix(" s")
@@ -4613,6 +4617,7 @@ class MainWindow(QMainWindow):
             "At most %.1f s here. The fade lies centred on the cut, so half "
             "of it has to fit into the kept material on each side and half "
             "into the cut itself.\n\n"
+            "Arrows and mouse wheel step 0.1 s, Page Up/Down 1 s.\n\n"
             "0 s means a hard cut. This changes the video only - the GPX "
             "track is not touched." % hoechst)
         aussen.addWidget(hinweis)
