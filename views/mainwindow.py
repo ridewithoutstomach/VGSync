@@ -7241,6 +7241,61 @@ class MainWindow(QMainWindow):
             "Nothing was changed. Adjust the length with the right-click menu "
             "on the cut, or move the cuts apart." % "\n".join(zeilen))
 
+    def _alte_schnitte_melden(self):
+        """Nach dem Laden: welche Schnitte lassen sich nicht mehr anfassen?
+
+        Verschieben und Zuruecknehmen brauchen die Aufzeichnung dessen, was
+        der Schnitt aus der GPX-Spur genommen hat (cut_points in der
+        Projektdatei, seit 6.03) und einen Fingerabdruck der Spur, der noch
+        stimmt. Fehlt eines davon, sperrt ruecknahme_moeglich() den Schnitt -
+        bisher erfuhr der Nutzer das erst, wenn er die Kante schon in der
+        Hand hatte. Vorschlag von Bernd am 05.09.2026: gleich beim Laden
+        sagen, woran er ist. Nur melden, nichts aendern.
+
+        Ohne GPX-Spur gibt es nichts zurueckzurechnen, dann sind alle
+        Schnitte frei und es gibt nichts zu melden.
+        """
+        if not self._gpx_data:
+            return
+        schnitte = list(self.cut_manager._cut_intervals)
+        if not schnitte:
+            return
+        ohne = [(a, b) for (a, b) in schnitte
+                if not self.cut_manager.hat_aufzeichnung(a, b)]
+        mit = len(schnitte) - len(ohne)
+        spur_passt = self.cut_manager.zeiten_unveraendert(self._gpx_data)
+
+        if not ohne and spur_passt:
+            return
+
+        zeilen = []
+        if ohne:
+            if len(ohne) == len(schnitte):
+                zeilen.append(
+                    "This project was saved by an older KVRouite (before "
+                    "6.03). None of its %d cut(s) carries a record of the "
+                    "GPX points it removed." % len(schnitte))
+            else:
+                zeilen.append(
+                    "%d of the %d cuts in this project carry no record of "
+                    "the GPX points they removed:" % (len(ohne), len(schnitte)))
+                zeilen.append("\n".join("    %s - %s" % (self._sek_kurz(a),
+                                                          self._sek_kurz(b))
+                                        for (a, b) in ohne))
+        if mit and not spur_passt:
+            zeilen.append(
+                "The GPX track no longer matches the %d recorded cut(s): its "
+                "times have changed since they were saved, or the project "
+                "carries no fingerprint of the track." % mit)
+        zeilen.append(
+            "While a GPX track is loaded, these cuts can be neither moved "
+            "nor undone - the track could not be put back correctly. "
+            "New cuts you set now are recorded and stay editable.")
+        for z in zeilen:
+            print("[CUT-REC] " + z.replace("\n", " "))
+        QMessageBox.information(
+            self, "Cuts in this project are fixed", "\n\n".join(zeilen))
+
     def _blenden_an_timeline(self):
         """Der Zeitleiste sagen, wie lang die Blende je Uebergang ist.
 
@@ -9349,6 +9404,9 @@ class MainWindow(QMainWindow):
             # nichts - beim Laden hat der Nutzer nichts getan, was er
             # zuruecknehmen koennte.
             QTimer.singleShot(0, self._blenden_lage_melden)
+            # Lassen sich die Schnitte noch verschieben und zuruecknehmen?
+            # Das soll der Nutzer gleich erfahren, nicht erst beim Versuch.
+            QTimer.singleShot(0, self._alte_schnitte_melden)
 
             
     def _rebuild_playlist_menu(self):
