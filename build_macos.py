@@ -501,18 +501,31 @@ def _weg_macos(pfad, konto):
         shutil.rmtree(pfad)
 
 
-def symlinks_ins_leere_entfernen(ordner):
-    """Symlinks entfernen, deren Ziel es nicht mehr gibt. Rueckgabe: Anzahl."""
-    entfernt = 0
+def symlinks_ins_leere_finden(ordner):
+    """Alle Symlinks unter ordner, deren Ziel es nicht gibt. Symlink-Ordner
+    werden nicht betreten - sonst liefe die Suche durch die Frameworks
+    mehrfach (Versions/Current -> A)."""
+    gefunden = []
     for wurzel, unterordner, dateien in os.walk(ordner):
         for name in list(unterordner) + dateien:
             voll = os.path.join(wurzel, name)
-            if os.path.islink(voll) and not os.path.exists(voll):
-                os.remove(voll)
-                entfernt += 1
+            if os.path.islink(voll):
+                if not os.path.exists(voll):
+                    gefunden.append(voll)
                 if name in unterordner:
                     unterordner.remove(name)
-    return entfernt
+    return gefunden
+
+
+def symlinks_ins_leere_entfernen(ordner, protokoll=False):
+    """Symlinks entfernen, deren Ziel es nicht mehr gibt. Rueckgabe: Anzahl."""
+    leer = symlinks_ins_leere_finden(ordner)
+    for voll in leer:
+        if protokoll:
+            print("[QT]   Link ohne Ziel: %s -> %s"
+                  % (os.path.relpath(voll, ordner), os.readlink(voll)))
+        os.remove(voll)
+    return len(leer)
 
 
 def qt_abspecken_macos(buendel):
@@ -610,16 +623,15 @@ def qt_abspecken_macos(buendel):
     #    dort fuer jede Framework-Bibliothek einen Symlink QtCore ->
     #    PySide6/Qt/lib/QtCore.framework/Versions/A/QtCore an. Fuer jedes
     #    entfernte Framework bleibt so ein Link ohne Ziel zurueck.
-    leer = 0
-    for seite in (fw, res):
-        if os.path.isdir(seite):
-            leer += symlinks_ins_leere_entfernen(seite)
-    frameworks = os.path.join(buendel, "Contents", "Frameworks")
-    for name in os.listdir(frameworks):
-        voll = os.path.join(frameworks, name)
-        if os.path.islink(voll) and not os.path.exists(voll):
-            os.remove(voll)
-            leer += 1
+    #    Gesucht wird im GANZEN Buendel, nicht nur unter PySide6. Der erste
+    #    Lauf auf GitHub (05.09.2026) scheiterte an der Gegenprobe des
+    #    Siegels mit "No such file or directory": PyInstaller legt auch
+    #    direkt in Contents/Resources fuer jede Framework-Bibliothek einen
+    #    Symlink an (QtQuick3D -> PySide6/Qt/lib/QtQuick3D.framework/
+    #    Versions/A/QtQuick3D), der ueber den Verzeichnis-Symlink
+    #    Resources/PySide6/Qt/lib in den Frameworks-Baum fuehrt. 104 davon
+    #    zeigten nach dem Abspecken ins Leere, standen aber im Siegel.
+    leer = symlinks_ins_leere_entfernen(buendel, protokoll=True)
     print("[QT] %d Symlinks ins Leere entfernt" % leer)
 
     print("[QT] zusammen %.1f MB weniger" % (konto[0] / (1024 * 1024)))
@@ -662,19 +674,9 @@ def check_qt_payload_macos(buendel):
             befunde.append("%s verweist auf %s, das nirgends liegt"
                            % (os.path.relpath(datei, buendel), verweis))
 
-    for seite in (fw, res):
-        for wurzel, unterordner, dateien in os.walk(seite):
-            for name in list(unterordner) + dateien:
-                voll = os.path.join(wurzel, name)
-                if os.path.islink(voll) and not os.path.exists(voll):
-                    befunde.append("Symlink ins Leere: "
-                                   + os.path.relpath(voll, buendel))
-    frameworks = os.path.join(buendel, "Contents", "Frameworks")
-    for name in os.listdir(frameworks):
-        voll = os.path.join(frameworks, name)
-        if os.path.islink(voll) and not os.path.exists(voll):
-            befunde.append("Symlink ins Leere: "
-                           + os.path.relpath(voll, buendel))
+    for voll in symlinks_ins_leere_finden(buendel):
+        befunde.append("Symlink ins Leere: %s -> %s"
+                       % (os.path.relpath(voll, buendel), os.readlink(voll)))
 
     print("[QT] %d Mach-O-Dateien geprueft, %d Befund(e)"
           % (geprueft, len(befunde)))
@@ -813,12 +815,61 @@ def signieren(buendel):
     signieren_lauf([codesign, "--force", "--sign", "-", buendel])
 
     print("[SIGN] Gegenprobe - meldet jede Datei, die nicht im Siegel steht")
-    signieren_lauf([codesign, "--verify", "--deep", "--strict",
-                    "--verbose=2", buendel])
+    try:
+        signieren_lauf([codesign, "--verify", "--deep", "--strict",
+                        "--verbose=2", buendel])
+    except SystemExit:
+        siegel_diagnose(codesign, buendel)
+        raise
 
     for programm, _rechte in helfer:
         rechte_nachweisen(codesign, programm, buendel)
     print("[SIGN] Siegel in Ordnung")
+
+
+def siegel_diagnose(codesign, buendel):
+    """Wenn die Gegenprobe scheitert: WELCHES eingebettete Teil ist es?
+
+    codesign --verify --deep nennt bei "No such file or directory" nur das
+    Buendel, nicht das Teil, an dem es haengt (so am 05.09.2026 auf GitHub,
+    nach dem Abspecken von Qt). Deshalb hier zweierlei: alle Symlinks ohne
+    Ziel im ganzen Buendel, und jedes eingebettete Teil einzeln geprueft -
+    jeder Eintrag direkt in Contents/Frameworks und jedes Framework unter
+    PySide6/Qt/lib. Nur Protokoll, nichts wird geaendert.
+    """
+    print("[SIGN] Diagnose: Symlinks ohne Ziel im ganzen Buendel")
+    leer = symlinks_ins_leere_finden(buendel)
+    for voll in leer[:60]:
+        print("      %s -> %s" % (os.path.relpath(voll, buendel),
+                                  os.readlink(voll)))
+    print("      %d gefunden" % len(leer))
+
+    print("[SIGN] Diagnose: eingebettete Teile einzeln pruefen")
+    frameworks = os.path.join(buendel, "Contents", "Frameworks")
+    teile = []
+    if os.path.isdir(frameworks):
+        for name in sorted(os.listdir(frameworks)):
+            voll = os.path.join(frameworks, name)
+            if not os.path.islink(voll):
+                teile.append(voll)
+    qt_lib = os.path.join(frameworks, "PySide6", "Qt", "lib")
+    if os.path.isdir(qt_lib):
+        teile += [os.path.join(qt_lib, n) for n in sorted(os.listdir(qt_lib))
+                  if n.endswith(".framework")]
+    schlecht = 0
+    for teil in teile:
+        if os.path.isdir(teil) and not teil.endswith((".framework", ".app")):
+            continue                      # Paketordner, kein Code-Objekt
+        if os.path.isfile(teil) and not ist_mach_o(teil):
+            continue
+        ergebnis = subprocess.run([codesign, "--verify", "--strict", teil],
+                                  capture_output=True)
+        if ergebnis.returncode != 0:
+            schlecht += 1
+            grund = (ergebnis.stderr or b"").decode("utf-8", "replace").strip()
+            print("      FEHLER %s: %s"
+                  % (os.path.relpath(teil, buendel), grund.replace(chr(10), " | ")))
+    print("      %d von %d Teilen mit Befund" % (schlecht, len(teile)))
 
 
 def signieren_lauf(befehl):
